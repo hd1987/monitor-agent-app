@@ -13,6 +13,8 @@ struct MonitorAgentApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var panel: FloatingPanel!
+    private var statusMenu: NSMenu!
+    private var rightClickHandled = false
     private let store = AppStore()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -22,7 +24,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.image = Self.makeMenuBarIcon()
             button.action = #selector(togglePanel(_:))
             button.target = self
+            button.sendAction(on: [.leftMouseUp])
         }
+
+        // Right-click context menu
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: "Settings", action: #selector(openSettings(_:)), keyEquivalent: ","))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp(_:)), keyEquivalent: "q"))
+        statusMenu = menu
 
         let hostingView = NSHostingView(
             rootView: PopoverView()
@@ -33,13 +43,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel = FloatingPanel()
         panel.contentView = hostingView
 
-        // Close when clicking outside
+        // Close panel when clicking outside
         NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             self?.panel.orderOut(nil)
+        }
+
+        // Right-click on status item → show context menu
+        NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown]) { [weak self] event in
+            guard let self,
+                  let button = self.statusItem.button,
+                  event.window == button.window else { return event }
+            self.rightClickHandled = true
+            self.panel.orderOut(nil)
+            self.statusItem.menu = self.statusMenu
+            self.statusItem.button?.performClick(nil)
+            DispatchQueue.main.async {
+                self.statusItem.menu = nil
+                self.rightClickHandled = false
+            }
+            return nil
         }
     }
 
     @objc private func togglePanel(_ sender: AnyObject?) {
+        // Skip if right-click just handled the menu
+        guard !rightClickHandled else { return }
+
         if panel.isVisible {
             panel.orderOut(nil)
             return
@@ -60,6 +89,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         panel.setFrameOrigin(NSPoint(x: x, y: y))
         panel.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func openSettings(_ sender: AnyObject?) {
+        // TODO: open settings window
+    }
+
+    @objc private func quitApp(_ sender: AnyObject?) {
+        NSApplication.shared.terminate(nil)
     }
 
     /// Build menu bar icon from bundled SVG
