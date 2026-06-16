@@ -66,7 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static func makeMenuBarIcon() -> NSImage {
         let svgString = """
         <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
-        <path d="M458 476.6L170.8 332.9c-19.6-9.8-38.6-10.2-53.4-1-14.8 9.2-23 26.2-23 48.1v332.2c0 31.4 21.7 67.7 49.3 82.8l289.1 156.6c10.5 5.7 20.8 8.6 30.6 8.6 8.1 0 15.6-2 22.2-5.9 14.7-8.8 22.9-25.7 22.9-47.6V558.2c0-15.4-5.2-32.2-14.5-47.4-9.4-15.1-22.2-27.3-36-34.2z m-7.3 81.6v337.4L171.2 744.2c-8.9-4.8-19.1-21.9-19.1-32V388.3l280 140c8.7 4.3 18.6 20.2 18.6 29.9zM874.5 300.8c19.3-9.5 29.9-23.1 29.8-38.3 0-15.2-10.6-28.8-29.9-38.3l-302-148c-16.3-8-37.8-12.3-60.5-12.3-22.7 0-44.2 4.4-60.4 12.3l-302 147.9c-19.3 9.5-29.8 23.1-29.8 38.3 0 15.2 10.6 28.8 29.9 38.3l302 148c16.3 8 37.8 12.3 60.5 12.3 22.7 0 44.2-4.4 60.4-12.3l302-147.9z m-671.8-38.4L477 128.1c18-8.8 52-8.8 70.1 0l274.2 134.3L547 396.8c-18 8.8-52 8.8-70.1 0L202.7 262.4zM906.7 332.4c-14.8-8.8-33.6-7.9-52.9 2.6L581 483.3c-27.6 15.1-49.3 51.6-49.3 82.9v340.3c0 22 8.1 38.8 22.8 47.4 6.4 3.7 13.6 5.6 21.4 5.6 10 0 20.4-3.1 31.1-9.1l273.8-154.7c13.3-7.6 25.7-20.3 34.8-35.8 9.1-15.5 14.1-32.5 14.1-47.7V380c-0.1-21.9-8.2-38.8-23-47.6z m-34.9 58.7v321c0 10.4-10.3 28.1-19.4 33.2L589.5 893.9V566.2c0-10.1 10.2-27.2 19.1-32.1l263.2-143z" fill="#000000"/>
+        <path d="M236.397714 911.36c0 27.940571 22.674286 50.614857 50.614857 50.614857h449.974858a50.614857 50.614857 0 1 0 0-101.229714H287.012571a50.614857 50.614857 0 0 0-50.614857 50.614857z m506.368-666.989714h50.468572a168.740571 168.740571 0 0 1 168.667428 168.740571v224.914286a168.740571 168.740571 0 0 1-168.740571 168.740571H230.765714A168.740571 168.740571 0 0 1 62.171429 638.025143V413.110857A168.740571 168.740571 0 0 1 230.765714 244.297143h50.468572l-20.553143-123.392a50.614857 50.614857 0 0 1 99.913143-16.676572l22.454857 134.948572 0.658286 5.046857h256.585142l0.585143-5.046857 22.528-134.875429a50.614857 50.614857 0 0 1 99.913143 16.749715l-20.553143 123.172571v0.073143z m-460.214857 236.251428v44.982857a50.614857 50.614857 0 0 0 101.229714 0V480.548571a50.614857 50.614857 0 1 0-101.229714 0z m357.668572 0v44.982857a50.614857 50.614857 0 0 0 101.229714 0V480.548571a50.614857 50.614857 0 0 0-101.229714 0z" fill="#000000"/>
         </svg>
         """
         guard let data = svgString.data(using: .utf8),
@@ -98,17 +98,14 @@ final class FloatingPanel: NSPanel {
         isMovableByWindowBackground = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
-        // Solid frosted glass background
-        let visualEffect = NSVisualEffectView(frame: .zero)
-        visualEffect.material = .sidebar
-        visualEffect.blendingMode = .behindWindow
-        visualEffect.state = .active
-        visualEffect.appearance = NSAppearance(named: .aqua)
+        // White background with 95% opacity
+        let visualEffect = NSView(frame: .zero)
         visualEffect.wantsLayer = true
+        visualEffect.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.98).cgColor
         visualEffect.layer?.cornerRadius = 12
         visualEffect.layer?.masksToBounds = true
-        visualEffect.layer?.borderWidth = 0.5
-        visualEffect.layer?.borderColor = NSColor.black.withAlphaComponent(0.08).cgColor
+        visualEffect.layer?.borderWidth = 1.0 / NSScreen.main!.backingScaleFactor
+        visualEffect.layer?.borderColor = NSColor.black.withAlphaComponent(0.01).cgColor
         visualEffect.translatesAutoresizingMaskIntoConstraints = false
 
         let wrapper = NSView(frame: .zero)
