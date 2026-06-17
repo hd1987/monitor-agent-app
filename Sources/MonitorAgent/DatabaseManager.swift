@@ -209,12 +209,17 @@ final class DatabaseManager {
 
         return (try? db.read { db in
             let rows = try Row.fetchAll(db, sql: """
-                SELECT model,
+                SELECT
+                    CASE model
+                        WHEN 'anthropic.claude-4-6-opus' THEN 'claude-opus-4-6'
+                        WHEN 'anthropic.claude-4-5-haiku' THEN 'claude-haiku-4-5-20251001'
+                        ELSE model
+                    END AS model,
                     COUNT(*) AS reqs,
                     COALESCE(SUM(input_tokens), 0) AS input_tk,
                     COALESCE(SUM(output_tokens), 0) AS output_tk
                 FROM request_logs \(w.sql)
-                GROUP BY model ORDER BY reqs DESC
+                GROUP BY 1 ORDER BY reqs DESC
                 """, arguments: StatementArguments(w.args))
             return rows.map {
                 ModelShare(
