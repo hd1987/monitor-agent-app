@@ -86,9 +86,9 @@ Sources/MonitorAgent/
 ## Release
 
 See [RELEASE.md](RELEASE.md) for full workflow. Summary:
-1. Agent: update CHANGELOG → commit → tag → merge to main
-2. You: `git push origin main --tags`
-3. GitHub Actions: build → package .app → create Release
+1. Agent: update CHANGELOG → commit → tag
+2. You: push develop + tags → create PR → merge
+3. GitHub Actions: build → sign → package .app → create Release
 
 ## Conventions
 
