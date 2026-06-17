@@ -29,9 +29,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Right-click context menu
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Settings", action: #selector(openSettings(_:)), keyEquivalent: ","))
+        let settingsItem = NSMenuItem(title: "Settings", action: #selector(openSettings(_:)), keyEquivalent: ",")
+        settingsItem.target = self
+        let updateItem = NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
+        updateItem.target = self
+        let quitItem = NSMenuItem(title: "Quit", action: #selector(quitApp(_:)), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(settingsItem)
+        menu.addItem(updateItem)
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp(_:)), keyEquivalent: "q"))
+        menu.addItem(quitItem)
         statusMenu = menu
 
         let hostingView = NSHostingView(
@@ -63,6 +70,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return nil
         }
+
+        // Auto-check for updates on launch (silent, 24h throttle)
+        UpdateChecker.shared.checkOnLaunch()
     }
 
     @objc private func togglePanel(_ sender: AnyObject?) {
@@ -93,6 +103,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettings(_ sender: AnyObject?) {
         // TODO: open settings window
+    }
+
+    @objc private func checkForUpdates(_ sender: AnyObject?) {
+        UpdateChecker.shared.checkForUpdates(silent: false)
     }
 
     @objc private func quitApp(_ sender: AnyObject?) {
