@@ -9,6 +9,7 @@ struct StatCardsView: View {
             StatCard(title: "Sessions", value: formatCount(store.stats.totalSessions))
             StatCard(title: "Input Tokens", value: formatTokens(store.stats.inputTokens))
             StatCard(title: "Output Tokens", value: formatTokens(store.stats.outputTokens))
+            StatCard(title: "Cache Read", value: formatTokens(store.stats.cacheReadTokens))
             StatCard(title: "Cache Hit", value: formatPercent(store.stats.cacheHitRate))
         }
         .padding(.horizontal, 16)

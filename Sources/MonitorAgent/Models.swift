@@ -13,7 +13,7 @@ enum AppFilter: String, CaseIterable, Identifiable {
     var dbValues: [String]? {
         switch self {
         case .all: return nil
-        case .claude: return ["claude", "claude-desktop"]
+        case .claude: return ["claude"]
         case .codex: return ["codex"]
         }
     }
@@ -28,7 +28,7 @@ enum TimeRange: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-// MARK: - Data
+// MARK: - Display Data
 
 struct UsageStats {
     var totalRequests: Int = 0
@@ -57,4 +57,43 @@ struct ModelShare: Identifiable {
     let inputTokens: Int64
     let outputTokens: Int64
     var id: String { model }
+}
+
+// MARK: - Sync Data
+
+struct ParsedRecord {
+    let requestId: String       // unique key, e.g. "session:msg_01xxx" or "codex:sid:3"
+    let appType: String         // "claude" or "codex"
+    let model: String
+    let inputTokens: Int
+    let outputTokens: Int
+    let cacheReadTokens: Int
+    let cacheCreationTokens: Int
+    let sessionId: String
+    let createdAt: Int          // Unix seconds
+}
+
+struct SyncState {
+    let filePath: String
+    var byteOffset: Int64
+    var recordCount: Int
+    var sessionId: String?
+    var model: String?
+    var lastModified: Int       // file mtime, Unix seconds
+    var lastSyncedAt: Int       // Unix seconds
+}
+
+// MARK: - Utilities
+
+/// Shared ISO-8601 formatter supporting fractional seconds
+private let iso8601Formatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+}()
+
+/// Parse ISO-8601 timestamp to Unix seconds
+func unixSeconds(from iso8601: String) -> Int? {
+    guard let date = iso8601Formatter.date(from: iso8601) else { return nil }
+    return Int(date.timeIntervalSince1970)
 }

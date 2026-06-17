@@ -7,19 +7,108 @@ final class DatabaseManager {
     private var dbQueue: DatabaseQueue?
 
     private init() {
-        let path = NSHomeDirectory() + "/.cc-switch/cc-switch.db"
+        let dir = NSHomeDirectory() + "/.monitor-agent"
+        let path = dir + "/monitor.db"
         do {
-            var config = Configuration()
-            config.readonly = true
-            dbQueue = try DatabaseQueue(path: path, configuration: config)
+            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            dbQueue = try DatabaseQueue(path: path)
+            try setupSchema()
         } catch {
             print("Failed to open db: \(error)")
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - Schema
 
-    /// Build WHERE clause fragments for app filter and time range
+    private func setupSchema() throws {
+        try dbQueue?.write { db in
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS request_logs (
+                    request_id TEXT PRIMARY KEY,
+                    app_type TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    input_tokens INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                    session_id TEXT,
+                    created_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_logs_app_created ON request_logs(app_type, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_logs_session ON request_logs(session_id);
+                CREATE INDEX IF NOT EXISTS idx_logs_model ON request_logs(model);
+
+                CREATE TABLE IF NOT EXISTS sync_state (
+                    file_path TEXT PRIMARY KEY,
+                    byte_offset INTEGER NOT NULL DEFAULT 0,
+                    record_count INTEGER NOT NULL DEFAULT 0,
+                    session_id TEXT,
+                    model TEXT,
+                    last_modified INTEGER NOT NULL,
+                    last_synced_at INTEGER NOT NULL
+                );
+                """)
+        }
+    }
+
+    // MARK: - Write Methods
+
+    func insertRecords(_ records: [ParsedRecord]) {
+        guard let db = dbQueue, !records.isEmpty else { return }
+        try? db.write { db in
+            for r in records {
+                try db.execute(
+                    sql: """
+                        INSERT OR IGNORE INTO request_logs
+                        (request_id, app_type, model, input_tokens, output_tokens,
+                         cache_read_tokens, cache_creation_tokens, session_id, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                    arguments: [r.requestId, r.appType, r.model,
+                                r.inputTokens, r.outputTokens,
+                                r.cacheReadTokens, r.cacheCreationTokens,
+                                r.sessionId, r.createdAt]
+                )
+            }
+        }
+    }
+
+    func getSyncState(for filePath: String) -> SyncState? {
+        guard let db = dbQueue else { return nil }
+        return try? db.read { db in
+            guard let row = try Row.fetchOne(db,
+                sql: "SELECT * FROM sync_state WHERE file_path = ?",
+                arguments: [filePath]
+            ) else { return nil }
+            return SyncState(
+                filePath: row["file_path"],
+                byteOffset: row["byte_offset"],
+                recordCount: row["record_count"],
+                sessionId: row["session_id"],
+                model: row["model"],
+                lastModified: row["last_modified"],
+                lastSyncedAt: row["last_synced_at"]
+            )
+        }
+    }
+
+    func updateSyncState(_ state: SyncState) {
+        guard let db = dbQueue else { return }
+        try? db.write { db in
+            try db.execute(
+                sql: """
+                    INSERT OR REPLACE INTO sync_state
+                    (file_path, byte_offset, record_count, session_id, model, last_modified, last_synced_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                arguments: [state.filePath, state.byteOffset, state.recordCount,
+                            state.sessionId, state.model, state.lastModified, state.lastSyncedAt]
+            )
+        }
+    }
+
+    // MARK: - Query Helpers
+
     private func whereClause(app: AppFilter, range: TimeRange) -> (sql: String, args: [any DatabaseValueConvertible]) {
         var conditions: [String] = []
         var args: [any DatabaseValueConvertible] = []
@@ -69,7 +158,7 @@ final class DatabaseManager {
                     COALESCE(SUM(output_tokens), 0) AS output_tokens,
                     COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
                     COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens
-                FROM proxy_request_logs \(w.sql)
+                FROM request_logs \(w.sql)
                 """, arguments: StatementArguments(w.args))
 
             guard let r = row else { return UsageStats() }
@@ -106,8 +195,8 @@ final class DatabaseManager {
 
         return (try? db.read { db in
             let rows = try Row.fetchAll(db, sql: """
-                SELECT date(created_at, 'unixepoch') AS day, COUNT(*) AS cnt
-                FROM proxy_request_logs \(whereSQL)
+                SELECT date(created_at, 'unixepoch', 'localtime') AS day, COUNT(*) AS cnt
+                FROM request_logs \(whereSQL)
                 GROUP BY day ORDER BY day
                 """, arguments: StatementArguments(args))
             return rows.map { DayActivity(date: $0["day"], count: $0["cnt"]) }
@@ -124,7 +213,7 @@ final class DatabaseManager {
                     COUNT(*) AS reqs,
                     COALESCE(SUM(input_tokens), 0) AS input_tk,
                     COALESCE(SUM(output_tokens), 0) AS output_tk
-                FROM proxy_request_logs \(w.sql)
+                FROM request_logs \(w.sql)
                 GROUP BY model ORDER BY reqs DESC
                 """, arguments: StatementArguments(w.args))
             return rows.map {
@@ -138,13 +227,12 @@ final class DatabaseManager {
         }) ?? []
     }
 
-    /// Return the years that have data
     func availableYears() -> [Int] {
         guard let db = dbQueue else { return [] }
         return (try? db.read { db in
             let rows = try Row.fetchAll(db, sql: """
-                SELECT DISTINCT CAST(strftime('%Y', created_at, 'unixepoch') AS INTEGER) AS yr
-                FROM proxy_request_logs ORDER BY yr DESC
+                SELECT DISTINCT CAST(strftime('%Y', created_at, 'unixepoch', 'localtime') AS INTEGER) AS yr
+                FROM request_logs ORDER BY yr DESC
                 """)
             return rows.map { $0["yr"] as Int }
         }) ?? []

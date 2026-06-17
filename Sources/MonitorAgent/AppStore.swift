@@ -13,12 +13,11 @@ final class AppStore: ObservableObject {
     @Published var availableYears: [Int] = []
 
     private let db = DatabaseManager.shared
+    private let syncManager = SessionSyncManager()
     private var cancellables = Set<AnyCancellable>()
 
     init() {
-        let years = DatabaseManager.shared.availableYears()
-        self.availableYears = years
-        self.selectedYear = years.first ?? Calendar.current.component(.year, from: Date())
+        self.selectedYear = Calendar.current.component(.year, from: Date())
 
         // React to filter changes
         Publishers.CombineLatest3($appFilter, $timeRange, $selectedYear)
@@ -28,7 +27,10 @@ final class AppStore: ObservableObject {
             }
             .store(in: &cancellables)
 
-        reload()
+        // Start background JSONL sync; reload UI after each cycle
+        syncManager.start(interval: 30) { [weak self] in
+            self?.reload()
+        }
     }
 
     func reload() {
@@ -36,11 +38,19 @@ final class AppStore: ObservableObject {
             let s = db.fetchStats(app: appFilter, range: timeRange)
             let h = db.fetchHeatmap(app: appFilter, year: selectedYear)
             let m = db.fetchModelDistribution(app: appFilter, range: timeRange)
+            let years = db.availableYears()
 
             DispatchQueue.main.async {
                 self.stats = s
                 self.heatmap = h
                 self.modelDistribution = m
+                if !years.isEmpty {
+                    self.availableYears = years
+                    // Keep selectedYear if valid, else use latest
+                    if !years.contains(self.selectedYear) {
+                        self.selectedYear = years.first!
+                    }
+                }
             }
         }
     }
