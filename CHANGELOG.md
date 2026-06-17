@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-17
+
+### Fixed
+- Merge duplicate model names in distribution chart (e.g. two "Opus 4.6" entries)
+
 ## [0.1.0] - 2026-06-17
 
 ### Added
