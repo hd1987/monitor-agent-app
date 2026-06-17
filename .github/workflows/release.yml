@@ -5,9 +5,15 @@ on:
     branches:
       - main
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+
 jobs:
   check-and-release:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,6 +47,10 @@ jobs:
           echo "skip=false" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Select Xcode 16
+        if: steps.tag.outputs.skip == 'false'
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
 
       - name: Build release binary
         if: steps.tag.outputs.skip == 'false'
@@ -96,7 +106,7 @@ jobs:
         id: changelog
         run: |
           VERSION="${{ steps.tag.outputs.version }}"
-          NOTES=$(sed -n "/## \[${VERSION}\]/,/## \[/{/## \[${VERSION}\]/d;/## \[/d;p}" CHANGELOG.md)
+          NOTES=$(awk "/^## \[${VERSION}\]/{found=1; next} /^## \[/{found=0} found" CHANGELOG.md)
           echo "notes<<EOF" >> $GITHUB_OUTPUT
           echo "$NOTES" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
