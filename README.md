@@ -40,10 +40,7 @@
 
 Download the latest `MonitorAgent.zip` from [Releases](https://github.com/hd1987/monitor-agent-app/releases), unzip, and drag to `/Applications`.
 
-> **First launch:** macOS will show *"MonitorAgent is damaged and can't be opened"* because the app is not code-signed. This is expected. Run this once in Terminal to fix it:
-> ```bash
-> xattr -cr /Applications/MonitorAgent.app
-> ```
+> **First launch:** Since the app is not notarized, macOS will show a warning. Go to **System Settings → Privacy & Security**, scroll to the bottom, and click **Open Anyway**.
 
 ### Build from source
 
@@ -97,10 +94,7 @@ MIT
 
 从 [Releases](https://github.com/hd1987/monitor-agent-app/releases) 下载最新的 `MonitorAgent.zip`，解压后拖入 `/Applications` 即可。
 
-> **首次启动：** macOS 会提示 *"MonitorAgent 已损坏，无法打开"*，这是因为应用未签名。在终端执行一次即可修复：
-> ```bash
-> xattr -cr /Applications/MonitorAgent.app
-> ```
+> **首次启动：** 应用未经公证，macOS 会弹出警告。打开 **系统设置 → 隐私与安全性**，滚到底部，点击 **仍要打开** 即可。
 
 ### 工作原理
 
