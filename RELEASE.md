@@ -3,7 +3,7 @@
 ## Branch Strategy
 
 - `develop` — active development branch, all work happens here
-- `main` — release branch, only receives merges from develop at release time
+- `main` — protected release branch, only accepts pull requests from develop
 
 ## Release Flow
 
@@ -15,28 +15,28 @@ When you say "release vX.Y.Z", the agent will:
 2. Add a new empty `[Unreleased]` section at top
 3. Commit: `Release vX.Y.Z`
 4. Tag: `vX.Y.Z`
-5. Merge develop → main (fast-forward)
 
-### 2. You push (manual)
+### 2. You push and create PR (manual)
 
-```bash
-git push origin main --tags
-```
+1. `git push origin develop --tags`
+2. Create a PR from develop → main on GitHub
+3. Merge the PR
 
 ### 3. GitHub Actions builds and publishes
 
 Triggered by push to `main`. The workflow (`.github/workflows/release.yml`):
 
 1. Checks if HEAD has a tag that hasn't been released yet — skips otherwise
-2. `swift build -c release` on macOS 14 runner
+2. `swift build -c release` on macOS 15 runner (Xcode 16 / Swift 6)
 3. Packages `MonitorAgent.app` bundle with `Info.plist` (version from tag, `LSUIElement=true`)
-4. Compresses to `MonitorAgent.zip` via `ditto`
-5. Extracts release notes from `CHANGELOG.md`
-6. Creates GitHub Release with zip attached
+4. Ad-hoc code signs the app (`codesign -s -`)
+5. Compresses to `MonitorAgent.zip` via `ditto`
+6. Extracts release notes from `CHANGELOG.md`
+7. Creates GitHub Release with zip attached
 
 ### Result
 
-Users download `MonitorAgent.zip` from the GitHub Releases page → unzip → drag to Applications → double-click to run.
+Users download `MonitorAgent.zip` from the GitHub Releases page → unzip → drag to Applications → open.
 
 ## Changelog Convention
 

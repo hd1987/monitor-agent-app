@@ -97,6 +97,10 @@ jobs:
           </plist>
           EOF
 
+      - name: Ad-hoc code sign
+        if: steps.tag.outputs.skip == 'false'
+        run: codesign --force --deep -s - MonitorAgent.app
+
       - name: Create zip
         if: steps.tag.outputs.skip == 'false'
         run: ditto -c -k --keepParent MonitorAgent.app MonitorAgent.zip
