@@ -35,6 +35,10 @@ struct StatCard: View {
         .padding(.vertical, 10)
         .background(theme.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(theme.cardBorder, lineWidth: 0.5)
+        )
     }
 }
 

@@ -66,7 +66,14 @@ final class ThemeManager: ObservableObject {
     var cardBackground: Color {
         isDark
             ? Color(red: 0.17, green: 0.17, blue: 0.18)
-            : .black.opacity(0.04)
+            : .white
+    }
+
+    /// Light: thin gray border for cards; Dark: subtle edge
+    var cardBorder: Color {
+        isDark
+            ? Color.white.opacity(0.1)
+            : Color.black.opacity(0.12)
     }
 
     /// Dark: subtle light squares on dark grid
