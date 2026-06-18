@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var panel: FloatingPanel!
     private var settingsPanel: NSWindow?
+    private var aboutPanel: NSWindow?
     private var statusMenu: NSMenu!
     private var rightClickHandled = false
     private let store = AppStore()
@@ -33,12 +34,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Right-click context menu
         let menu = NSMenu()
+        let aboutItem = NSMenuItem(title: "About MonitorAgent", action: #selector(openAbout(_:)), keyEquivalent: "")
+        aboutItem.target = self
         let settingsItem = NSMenuItem(title: "Settings", action: #selector(openSettings(_:)), keyEquivalent: ",")
         settingsItem.target = self
         let updateItem = NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
         updateItem.target = self
         let quitItem = NSMenuItem(title: "Quit", action: #selector(quitApp(_:)), keyEquivalent: "q")
         quitItem.target = self
+        menu.addItem(aboutItem)
+        menu.addItem(.separator())
         menu.addItem(settingsItem)
         menu.addItem(updateItem)
         menu.addItem(.separator())
@@ -153,6 +158,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         settingsPanel = w
+    }
+
+    @objc private func openAbout(_ sender: AnyObject?) {
+        if let existing = aboutPanel, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let hosting = NSHostingView(rootView: AboutView())
+        hosting.translatesAutoresizingMaskIntoConstraints = false
+
+        let w = NSWindow(
+            contentRect: .zero,
+            styleMask: [.titled, .closable, .fullSizeContentView],
+            backing: .buffered, defer: false
+        )
+        w.title = "About MonitorAgent"
+        w.titlebarAppearsTransparent = true
+        w.titleVisibility = .hidden
+        w.isReleasedWhenClosed = false
+        w.level = .floating
+        w.hidesOnDeactivate = false
+
+        // Match theme appearance
+        switch themeManager.theme {
+        case .light: w.appearance = NSAppearance(named: .aqua)
+        case .dark: w.appearance = NSAppearance(named: .darkAqua)
+        case .system: w.appearance = nil
+        }
+
+        w.contentView = hosting
+        w.setContentSize(hosting.fittingSize)
+        w.center()
+        w.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        aboutPanel = w
     }
 
     @objc private func checkForUpdates(_ sender: AnyObject?) {

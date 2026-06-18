@@ -7,6 +7,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 ## [Unreleased]
 
 ### Added
+- About MonitorAgent window with app icon, version/build/commit info, and GitHub link
 - Settings window with theme picker (System / Light / Dark)
 - Dark theme support across all views
 - Configurable sync interval (10/20/30/40/50/60s or Never) in Settings

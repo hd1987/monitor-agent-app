@@ -61,6 +61,7 @@ Sources/MonitorAgent/
 │   ├── ClaudeLogParser.swift      # Stateless: line Data → ParsedRecord?
 │   └── CodexLogParser.swift       # Stateful: line Data + CodexParseContext → ParsedRecord?
 └── Views/
+    ├── AboutView.swift            # About window (app icon, version, GitHub link) + AppVersion constant
     ├── PopoverView.swift          # Panel container (620px, white 98%, rounded 12pt, light mode)
     ├── FilterBar.swift            # App toggle (All/Claude Code/Codex) + time range picker
     ├── StatCardsView.swift        # 6 stat cards in HStack
@@ -70,11 +71,13 @@ Sources/MonitorAgent/
 
 ## UI Layout
 
-**Menu Bar**: Robot icon (SVG template image). Left-click → panel (triggers sync). Right-click → Settings / Quit.
+**Menu Bar**: Robot icon (SVG template image). Left-click → panel (triggers sync). Right-click → About / Settings / Quit.
 
 **Panel** (top → bottom):
 
 1. **FilterBar** — `[All | Claude Code | Codex]` segmented + `[Today ▾]` time picker
+
+**About** — App icon (AppIcon.icns), name, tagline, version (`AppVersion.current`), GitHub button
 
 **Settings** (Cancel/Save flow — changes apply only after Save):
 
