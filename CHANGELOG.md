@@ -6,6 +6,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-06-18
+
+### Fixed
+- About window crash caused by Bundle.module missing in release builds
+- App not restarting after update install (now uses NSWorkspace.openApplication)
+
 ## [0.1.2] - 2026-06-18
 
 ### Added
