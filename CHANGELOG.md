@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-06-18
+
+### Fixed
+- App not restarting after update (use detached shell process instead of NSWorkspace)
+
 ## [0.1.3] - 2026-06-18
 
 ### Fixed
