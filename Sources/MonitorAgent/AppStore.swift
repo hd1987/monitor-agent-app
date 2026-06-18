@@ -14,6 +14,7 @@ final class AppStore: ObservableObject {
 
     private let db = DatabaseManager.shared
     private let syncManager = SessionSyncManager()
+    private let syncSettings = SyncSettings.shared
     private var cancellables = Set<AnyCancellable>()
 
     init() {
@@ -27,8 +28,28 @@ final class AppStore: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Start background JSONL sync; reload UI after each cycle
-        syncManager.start(interval: 30) { [weak self] in
+        // React to sync interval changes
+        syncSettings.$interval
+            .sink { [weak self] interval in
+                self?.applySyncInterval(interval)
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Apply sync interval: start/restart timer or stop if "never".
+    private func applySyncInterval(_ interval: SyncInterval) {
+        if interval == .never {
+            syncManager.stop()
+        } else {
+            syncManager.restart(interval: TimeInterval(interval.rawValue)) { [weak self] in
+                self?.reload()
+            }
+        }
+    }
+
+    /// Trigger a one-shot sync + reload (called when panel opens).
+    func sync() {
+        syncManager.syncOnce { [weak self] in
             self?.reload()
         }
     }

@@ -108,6 +108,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Always sync fresh data when opening the panel
+        store.sync()
+
         guard let button = statusItem.button,
               let buttonWindow = button.window else { return }
 
@@ -125,11 +128,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings(_ sender: AnyObject?) {
-        if let w = settingsPanel {
-            w.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
-        }
+        // Always recreate so @State drafts reset to saved values
+        settingsPanel?.close()
+        settingsPanel = nil
 
         let hosting = NSHostingView(
             rootView: SettingsView()

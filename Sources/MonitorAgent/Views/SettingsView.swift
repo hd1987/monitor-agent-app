@@ -2,22 +2,54 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var themeManager: ThemeManager
-    @State private var selectedTab = "General"
 
-    private let tabs = ["General"]
+    /// Local draft state — only committed on Save
+    @State private var draftTheme: Theme = .system
+    @State private var draftSyncInterval: SyncInterval = .thirty
 
     var body: some View {
-        ScrollView {
-            GeneralSettingsView()
+        VStack(spacing: 0) {
+            ScrollView {
+                GeneralSettingsView(
+                    draftTheme: $draftTheme,
+                    draftSyncInterval: $draftSyncInterval
+                )
+            }
+
+            Divider()
+
+            // Cancel / Save buttons
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    NSApp.keyWindow?.close()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("Save") {
+                    themeManager.theme = draftTheme
+                    SyncSettings.shared.interval = draftSyncInterval
+                    NSApp.keyWindow?.close()
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
         }
         .frame(width: 500, height: 320)
+        .onAppear {
+            draftTheme = themeManager.theme
+            draftSyncInterval = SyncSettings.shared.interval
+        }
     }
 }
 
 // MARK: - General
 
 struct GeneralSettingsView: View {
-    @EnvironmentObject var themeManager: ThemeManager
+    @Binding var draftTheme: Theme
+    @Binding var draftSyncInterval: SyncInterval
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -25,13 +57,27 @@ struct GeneralSettingsView: View {
                 title: "Theme",
                 description: "Choose the appearance of the app. System follows your macOS settings."
             ) {
-                Picker("", selection: $themeManager.theme) {
+                Picker("", selection: $draftTheme) {
                     ForEach(Theme.allCases) { theme in
                         Text(theme.rawValue).tag(theme)
                     }
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 200)
+            }
+
+            Divider().padding(.vertical, 4)
+
+            SettingsRow(
+                title: "Sync Interval",
+                description: "How often to sync usage data. \"Never\" syncs only when the panel is opened."
+            ) {
+                Picker("", selection: $draftSyncInterval) {
+                    ForEach(SyncInterval.allCases) { interval in
+                        Text(interval.displayName).tag(interval)
+                    }
+                }
+                .frame(width: 100)
             }
         }
         .padding(20)
