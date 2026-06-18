@@ -11,6 +11,7 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
 
     // UI elements (lazy-created, reused across states)
     private var window: NSPanel?
+    private var backgroundLayer: CALayer?
     private var titleLabel: NSTextField?
     private var detailLabel: NSTextField?
     private var progress: NSProgressIndicator?
@@ -40,6 +41,12 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
     }
 
     func checkOnLaunch() { checkForUpdates(silent: true) }
+
+    /// Refresh window appearance to match current theme
+    func applyTheme() {
+        window?.appearance = ThemeManager.shared.nsAppearance
+        backgroundLayer?.backgroundColor = ThemeManager.shared.panelBackground.cgColor
+    }
 
     // MARK: - Result Handling
 
@@ -166,11 +173,14 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
         panel.hasShadow = true
         panel.isMovableByWindowBackground = true
 
+        panel.appearance = ThemeManager.shared.nsAppearance
+
         let bg = NSView(frame: NSRect(x: 0, y: 0, width: w, height: h))
         bg.wantsLayer = true
-        bg.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.96).cgColor
+        bg.layer?.backgroundColor = ThemeManager.shared.panelBackground.cgColor
         bg.layer?.cornerRadius = 12
         bg.layer?.masksToBounds = true
+        backgroundLayer = bg.layer
         panel.contentView = bg
 
         titleLabel = makeLabel(in: bg, frame: .init(x: 20, y: 110, width: w - 40, height: 20),
@@ -347,9 +357,7 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
 
     // MARK: - Version Comparison
 
-    private var currentVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
-    }
+    private var currentVersion: String { AppVersion.current }
 
     private func isNewer(_ remote: String) -> Bool {
         let r = remote.split(separator: ".").compactMap { Int($0) }

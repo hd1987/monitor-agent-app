@@ -94,15 +94,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applyTheme() {
         panel.backgroundLayer?.backgroundColor = themeManager.panelBackground.cgColor
         panel.backgroundLayer?.borderColor = themeManager.panelBorder.cgColor
+        panel.appearance = themeManager.nsAppearance
 
-        // Sync NSAppearance so SwiftUI .primary/.secondary colors match
-        let appearance: NSAppearance?
-        switch themeManager.theme {
-        case .light: appearance = NSAppearance(named: .aqua)
-        case .dark: appearance = NSAppearance(named: .darkAqua)
-        case .system: appearance = nil
-        }
-        panel.appearance = appearance
+        // Update already-open windows
+        settingsPanel?.appearance = themeManager.nsAppearance
+        aboutPanel?.appearance = themeManager.nsAppearance
+        UpdateChecker.shared.applyTheme()
     }
 
     @objc private func togglePanel(_ sender: AnyObject?) {
@@ -153,6 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.isReleasedWhenClosed = false
         w.level = .floating
         w.hidesOnDeactivate = false
+        w.appearance = themeManager.nsAppearance
         w.contentView = hosting
         w.center()
         w.makeKeyAndOrderFront(nil)
@@ -182,13 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.level = .floating
         w.hidesOnDeactivate = false
 
-        // Match theme appearance
-        switch themeManager.theme {
-        case .light: w.appearance = NSAppearance(named: .aqua)
-        case .dark: w.appearance = NSAppearance(named: .darkAqua)
-        case .system: w.appearance = nil
-        }
-
+        w.appearance = themeManager.nsAppearance
         w.contentView = hosting
         w.setContentSize(hosting.fittingSize)
         w.center()

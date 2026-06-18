@@ -29,7 +29,6 @@ struct SettingsView: View {
                 Button("Save") {
                     themeManager.theme = draftTheme
                     SyncSettings.shared.interval = draftSyncInterval
-                    NSApp.keyWindow?.close()
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)

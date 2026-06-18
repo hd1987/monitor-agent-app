@@ -101,4 +101,13 @@ final class ThemeManager: ObservableObject {
     var dividerOpacity: Double {
         isDark ? 0.1 : 0.2
     }
+
+    /// NSAppearance matching the current theme — use on NSWindow.appearance
+    var nsAppearance: NSAppearance? {
+        switch theme {
+        case .light: return NSAppearance(named: .aqua)
+        case .dark: return NSAppearance(named: .darkAqua)
+        case .system: return nil
+        }
+    }
 }
