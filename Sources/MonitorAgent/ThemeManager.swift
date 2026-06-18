@@ -47,37 +47,51 @@ final class ThemeManager: ObservableObject {
 
     // MARK: - Panel Colors (AppKit)
 
+    /// Dark: #1c1c1e (macOS native dark background)
     var panelBackground: NSColor {
         isDark
-            ? NSColor(white: 0.15, alpha: 0.98)
+            ? NSColor(red: 0.11, green: 0.11, blue: 0.118, alpha: 0.98)
             : NSColor.white.withAlphaComponent(0.98)
     }
 
     var panelBorder: NSColor {
         isDark
-            ? NSColor.white.withAlphaComponent(0.06)
+            ? NSColor.white.withAlphaComponent(0.08)
             : NSColor.black.withAlphaComponent(0.01)
     }
 
     // MARK: - View Colors (SwiftUI)
 
+    /// Dark: #2c2c2e — slightly lighter than panel background
     var cardBackground: Color {
-        isDark ? .white.opacity(0.08) : .black.opacity(0.04)
+        isDark
+            ? Color(red: 0.17, green: 0.17, blue: 0.18)
+            : .black.opacity(0.04)
     }
 
+    /// Dark: subtle light squares on dark grid
     var cellEmpty: Color {
-        isDark ? .white.opacity(0.08) : .black.opacity(0.06)
+        isDark
+            ? Color.white.opacity(0.06)
+            : .black.opacity(0.06)
+    }
+
+    /// Heatmap active cell base color
+    var cellActive: Color {
+        isDark ? Color(red: 0.4, green: 0.6, blue: 1.0) : Color.accentColor
     }
 
     var tooltipBackground: Color {
-        isDark ? Color.white.opacity(0.9) : Color.black.opacity(0.75)
+        isDark
+            ? Color(red: 0.22, green: 0.22, blue: 0.24)
+            : Color.black.opacity(0.75)
     }
 
     var tooltipForeground: Color {
-        isDark ? .black : .white
+        isDark ? .white.opacity(0.9) : .white
     }
 
     var dividerOpacity: Double {
-        isDark ? 0.15 : 0.2
+        isDark ? 0.1 : 0.2
     }
 }

@@ -14,7 +14,7 @@ struct MonitorAgentApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var panel: FloatingPanel!
-    private var settingsPanel: NSPanel?
+    private var settingsPanel: NSWindow?
     private var statusMenu: NSMenu!
     private var rightClickHandled = false
     private let store = AppStore()
@@ -89,6 +89,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applyTheme() {
         panel.backgroundLayer?.backgroundColor = themeManager.panelBackground.cgColor
         panel.backgroundLayer?.borderColor = themeManager.panelBorder.cgColor
+
+        // Sync NSAppearance so SwiftUI .primary/.secondary colors match
+        let appearance: NSAppearance?
+        switch themeManager.theme {
+        case .light: appearance = NSAppearance(named: .aqua)
+        case .dark: appearance = NSAppearance(named: .darkAqua)
+        case .system: appearance = nil
+        }
+        panel.appearance = appearance
     }
 
     @objc private func togglePanel(_ sender: AnyObject?) {
@@ -127,14 +136,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .environmentObject(themeManager)
         )
 
-        let w = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 300, height: 120),
+        let w = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 320),
             styleMask: [.titled, .closable],
             backing: .buffered, defer: false
         )
-        w.title = "Settings"
+        w.title = ""
+        w.titlebarAppearsTransparent = true
+        w.titleVisibility = .hidden
         w.isReleasedWhenClosed = false
         w.level = .floating
+        w.hidesOnDeactivate = false
         w.contentView = hosting
         w.center()
         w.makeKeyAndOrderFront(nil)

@@ -216,7 +216,7 @@ struct HeatmapView: View {
         case 151...400: intensity = 0.80
         default:        intensity = 1.0
         }
-        return Color.accentColor.opacity(intensity)
+        return theme.cellActive.opacity(intensity)
     }
 
     // MARK: - Month Labels
