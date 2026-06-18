@@ -9,6 +9,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 ### Added
 - Settings window with theme picker (System / Light / Dark)
 - Dark theme support across all views
+- Configurable sync interval (10/20/30/40/50/60s or Never) in Settings
+- On-demand sync when opening panel (always triggers regardless of interval)
+- Settings Cancel/Save flow — changes only apply after explicit Save
 
 ## [0.1.1] - 2026-06-17
 
