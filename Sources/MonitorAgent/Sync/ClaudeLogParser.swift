@@ -27,6 +27,10 @@ enum ClaudeLogParser {
         }
 
         let model = message["model"] as? String ?? "unknown"
+
+        // Skip synthetic messages (internal placeholder, zero tokens)
+        if model.hasPrefix("<") && model.hasSuffix(">") { return nil }
+
         let inputTokens = usage["input_tokens"] as? Int ?? 0
         let outputTokens = usage["output_tokens"] as? Int ?? 0
         let cacheRead = usage["cache_read_input_tokens"] as? Int ?? 0
