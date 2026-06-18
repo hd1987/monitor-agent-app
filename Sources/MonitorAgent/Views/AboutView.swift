@@ -7,15 +7,12 @@ struct AboutView: View {
         VStack(spacing: 0) {
             Spacer().frame(height: 32)
 
-            // App icon — load bundled AppIcon.icns
-            if let iconURL = Bundle.module.url(forResource: "AppIcon", withExtension: "icns"),
-               let icon = NSImage(contentsOf: iconURL) {
-                Image(nsImage: icon)
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 128, height: 128)
-            }
+            // App icon — use NSApp icon (reads AppIcon.icns from .app bundle)
+            Image(nsImage: NSApplication.shared.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 128, height: 128)
 
             Spacer().frame(height: 20)
 
