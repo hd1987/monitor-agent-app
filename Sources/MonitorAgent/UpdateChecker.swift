@@ -307,12 +307,13 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
 
     @objc private func restartApp() {
         closeWindow()
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        p.arguments = ["/Applications/MonitorAgent.app"]
-        try? p.run()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            NSApplication.shared.terminate(nil)
+        let appURL = URL(fileURLWithPath: "/Applications/MonitorAgent.app")
+        let config = NSWorkspace.OpenConfiguration()
+        config.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: appURL, configuration: config) { _, _ in
+            DispatchQueue.main.async {
+                NSApplication.shared.terminate(nil)
+            }
         }
     }
 
