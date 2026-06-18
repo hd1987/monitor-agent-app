@@ -1,6 +1,35 @@
 import AppKit
 import Foundation
 
+struct RestartCommand {
+    let executablePath: String
+    let arguments: [String]
+}
+
+enum RestartLauncher {
+    static func makeCommand(appURL: URL, delay: TimeInterval) -> RestartCommand {
+        let delayValue = String(format: "%.1f", delay)
+        return RestartCommand(
+            executablePath: "/bin/sh",
+            arguments: [
+                "-c",
+                "sleep \(delayValue); /usr/bin/open -n \(shellQuoted(appURL.path))"
+            ]
+        )
+    }
+
+    static func launch(_ command: RestartCommand) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: command.executablePath)
+        process.arguments = command.arguments
+        try process.run()
+    }
+
+    private static func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
 /// Checks GitHub Releases for new versions, downloads and installs updates.
 final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
     static let shared = UpdateChecker()
@@ -308,12 +337,13 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
     @objc private func restartApp() {
         closeWindow()
         let appURL = URL(fileURLWithPath: "/Applications/MonitorAgent.app")
-        let config = NSWorkspace.OpenConfiguration()
-        config.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: appURL, configuration: config) { _, _ in
-            DispatchQueue.main.async {
-                NSApplication.shared.terminate(nil)
-            }
+        let command = RestartLauncher.makeCommand(appURL: appURL, delay: 0.5)
+        do {
+            try RestartLauncher.launch(command)
+            NSApplication.shared.terminate(nil)
+        } catch {
+            showResult(title: "Restart failed", detail: error.localizedDescription,
+                       primary: ("OK", #selector(close)))
         }
     }
 
