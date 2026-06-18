@@ -13,10 +13,7 @@ let package = Package(
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
-            path: "Sources/MonitorAgent",
-            resources: [
-                .copy("Resources/AppIcon.icns"),
-            ]
+            path: "Sources/MonitorAgent"
         ),
     ]
 )
