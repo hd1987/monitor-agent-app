@@ -52,14 +52,16 @@ sync_state (
 ```
 Sources/MonitorAgent/
 ├── App.swift                      # NSStatusItem + FloatingPanel (borderless NSPanel)
-├── AppStore.swift                 # ObservableObject, Combine filter → reload, starts sync
+├── AppStore.swift                 # ObservableObject, Combine filter → reload, manages sync lifecycle
 ├── DatabaseManager.swift          # GRDB r/w, schema setup, all queries + insert/sync methods
 ├── Models.swift                   # AppFilter, TimeRange, UsageStats, ParsedRecord, SyncState
+├── SyncSettings.swift             # SyncInterval enum + UserDefaults persistence (default 30s)
 ├── Sync/
-│   ├── SessionSyncManager.swift   # 30s DispatchSourceTimer, file discovery, incremental read
+│   ├── SessionSyncManager.swift   # Configurable DispatchSourceTimer, file discovery, incremental read
 │   ├── ClaudeLogParser.swift      # Stateless: line Data → ParsedRecord?
 │   └── CodexLogParser.swift       # Stateful: line Data + CodexParseContext → ParsedRecord?
 └── Views/
+    ├── AboutView.swift            # About window (app icon, version, GitHub link) + AppVersion constant
     ├── PopoverView.swift          # Panel container (620px, white 98%, rounded 12pt, light mode)
     ├── FilterBar.swift            # App toggle (All/Claude Code/Codex) + time range picker
     ├── StatCardsView.swift        # 6 stat cards in HStack
@@ -69,11 +71,18 @@ Sources/MonitorAgent/
 
 ## UI Layout
 
-**Menu Bar**: Robot icon (SVG template image). Left-click → panel. Right-click → Settings / Quit.
+**Menu Bar**: Robot icon (SVG template image). Left-click → panel (triggers sync). Right-click → About / Settings / Quit.
 
 **Panel** (top → bottom):
 
 1. **FilterBar** — `[All | Claude Code | Codex]` segmented + `[Today ▾]` time picker
+
+**About** — App icon (AppIcon.icns), name, tagline, version (`AppVersion.current`), GitHub button
+
+**Settings** (Cancel/Save flow — changes apply only after Save):
+
+- **Theme** — System / Light / Dark
+- **Sync Interval** — 10 / 20 / 30 / 40 / 50 / 60s / Never (default 30s; "Never" syncs only on panel open)
 2. **StatCards** — `Requests | Sessions | Input Tokens | Output Tokens | Cache Read | Cache Hit`
 3. **Heatmap** — GitHub-style year grid, auto-sized cells, year switcher, hover tooltip ("6 contributions on May 21st")
 4. **ModelDistribution** — stacked color bar + legend (top 6 models, 3 columns)

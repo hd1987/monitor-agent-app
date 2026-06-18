@@ -18,6 +18,7 @@ struct StatCardsView: View {
 }
 
 struct StatCard: View {
+    @EnvironmentObject var theme: ThemeManager
     let title: String
     let value: String
 
@@ -32,8 +33,12 @@ struct StatCard: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 10)
-        .background(.black.opacity(0.04))
+        .background(theme.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(theme.cardBorder, lineWidth: 0.5)
+        )
     }
 }
 

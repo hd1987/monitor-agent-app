@@ -25,6 +25,20 @@ final class SessionSyncManager {
         timer = nil
     }
 
+    /// Run a single sync cycle on the background queue, then call `onComplete`.
+    func syncOnce(onComplete: @escaping () -> Void) {
+        queue.async { [weak self] in
+            self?.syncAll()
+            onComplete()
+        }
+    }
+
+    /// Restart the periodic timer with a new interval.
+    func restart(interval: TimeInterval, onComplete: @escaping () -> Void) {
+        stop()
+        start(interval: interval, onComplete: onComplete)
+    }
+
     // MARK: - Sync Cycle
 
     private func syncAll() {
