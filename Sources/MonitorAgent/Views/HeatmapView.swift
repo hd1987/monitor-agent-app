@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HeatmapView: View {
     @EnvironmentObject var store: AppStore
+    @EnvironmentObject var theme: ThemeManager
     @State private var hoveredCell: String?
     @State private var hoveredCount: Int = 0
     @State private var hoverAnchor: CGPoint = .zero
@@ -79,10 +80,10 @@ struct HeatmapView: View {
                 if let cellDate = hoveredCell {
                     Text(tooltipText(date: cellDate, count: hoveredCount))
                         .font(.system(size: 11))
-                        .foregroundColor(.white)
+                        .foregroundColor(theme.tooltipForeground)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Color.black.opacity(0.75))
+                        .background(theme.tooltipBackground)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                         .fixedSize()
                         .offset(x: max(0, hoverAnchor.x - 60), y: hoverAnchor.y - 28)
@@ -204,7 +205,7 @@ struct HeatmapView: View {
 
     private func cellColor(count: Int, isPlaceholder: Bool) -> Color {
         if isPlaceholder { return .clear }
-        if count == 0 { return .black.opacity(0.06) }
+        if count == 0 { return theme.cellEmpty }
 
         // Determine intensity based on count percentiles
         let intensity: Double

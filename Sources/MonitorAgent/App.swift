@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 
 @main
 struct MonitorAgentApp: App {
@@ -13,9 +14,12 @@ struct MonitorAgentApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var panel: FloatingPanel!
+    private var settingsPanel: NSPanel?
     private var statusMenu: NSMenu!
     private var rightClickHandled = false
     private let store = AppStore()
+    private let themeManager = ThemeManager.shared
+    private var themeCancellable: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -44,11 +48,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hostingView = NSHostingView(
             rootView: PopoverView()
                 .environmentObject(store)
+                .environmentObject(themeManager)
         )
         hostingView.translatesAutoresizingMaskIntoConstraints = false
 
         panel = FloatingPanel()
         panel.contentView = hostingView
+
+        // Apply theme to panel and react to changes
+        applyTheme()
+        themeCancellable = themeManager.$theme.sink { [weak self] _ in
+            DispatchQueue.main.async { self?.applyTheme() }
+        }
 
         // Close panel when clicking outside
         NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
@@ -75,8 +86,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UpdateChecker.shared.checkOnLaunch()
     }
 
+    private func applyTheme() {
+        panel.backgroundLayer?.backgroundColor = themeManager.panelBackground.cgColor
+        panel.backgroundLayer?.borderColor = themeManager.panelBorder.cgColor
+    }
+
     @objc private func togglePanel(_ sender: AnyObject?) {
-        // Skip if right-click just handled the menu
         guard !rightClickHandled else { return }
 
         if panel.isVisible {
@@ -87,7 +102,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem.button,
               let buttonWindow = button.window else { return }
 
-        // Position below the menu bar icon, centered
         let buttonRect = button.convert(button.bounds, to: nil)
         let screenRect = buttonWindow.convertToScreen(buttonRect)
 
@@ -102,7 +116,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings(_ sender: AnyObject?) {
-        // TODO: open settings window
+        if let w = settingsPanel {
+            w.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let hosting = NSHostingView(
+            rootView: SettingsView()
+                .environmentObject(themeManager)
+        )
+
+        let w = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 120),
+            styleMask: [.titled, .closable],
+            backing: .buffered, defer: false
+        )
+        w.title = "Settings"
+        w.isReleasedWhenClosed = false
+        w.level = .floating
+        w.contentView = hosting
+        w.center()
+        w.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        settingsPanel = w
     }
 
     @objc private func checkForUpdates(_ sender: AnyObject?) {
@@ -133,6 +170,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 // MARK: - Floating Panel
 
 final class FloatingPanel: NSPanel {
+    /// Exposed for theme updates
+    private(set) var backgroundLayer: CALayer?
+
     init() {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 620, height: 400),
@@ -149,15 +189,15 @@ final class FloatingPanel: NSPanel {
         isMovableByWindowBackground = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
-        // White background with 95% opacity
-        let visualEffect = NSView(frame: .zero)
-        visualEffect.wantsLayer = true
-        visualEffect.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.98).cgColor
-        visualEffect.layer?.cornerRadius = 12
-        visualEffect.layer?.masksToBounds = true
-        visualEffect.layer?.borderWidth = 1.0 / NSScreen.main!.backingScaleFactor
-        visualEffect.layer?.borderColor = NSColor.black.withAlphaComponent(0.01).cgColor
-        visualEffect.translatesAutoresizingMaskIntoConstraints = false
+        let bg = NSView(frame: .zero)
+        bg.wantsLayer = true
+        bg.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.98).cgColor
+        bg.layer?.cornerRadius = 12
+        bg.layer?.masksToBounds = true
+        bg.layer?.borderWidth = 1.0 / (NSScreen.main?.backingScaleFactor ?? 2)
+        bg.layer?.borderColor = NSColor.black.withAlphaComponent(0.01).cgColor
+        bg.translatesAutoresizingMaskIntoConstraints = false
+        backgroundLayer = bg.layer
 
         let wrapper = NSView(frame: .zero)
         wrapper.wantsLayer = true
@@ -165,12 +205,12 @@ final class FloatingPanel: NSPanel {
         wrapper.layer?.masksToBounds = true
         wrapper.translatesAutoresizingMaskIntoConstraints = false
 
-        wrapper.addSubview(visualEffect)
+        wrapper.addSubview(bg)
         NSLayoutConstraint.activate([
-            visualEffect.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
-            visualEffect.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
-            visualEffect.topAnchor.constraint(equalTo: wrapper.topAnchor),
-            visualEffect.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
+            bg.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+            bg.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
+            bg.topAnchor.constraint(equalTo: wrapper.topAnchor),
+            bg.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
         ])
 
         self.contentView = wrapper
@@ -180,7 +220,6 @@ final class FloatingPanel: NSPanel {
         get { super.contentView }
         set {
             if let hosting = newValue as? NSHostingView<AnyView> ?? newValue as? _AnyNSHostingView {
-                // Insert hosting view on top of the visual effect background
                 if let wrapper = super.contentView, let _ = wrapper.subviews.first {
                     hosting.translatesAutoresizingMaskIntoConstraints = false
                     wrapper.addSubview(hosting)
@@ -205,6 +244,5 @@ final class FloatingPanel: NSPanel {
     }
 }
 
-/// Type-erased protocol to detect any NSHostingView
 private protocol _AnyNSHostingView: NSView {}
 extension NSHostingView: _AnyNSHostingView {}

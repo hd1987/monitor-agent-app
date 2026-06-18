@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Added
+- Settings window with theme picker (System / Light / Dark)
+- Dark theme support across all views
+
 ## [0.1.1] - 2026-06-17
 
 ### Fixed

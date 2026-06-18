@@ -2,6 +2,7 @@ import SwiftUI
 
 struct FilterBar: View {
     @EnvironmentObject var store: AppStore
+    @EnvironmentObject var theme: ThemeManager
 
     var body: some View {
         HStack(spacing: 12) {
@@ -26,7 +27,7 @@ struct FilterBar: View {
                 }
             }
             .padding(2)
-            .background(.black.opacity(0.04))
+            .background(theme.cardBackground)
             .clipShape(RoundedRectangle(cornerRadius: 8))
 
             Spacer()
