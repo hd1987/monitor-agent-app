@@ -40,7 +40,6 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
 
     // UI elements (lazy-created, reused across states)
     private var window: NSPanel?
-    private var backgroundLayer: CALayer?
     private var titleLabel: NSTextField?
     private var detailLabel: NSTextField?
     private var progress: NSProgressIndicator?
@@ -74,7 +73,6 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
     /// Refresh window appearance to match current theme
     func applyTheme() {
         window?.appearance = ThemeManager.shared.nsAppearance
-        backgroundLayer?.backgroundColor = ThemeManager.shared.panelBackground.cgColor
     }
 
     // MARK: - Result Handling
@@ -167,20 +165,35 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
             else { progress?.doubleValue = 0 }
         }
 
-        configureButton(primaryBtn, spec: primary)
+        configureButton(primaryBtn, spec: primary, accent: true)
         configureButton(secondaryBtn, spec: secondary)
+
+        // When only secondary is visible, move it to the right edge
+        if primary == nil && secondary != nil {
+            let w = window?.frame.width ?? 380
+            secondaryBtn?.frame.origin.x = w - 100
+        }
 
         window?.center()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func configureButton(_ button: NSButton?, spec: (String, Selector)?) {
+    private func configureButton(_ button: NSButton?, spec: (String, Selector)?, accent: Bool = false) {
         guard let button else { return }
         if let (label, action) = spec {
-            button.title = label
             button.action = action
             button.isHidden = false
+            if accent {
+                button.bezelColor = .controlAccentColor
+                button.attributedTitle = NSAttributedString(
+                    string: label,
+                    attributes: [.foregroundColor: NSColor.white, .font: NSFont.systemFont(ofSize: 13)]
+                )
+            } else {
+                button.bezelColor = nil
+                button.title = label
+            }
         } else {
             button.isHidden = true
         }
@@ -189,46 +202,41 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
     private func createWindow() {
         let w: CGFloat = 380, h: CGFloat = 150
 
-        let panel = NSPanel(
+        let win = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: w, height: h),
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.titled, .closable],
             backing: .buffered, defer: false
         )
-        panel.isReleasedWhenClosed = false
-        panel.level = .floating
-        panel.hidesOnDeactivate = false
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.isMovableByWindowBackground = true
+        win.title = ""
+        win.titlebarAppearsTransparent = true
+        win.titleVisibility = .hidden
+        win.isReleasedWhenClosed = false
+        win.level = .floating
+        win.hidesOnDeactivate = false
+        win.isMovableByWindowBackground = true
 
-        panel.appearance = ThemeManager.shared.nsAppearance
+        win.appearance = ThemeManager.shared.nsAppearance
 
-        let bg = NSView(frame: NSRect(x: 0, y: 0, width: w, height: h))
-        bg.wantsLayer = true
-        bg.layer?.backgroundColor = ThemeManager.shared.panelBackground.cgColor
-        bg.layer?.cornerRadius = 12
-        bg.layer?.masksToBounds = true
-        backgroundLayer = bg.layer
-        panel.contentView = bg
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: w, height: h))
+        win.contentView = container
 
-        titleLabel = makeLabel(in: bg, frame: .init(x: 20, y: 110, width: w - 40, height: 20),
+        titleLabel = makeLabel(in: container, frame: .init(x: 20, y: 110, width: w - 40, height: 20),
                                font: .boldSystemFont(ofSize: 13))
-        detailLabel = makeLabel(in: bg, frame: .init(x: 20, y: 85, width: w - 40, height: 20),
+        detailLabel = makeLabel(in: container, frame: .init(x: 20, y: 85, width: w - 40, height: 20),
                                 font: .systemFont(ofSize: 11), color: .secondaryLabelColor)
         detailLabel?.lineBreakMode = .byTruncatingTail
 
         let indicator = NSProgressIndicator(frame: NSRect(x: 20, y: 58, width: w - 40, height: 20))
         indicator.style = .bar
-        bg.addSubview(indicator)
+        container.addSubview(indicator)
         progress = indicator
 
-        primaryBtn = makeButton(in: bg, frame: .init(x: w - 100, y: 15, width: 80, height: 30),
+        primaryBtn = makeButton(in: container, frame: .init(x: w - 100, y: 15, width: 80, height: 30),
                                 keyEquivalent: "\r")
-        secondaryBtn = makeButton(in: bg, frame: .init(x: w - 190, y: 15, width: 80, height: 30),
+        secondaryBtn = makeButton(in: container, frame: .init(x: w - 190, y: 15, width: 80, height: 30),
                                   keyEquivalent: "\u{1b}")
 
-        window = panel
+        window = win
     }
 
     private func makeLabel(in parent: NSView, frame: NSRect,
@@ -404,13 +412,11 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
     // MARK: - Errors
 
     private enum UpdateError: LocalizedError {
-        case invalidResponse, noAsset, downloadFailed, installFailed
+        case invalidResponse, noAsset
         var errorDescription: String? {
             switch self {
             case .invalidResponse: return "Could not parse GitHub release info."
             case .noAsset:         return "No downloadable asset found in the release."
-            case .downloadFailed:  return "Failed to download the update."
-            case .installFailed:   return "Failed to install the update."
             }
         }
     }
