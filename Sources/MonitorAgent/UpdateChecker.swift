@@ -13,7 +13,7 @@ enum RestartLauncher {
             executablePath: "/bin/sh",
             arguments: [
                 "-c",
-                "sleep \(delayValue); /usr/bin/open -n \(shellQuoted(appURL.path))"
+                "sleep \(delayValue); /usr/bin/open \(shellQuoted(appURL.path))"
             ]
         )
     }
@@ -351,7 +351,12 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
         let command = RestartLauncher.makeCommand(appURL: appURL, delay: 0.5)
         do {
             try RestartLauncher.launch(command)
-            NSApplication.shared.terminate(nil)
+            // Force quit to bypass keepInBackground cancellation
+            if let delegate = NSApplication.shared.delegate as? AppDelegate {
+                delegate.forceTerminate()
+            } else {
+                NSApplication.shared.terminate(nil)
+            }
         } catch {
             showResult(title: "Restart failed", detail: error.localizedDescription,
                        primary: ("OK", #selector(close)))

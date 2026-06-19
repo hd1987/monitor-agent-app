@@ -6,6 +6,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-20
+
+### Fixed
+- Dual menu bar instances after update when Keep in Background is enabled
+- Config and Prompt editor text hidden in installed release app
+- Nested scrollbars in Config and Prompt editor pages
+
 ## [0.2.1] - 2026-06-19
 
 ### Fixed

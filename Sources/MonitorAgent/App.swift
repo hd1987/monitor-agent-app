@@ -246,9 +246,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UpdateChecker.shared.checkForUpdates(silent: false)
     }
 
-    @objc private func quitApp(_ sender: AnyObject?) {
+    /// Force quit bypassing keepInBackground check (used by update restart)
+    func forceTerminate() {
         forceQuit = true
         NSApplication.shared.terminate(nil)
+    }
+
+    @objc private func quitApp(_ sender: AnyObject?) {
+        forceTerminate()
     }
 
     /// Build menu bar icon from bundled SVG
