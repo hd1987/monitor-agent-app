@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-06-19
+
+### Changed
+- Update dialog uses titled window with blue primary button (white text)
+- Settings window closes on save as confirmation
+
+### Fixed
+- Single button misaligned in update dialog when only Cancel is shown
+
 ## [0.1.5] - 2026-06-19
 
 ### Added

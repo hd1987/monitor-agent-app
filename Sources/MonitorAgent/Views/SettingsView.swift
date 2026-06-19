@@ -35,6 +35,7 @@ struct SettingsView: View {
                     SyncSettings.shared.interval = draftSyncInterval
                     SyncSettings.shared.keepInBackground = draftKeepInBackground
                     SyncSettings.shared.launchAtLogin = draftLaunchAtLogin
+                    NSApp.keyWindow?.close()
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
