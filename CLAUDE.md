@@ -64,6 +64,7 @@ Sources/MonitorAgent/
     ├── AboutView.swift            # About window (app icon, version, GitHub link) + AppVersion constant
     ├── PopoverView.swift          # Panel container (620px, white 98%, rounded 12pt, light mode)
     ├── FilterBar.swift            # App toggle (All/Claude Code/Codex) + time range picker
+    ├── SettingsView.swift         # Sidebar settings: General / Config / Prompt categories
     ├── StatCardsView.swift        # 6 stat cards in HStack
     ├── HeatmapView.swift          # Year heatmap grid + hover tooltip overlay
     └── ModelDistributionView.swift # Stacked proportion bar + 3-col legend
@@ -71,7 +72,7 @@ Sources/MonitorAgent/
 
 ## UI Layout
 
-**Menu Bar**: Robot icon (SVG template image). Left-click → panel (triggers sync). Right-click → About / Settings / Quit. Activation policy `.accessory` (no Dock icon). Re-clicking app icon shows panel via `applicationShouldHandleReopen`.
+**Menu Bar**: Robot icon (SVG template image). Left-click → panel (triggers sync). Right-click → About / General / Config / Prompt / Check for Updates / Quit. Activation policy `.accessory` (no Dock icon). Re-clicking app icon shows panel via `applicationShouldHandleReopen`.
 
 **Panel** (top → bottom):
 
@@ -79,12 +80,11 @@ Sources/MonitorAgent/
 
 **About** — App icon (AppIcon.icns), name, tagline, version (`AppVersion.current`), GitHub button
 
-**Settings** (Cancel/Save flow — changes apply only after Save):
+**Settings** — Left sidebar (General / Config / Prompt) + right content area. Cancel closes window; Save shows "Saved" toast (no close). Save only applies to current category. Switching categories reloads from disk. Config/Prompt use Claude Code / Codex tab bar.
 
-- **Theme** — System / Light / Dark
-- **Sync Interval** — 10 / 20 / 30 / 40 / 50 / 60s / Never (default 30s; "Never" syncs only on panel open)
-- **Keep in Background** — Toggle (default on); Cmd+Q hides instead of quitting, right-click Quit always exits
-- **Launch at Login** — Toggle; uses SMAppService.mainApp, disabled when not running as .app bundle
+- **General** — Theme (System/Light/Dark), Sync Interval (10–60s/Never), Keep in Background toggle, Launch at Login toggle
+- **Config** — TextEditor for `~/.claude/settings.json` (JSON validated on save) and `~/.codex/config.toml`; shows "File not found" if missing
+- **Prompt** — TextEditor for `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`; shows "File not found" if missing
 2. **StatCards** — `Requests | Sessions | Input Tokens | Output Tokens | Cache Read | Cache Hit`
 3. **Heatmap** — GitHub-style year grid, auto-sized cells, year switcher, hover tooltip ("6 contributions on May 21st")
 4. **ModelDistribution** — stacked color bar + legend (top 6 models, 3 columns)
