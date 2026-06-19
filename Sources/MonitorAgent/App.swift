@@ -8,6 +8,14 @@ struct MonitorAgentApp: App {
 
     var body: some Scene {
         Settings { EmptyView() }
+            .commands {
+                CommandGroup(replacing: .appSettings) {
+                    Button("Settings") {
+                        appDelegate.openSettings(nil)
+                    }
+                    .keyboardShortcut(",", modifiers: .command)
+                }
+            }
     }
 }
 
@@ -149,7 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.makeKeyAndOrderFront(nil)
     }
 
-    @objc private func openSettings(_ sender: AnyObject?) {
+    @objc func openSettings(_ sender: AnyObject?) {
         // Always recreate so @State drafts reset to saved values
         settingsPanel?.close()
         settingsPanel = nil

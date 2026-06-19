@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Fixed
+- Route Cmd+, Settings to the same settings window as the menu bar context menu
+
 ## [0.1.6] - 2026-06-19
 
 ### Changed
