@@ -85,38 +85,40 @@ struct SettingsView: View {
                 }
 
                 // Content
-                ScrollView {
-                    switch selectedCategory {
-                    case .general:
+                switch selectedCategory {
+                case .general:
+                    ScrollView {
                         GeneralSettingsView(
                             draftTheme: $draftTheme,
                             draftSyncInterval: $draftSyncInterval,
                             draftKeepInBackground: $draftKeepInBackground,
                             draftLaunchAtLogin: $draftLaunchAtLogin
                         )
-                    case .config:
-                        TabbedFileEditorView(
-                            claudeText: $claudeConfigText,
-                            codexText: $codexConfigText,
-                            claudeExists: claudeConfigExists,
-                            codexExists: codexConfigExists,
-                            claudePath: Self.claudeSettingsPath,
-                            codexPath: Self.codexConfigPath,
-                            selectedTab: $configTab
-                        )
-                    case .prompt:
-                        TabbedFileEditorView(
-                            claudeText: $claudePromptText,
-                            codexText: $codexPromptText,
-                            claudeExists: claudePromptExists,
-                            codexExists: codexPromptExists,
-                            claudePath: Self.claudePromptPath,
-                            codexPath: Self.codexPromptPath,
-                            selectedTab: $promptTab
-                        )
                     }
+                    .frame(maxWidth: .infinity)
+                case .config:
+                    TabbedFileEditorView(
+                        claudeText: $claudeConfigText,
+                        codexText: $codexConfigText,
+                        claudeExists: claudeConfigExists,
+                        codexExists: codexConfigExists,
+                        claudePath: Self.claudeSettingsPath,
+                        codexPath: Self.codexConfigPath,
+                        selectedTab: $configTab
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                case .prompt:
+                    TabbedFileEditorView(
+                        claudeText: $claudePromptText,
+                        codexText: $codexPromptText,
+                        claudeExists: claudePromptExists,
+                        codexExists: codexPromptExists,
+                        claudePath: Self.claudePromptPath,
+                        codexPath: Self.codexPromptPath,
+                        selectedTab: $promptTab
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(maxWidth: .infinity)
 
                 // Cancel / Save buttons
                 HStack {
@@ -372,6 +374,7 @@ struct GeneralSettingsView: View {
             }
         }
         .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -463,7 +466,11 @@ struct FileEditorSection: View {
                 .foregroundStyle(.secondary)
 
             if fileExists {
-                AutoSizingTextEditor(text: $text)
+                TextEditor(text: $text)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .scrollContentBackground(.hidden)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(8)
                     .background(
                         RoundedRectangle(cornerRadius: 6)
@@ -489,81 +496,7 @@ struct FileEditorSection: View {
                 )
             }
         }
-    }
-}
-
-// MARK: - Auto-Sizing Text Editor
-
-/// NSTextView wrapper that expands to fit content — no internal scroll, relies on outer ScrollView.
-struct AutoSizingTextEditor: NSViewRepresentable {
-    @Binding var text: String
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-
-    func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = _AutoSizingScrollView()
-        scrollView.hasVerticalScroller = false
-        scrollView.hasHorizontalScroller = false
-        scrollView.borderType = .noBorder
-        scrollView.drawsBackground = false
-
-        let textView = NSTextView()
-        textView.isEditable = true
-        textView.isSelectable = true
-        textView.isRichText = false
-        textView.allowsUndo = true
-        textView.drawsBackground = false
-        textView.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        textView.textContainerInset = .zero
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = false
-        textView.textContainer?.widthTracksTextView = true
-        textView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
-        textView.isAutomaticQuoteSubstitutionEnabled = false
-        textView.isAutomaticDashSubstitutionEnabled = false
-        textView.isAutomaticTextReplacementEnabled = false
-        textView.delegate = context.coordinator
-
-        scrollView.documentView = textView
-        return scrollView
-    }
-
-    func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        guard let textView = scrollView.documentView as? NSTextView else { return }
-        if textView.string != text {
-            textView.string = text
-            scrollView.invalidateIntrinsicContentSize()
-        }
-    }
-
-    class Coordinator: NSObject, NSTextViewDelegate {
-        var parent: AutoSizingTextEditor
-
-        init(_ parent: AutoSizingTextEditor) {
-            self.parent = parent
-        }
-
-        func textDidChange(_ notification: Notification) {
-            guard let textView = notification.object as? NSTextView else { return }
-            parent.text = textView.string
-            textView.enclosingScrollView?.invalidateIntrinsicContentSize()
-        }
-    }
-}
-
-/// NSScrollView subclass that reports document height as intrinsic content size.
-private class _AutoSizingScrollView: NSScrollView {
-    override var intrinsicContentSize: NSSize {
-        guard let textView = documentView as? NSTextView,
-              let layoutManager = textView.layoutManager,
-              let textContainer = textView.textContainer else {
-            return NSSize(width: NSView.noIntrinsicMetric, height: 140)
-        }
-        layoutManager.ensureLayout(for: textContainer)
-        let height = max(140, layoutManager.usedRect(for: textContainer).height + textView.textContainerInset.height * 2)
-        return NSSize(width: NSView.noIntrinsicMetric, height: height)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
