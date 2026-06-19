@@ -71,7 +71,7 @@ Sources/MonitorAgent/
 
 ## UI Layout
 
-**Menu Bar**: Robot icon (SVG template image). Left-click → panel (triggers sync). Right-click → About / Settings / Quit.
+**Menu Bar**: Robot icon (SVG template image). Left-click → panel (triggers sync). Right-click → About / Settings / Quit. Activation policy `.accessory` (no Dock icon). Re-clicking app icon shows panel via `applicationShouldHandleReopen`.
 
 **Panel** (top → bottom):
 
@@ -83,6 +83,8 @@ Sources/MonitorAgent/
 
 - **Theme** — System / Light / Dark
 - **Sync Interval** — 10 / 20 / 30 / 40 / 50 / 60s / Never (default 30s; "Never" syncs only on panel open)
+- **Keep in Background** — Toggle (default on); Cmd+Q hides instead of quitting, right-click Quit always exits
+- **Launch at Login** — Toggle; uses SMAppService.mainApp, disabled when not running as .app bundle
 2. **StatCards** — `Requests | Sessions | Input Tokens | Output Tokens | Cache Read | Cache Hit`
 3. **Heatmap** — GitHub-style year grid, auto-sized cells, year switcher, hover tooltip ("6 contributions on May 21st")
 4. **ModelDistribution** — stacked color bar + legend (top 6 models, 3 columns)

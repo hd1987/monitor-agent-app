@@ -6,13 +6,17 @@ struct SettingsView: View {
     /// Local draft state — only committed on Save
     @State private var draftTheme: Theme = .system
     @State private var draftSyncInterval: SyncInterval = .thirty
+    @State private var draftKeepInBackground: Bool = true
+    @State private var draftLaunchAtLogin: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
                 GeneralSettingsView(
                     draftTheme: $draftTheme,
-                    draftSyncInterval: $draftSyncInterval
+                    draftSyncInterval: $draftSyncInterval,
+                    draftKeepInBackground: $draftKeepInBackground,
+                    draftLaunchAtLogin: $draftLaunchAtLogin
                 )
             }
 
@@ -29,6 +33,8 @@ struct SettingsView: View {
                 Button("Save") {
                     themeManager.theme = draftTheme
                     SyncSettings.shared.interval = draftSyncInterval
+                    SyncSettings.shared.keepInBackground = draftKeepInBackground
+                    SyncSettings.shared.launchAtLogin = draftLaunchAtLogin
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
@@ -36,10 +42,12 @@ struct SettingsView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
         }
-        .frame(width: 500, height: 320)
+        .frame(minWidth: 480, minHeight: 380)
         .onAppear {
             draftTheme = themeManager.theme
             draftSyncInterval = SyncSettings.shared.interval
+            draftKeepInBackground = SyncSettings.shared.keepInBackground
+            draftLaunchAtLogin = SyncSettings.shared.launchAtLogin
         }
     }
 }
@@ -49,6 +57,8 @@ struct SettingsView: View {
 struct GeneralSettingsView: View {
     @Binding var draftTheme: Theme
     @Binding var draftSyncInterval: SyncInterval
+    @Binding var draftKeepInBackground: Bool
+    @Binding var draftLaunchAtLogin: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -77,6 +87,26 @@ struct GeneralSettingsView: View {
                     }
                 }
                 .frame(width: 100)
+            }
+
+            Divider().padding(.vertical, 4)
+
+            SettingsRow(
+                title: "Keep in Background",
+                description: "Keep the app running when you press ⌘Q. Use right-click → Quit to fully exit."
+            ) {
+                Toggle("", isOn: $draftKeepInBackground)
+                    .toggleStyle(.switch)
+            }
+
+            Divider().padding(.vertical, 4)
+
+            SettingsRow(
+                title: "Launch at Login",
+                description: "Automatically start MonitorAgent when you log in."
+            ) {
+                Toggle("", isOn: $draftLaunchAtLogin)
+                    .toggleStyle(.switch)
             }
         }
         .padding(20)

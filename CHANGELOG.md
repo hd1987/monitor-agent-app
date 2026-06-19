@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-06-19
+
+### Added
+- Reopen panel when clicking app icon while already running (applicationShouldHandleReopen)
+- Keep in Background: Cmd+Q hides instead of quitting (default on, right-click Quit always exits)
+- Launch at Login: auto-start via SMAppService (requires .app bundle)
+- Set activation policy to .accessory (hide from Dock and Cmd+Tab)
+- Settings window resizable with larger default size
+
 ## [0.1.4] - 2026-06-18
 
 ### Fixed
