@@ -59,5 +59,5 @@ struct AboutView: View {
 
 /// Single source of truth for app version — update alongside git tag at release
 enum AppVersion {
-    static let current = "0.1.6"
+    static let current = "0.2.0"
 }

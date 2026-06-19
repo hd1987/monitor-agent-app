@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-19
+
 ### Added
 - Settings sidebar navigation with three categories: General, Config, Prompt
 - Config tab: view and edit Claude Code settings.json and Codex config.toml
