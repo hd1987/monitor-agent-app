@@ -6,6 +6,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-19
+
+### Added
+- Settings sidebar navigation with three categories: General, Config, Prompt
+- Config tab: view and edit Claude Code settings.json and Codex config.toml
+- Prompt tab: view and edit Claude Code CLAUDE.md and Codex AGENTS.md system prompts
+- Right-click menu direct links to General, Config, and Prompt
+- Save shows "Saved" toast instead of closing the settings window
+
+### Fixed
+- Route Cmd+, Settings to the same settings window as the menu bar context menu
+
 ## [0.1.6] - 2026-06-19
 
 ### Changed

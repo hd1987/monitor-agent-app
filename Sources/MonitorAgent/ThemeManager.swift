@@ -8,6 +8,14 @@ enum Theme: String, CaseIterable, Identifiable {
     case dark = "Dark"
 
     var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .system: return "circle.lefthalf.filled"
+        case .light: return "sun.max"
+        case .dark: return "moon"
+        }
+    }
 }
 
 /// Manages app-wide theme, persisted to UserDefaults.

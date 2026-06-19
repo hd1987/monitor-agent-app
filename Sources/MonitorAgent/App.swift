@@ -8,6 +8,14 @@ struct MonitorAgentApp: App {
 
     var body: some Scene {
         Settings { EmptyView() }
+            .commands {
+                CommandGroup(replacing: .appSettings) {
+                    Button("Settings") {
+                        appDelegate.openSettings(nil)
+                    }
+                    .keyboardShortcut(",", modifiers: .command)
+                }
+            }
     }
 }
 
@@ -39,15 +47,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         let aboutItem = NSMenuItem(title: "About MonitorAgent", action: #selector(openAbout(_:)), keyEquivalent: "")
         aboutItem.target = self
-        let settingsItem = NSMenuItem(title: "Settings", action: #selector(openSettings(_:)), keyEquivalent: ",")
-        settingsItem.target = self
+
+        let generalItem = NSMenuItem(title: "General", action: #selector(openSettingsGeneral(_:)), keyEquivalent: ",")
+        generalItem.target = self
+        let configItem = NSMenuItem(title: "Config", action: #selector(openSettingsConfig(_:)), keyEquivalent: "")
+        configItem.target = self
+        let promptItem = NSMenuItem(title: "Prompt", action: #selector(openSettingsPrompt(_:)), keyEquivalent: "")
+        promptItem.target = self
+
         let updateItem = NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
         updateItem.target = self
         let quitItem = NSMenuItem(title: "Quit", action: #selector(quitApp(_:)), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(aboutItem)
         menu.addItem(.separator())
-        menu.addItem(settingsItem)
+        menu.addItem(generalItem)
+        menu.addItem(configItem)
+        menu.addItem(promptItem)
+        menu.addItem(.separator())
         menu.addItem(updateItem)
         menu.addItem(.separator())
         menu.addItem(quitItem)
@@ -149,18 +166,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.makeKeyAndOrderFront(nil)
     }
 
-    @objc private func openSettings(_ sender: AnyObject?) {
+    @objc func openSettings(_ sender: AnyObject?) {
+        openSettings(category: .general)
+    }
+
+    @objc private func openSettingsGeneral(_ sender: AnyObject?) {
+        openSettings(category: .general)
+    }
+
+    @objc private func openSettingsConfig(_ sender: AnyObject?) {
+        openSettings(category: .config)
+    }
+
+    @objc private func openSettingsPrompt(_ sender: AnyObject?) {
+        openSettings(category: .prompt)
+    }
+
+    private func openSettings(category: SettingsCategory) {
         // Always recreate so @State drafts reset to saved values
         settingsPanel?.close()
         settingsPanel = nil
 
         let hosting = NSHostingView(
-            rootView: SettingsView()
+            rootView: SettingsView(initialCategory: category)
                 .environmentObject(themeManager)
         )
 
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 750, height: 550),
+            contentRect: NSRect(x: 0, y: 0, width: 850, height: 580),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered, defer: false
         )
