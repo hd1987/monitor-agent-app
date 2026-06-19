@@ -168,10 +168,12 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
         configureButton(primaryBtn, spec: primary, accent: true)
         configureButton(secondaryBtn, spec: secondary)
 
-        // When only secondary is visible, move it to the right edge
+        // Reset secondary button position based on whether primary is visible
+        let winW = window?.frame.width ?? 380
         if primary == nil && secondary != nil {
-            let w = window?.frame.width ?? 380
-            secondaryBtn?.frame.origin.x = w - 100
+            secondaryBtn?.frame.origin.x = winW - 100
+        } else {
+            secondaryBtn?.frame.origin.x = winW - 190
         }
 
         window?.center()
