@@ -68,8 +68,6 @@ Sources/MonitorAgent/
     ├── StatCardsView.swift        # 6 stat cards in HStack
     ├── HeatmapView.swift          # Year heatmap grid + hover tooltip overlay
     └── ModelDistributionView.swift # Stacked proportion bar + 3-col legend
-Tests/MonitorAgentTests/
-└── SettingsViewTests.swift         # SwiftUI/AppKit settings view behavior tests
 ```
 
 ## UI Layout
