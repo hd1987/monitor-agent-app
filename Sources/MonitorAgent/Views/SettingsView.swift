@@ -310,13 +310,31 @@ struct GeneralSettingsView: View {
                 title: "Theme",
                 description: "Choose the appearance of the app. System follows your macOS settings."
             ) {
-                Picker("", selection: $draftTheme) {
+                HStack(spacing: 0) {
                     ForEach(Theme.allCases) { theme in
-                        Text(theme.rawValue).tag(theme)
+                        HStack(spacing: 4) {
+                            Image(systemName: theme.icon)
+                                .font(.system(size: 11))
+                            Text(theme.rawValue)
+                                .font(.system(size: 12))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(draftTheme == theme ? Color.accentColor : Color.clear)
+                        )
+                        .foregroundColor(draftTheme == theme ? .white : .secondary)
+                        .contentShape(RoundedRectangle(cornerRadius: 5))
+                        .onTapGesture { draftTheme = theme }
                     }
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 200)
+                .padding(2)
+                .background(
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(Color(nsColor: .separatorColor).opacity(0.2))
+                )
+                .frame(width: 240)
             }
 
             Divider().padding(.vertical, 4)
