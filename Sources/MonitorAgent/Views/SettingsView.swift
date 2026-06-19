@@ -515,6 +515,7 @@ struct AutoSizingTextEditor: NSViewRepresentable {
         textView.isRichText = false
         textView.allowsUndo = true
         textView.drawsBackground = false
+        Self.configureTextAppearance(textView)
         textView.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         textView.textContainerInset = .zero
         textView.isVerticallyResizable = true
@@ -532,10 +533,16 @@ struct AutoSizingTextEditor: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? NSTextView else { return }
+        Self.configureTextAppearance(textView)
         if textView.string != text {
             textView.string = text
             scrollView.invalidateIntrinsicContentSize()
         }
+    }
+
+    static func configureTextAppearance(_ textView: NSTextView) {
+        textView.textColor = .labelColor
+        textView.insertionPointColor = .labelColor
     }
 
     class Coordinator: NSObject, NSTextViewDelegate {

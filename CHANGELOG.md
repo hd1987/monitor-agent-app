@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Fixed
+- Config and Prompt editor text invisible in installed app builds
+
 ## [0.2.1] - 2026-06-19
 
 ### Fixed

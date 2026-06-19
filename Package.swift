@@ -13,7 +13,12 @@ let package = Package(
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
-            path: "Sources/MonitorAgent"
+            path: "Sources/MonitorAgent",
+            exclude: ["Resources"]
+        ),
+        .testTarget(
+            name: "MonitorAgentTests",
+            dependencies: ["MonitorAgent"]
         ),
     ]
 )
