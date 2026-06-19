@@ -254,6 +254,7 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
         btn.bezelStyle = .rounded
         btn.frame = frame
         btn.keyEquivalent = keyEquivalent
+        btn.widthAnchor.constraint(greaterThanOrEqualToConstant: 60).isActive = true
         parent.addSubview(btn)
         return btn
     }

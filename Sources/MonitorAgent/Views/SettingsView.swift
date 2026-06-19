@@ -25,17 +25,21 @@ struct SettingsView: View {
             // Cancel / Save buttons
             HStack {
                 Spacer()
-                Button("Cancel") {
+                Button {
                     NSApp.keyWindow?.close()
+                } label: {
+                    Text("Cancel").frame(minWidth: 48)
                 }
                 .keyboardShortcut(.cancelAction)
 
-                Button("Save") {
+                Button {
                     themeManager.theme = draftTheme
                     SyncSettings.shared.interval = draftSyncInterval
                     SyncSettings.shared.keepInBackground = draftKeepInBackground
                     SyncSettings.shared.launchAtLogin = draftLaunchAtLogin
                     NSApp.keyWindow?.close()
+                } label: {
+                    Text("Save").frame(minWidth: 48)
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
