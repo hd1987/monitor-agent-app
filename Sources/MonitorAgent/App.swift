@@ -22,7 +22,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let themeManager = ThemeManager.shared
     private var themeCancellable: AnyCancellable?
 
+    private var forceQuit = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
         if let button = statusItem.button {
@@ -91,6 +94,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UpdateChecker.shared.checkOnLaunch()
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !panel.isVisible {
+            togglePanel(nil)
+        }
+        return false
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if !forceQuit && SyncSettings.shared.keepInBackground {
+            panel.orderOut(nil)
+            settingsPanel?.close()
+            aboutPanel?.close()
+            return .terminateCancel
+        }
+        return .terminateNow
+    }
+
     private func applyTheme() {
         panel.backgroundLayer?.backgroundColor = themeManager.panelBackground.cgColor
         panel.backgroundLayer?.borderColor = themeManager.panelBorder.cgColor
@@ -140,8 +160,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 500, height: 320),
-            styleMask: [.titled, .closable],
+            contentRect: NSRect(x: 0, y: 0, width: 750, height: 550),
+            styleMask: [.titled, .closable, .resizable],
             backing: .buffered, defer: false
         )
         w.title = ""
@@ -194,6 +214,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func quitApp(_ sender: AnyObject?) {
+        forceQuit = true
         NSApplication.shared.terminate(nil)
     }
 
