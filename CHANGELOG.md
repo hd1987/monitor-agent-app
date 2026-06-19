@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-19
+
+### Fixed
+- Update and Restart buttons hidden by overlapping secondary button position
+
 ## [0.2.0] - 2026-06-19
 
 ### Added
