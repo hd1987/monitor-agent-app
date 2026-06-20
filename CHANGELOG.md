@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-06-20
+
+### Fixed
+- Restart after update now uses a detached launcher so the new app starts after the old process exits
+
 ## [0.2.5] - 2026-06-20
 
 ### Added
