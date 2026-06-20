@@ -6,6 +6,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-06-20
+
+### Added
+- Activity days now expand to an hourly Input Tokens, Output Tokens, and Cache Read line chart
+- Clicking outside the Activity area now hides the selected-day detail
+- Activity no longer shows the token chart when the selected day has no token usage
+- Activity days with no data are no longer selectable or highlighted
+
 ## [0.2.6] - 2026-06-20
 
 ### Fixed

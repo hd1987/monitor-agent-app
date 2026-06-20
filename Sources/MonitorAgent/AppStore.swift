@@ -9,6 +9,8 @@ final class AppStore: ObservableObject {
 
     @Published var stats = UsageStats()
     @Published var heatmap: [DayActivity] = []
+    @Published var selectedActivityDate: String?
+    @Published var hourlyTokenUsage: [HourlyTokenUsage] = []
     @Published var modelDistribution: [ModelShare] = []
     @Published var availableYears: [Int] = []
 
@@ -58,12 +60,16 @@ final class AppStore: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [self] in
             let s = db.fetchStats(app: appFilter, range: timeRange)
             let h = db.fetchHeatmap(app: appFilter, year: selectedYear)
+            let hourly = selectedActivityDate.map {
+                db.fetchHourlyTokenUsage(app: appFilter, date: $0)
+            } ?? []
             let m = db.fetchModelDistribution(app: appFilter, range: timeRange)
             let years = db.availableYears()
 
             DispatchQueue.main.async {
                 self.stats = s
                 self.heatmap = h
+                self.hourlyTokenUsage = hourly
                 self.modelDistribution = m
                 if !years.isEmpty {
                     self.availableYears = years
@@ -71,6 +77,36 @@ final class AppStore: ObservableObject {
                     if !years.contains(self.selectedYear) {
                         self.selectedYear = years.first!
                     }
+                }
+            }
+        }
+    }
+
+    func selectActivityDate(_ date: String) {
+        if selectedActivityDate == date {
+            clearSelectedActivityDate()
+            return
+        }
+
+        selectedActivityDate = date
+        loadHourlyTokenUsage(for: date)
+    }
+
+    func clearSelectedActivityDate() {
+        selectedActivityDate = nil
+        hourlyTokenUsage = []
+    }
+
+    private func loadHourlyTokenUsage(for date: String) {
+        let app = appFilter
+        DispatchQueue.global(qos: .userInitiated).async { [db] in
+            let usage = db.fetchHourlyTokenUsage(app: app, date: date)
+            DispatchQueue.main.async { [weak self] in
+                guard self?.selectedActivityDate == date else { return }
+                if usage.contains(where: \.hasTokenUsage) {
+                    self?.hourlyTokenUsage = usage
+                } else {
+                    self?.clearSelectedActivityDate()
                 }
             }
         }

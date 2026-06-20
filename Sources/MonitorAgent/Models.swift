@@ -167,6 +167,18 @@ struct DayActivity: Identifiable {
     var id: String { date }
 }
 
+struct HourlyTokenUsage: Identifiable, Equatable {
+    let hour: Int
+    let inputTokens: Int64
+    let outputTokens: Int64
+    let cacheReadTokens: Int64
+    var id: Int { hour }
+
+    var hasTokenUsage: Bool {
+        inputTokens > 0 || outputTokens > 0 || cacheReadTokens > 0
+    }
+}
+
 struct ModelShare: Identifiable {
     let model: String
     let requests: Int
