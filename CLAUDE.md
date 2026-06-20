@@ -80,7 +80,7 @@ Sources/MonitorAgent/
 
 **About** — App icon (AppIcon.icns), name, tagline, bundle version (`AppVersion.display`), GitHub button
 
-**Settings** — Left sidebar (General / Config / Prompt) + right content area. Cancel closes window; Save shows "Saved" toast (no close). Save only applies to current category. Switching categories reloads from disk. Config/Prompt use Claude Code / Codex tab bar.
+**Settings** — Left sidebar (General / Config / Prompt) + right content area. Cancel closes window; Save asks for confirmation before applying the current category, then shows a top saved toast and keeps the window open. Save only applies to current category. Switching categories reloads from disk. Config/Prompt use Claude Code / Codex tab bar.
 
 - **General** — Theme (System/Light/Dark), Sync Interval (10–60s/Never), Keep in Background toggle, Launch at Login toggle
 - **Config** — TextEditor for `~/.claude/settings.json` (JSON validated on save) and `~/.codex/config.toml`; shows "File not found" if missing

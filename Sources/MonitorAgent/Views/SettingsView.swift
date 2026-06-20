@@ -16,6 +16,29 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         case .prompt: return "text.bubble"
         }
     }
+
+    var saveConfirmationTitle: String {
+        "Save \(rawValue) settings?"
+    }
+
+    var saveConfirmationMessage: String {
+        "Apply changes to \(rawValue) settings."
+    }
+
+    var saveSuccessMessage: String {
+        "\(rawValue) settings saved."
+    }
+}
+
+enum SaveSuccessToastPlacement {
+    static let alignment: Alignment = .top
+    static let edge: Edge = .top
+    static let padding: CGFloat = 16
+}
+
+enum SaveSuccessToastStyle {
+    static let backgroundColorName = "green"
+    static let backgroundColor = Color.green
 }
 
 // MARK: - Settings View
@@ -49,9 +72,12 @@ struct SettingsView: View {
     @State private var configTab: AppSourceTab = .claude
     @State private var promptTab: AppSourceTab = .claude
 
-    // Save error alert
+    // Save alerts / toast
     @State private var showSaveError: Bool = false
     @State private var saveErrorMessage: String = ""
+    @State private var showSaveConfirmation: Bool = false
+    @State private var showSaveSuccess: Bool = false
+    @State private var saveSuccessMessage: String = ""
 
     var body: some View {
         HStack(spacing: 0) {
@@ -131,7 +157,7 @@ struct SettingsView: View {
                     .keyboardShortcut(.cancelAction)
 
                     Button {
-                        saveCurrentCategory()
+                        showSaveConfirmation = true
                     } label: {
                         Text("Save").frame(minWidth: 48)
                     }
@@ -143,6 +169,21 @@ struct SettingsView: View {
             }
         }
         .frame(minWidth: 680, minHeight: 460)
+        .overlay(alignment: SaveSuccessToastPlacement.alignment) {
+            if showSaveSuccess {
+                Text(saveSuccessMessage)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(
+                        Capsule()
+                            .fill(SaveSuccessToastStyle.backgroundColor)
+                    )
+                    .padding(.top, SaveSuccessToastPlacement.padding)
+                    .transition(.opacity.combined(with: .move(edge: SaveSuccessToastPlacement.edge)))
+            }
+        }
         .onAppear {
             selectedCategory = initialCategory
             loadCategory(initialCategory)
@@ -154,6 +195,14 @@ struct SettingsView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(saveErrorMessage)
+        }
+        .alert(selectedCategory.saveConfirmationTitle, isPresented: $showSaveConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                saveCurrentCategory()
+            }
+        } message: {
+            Text(selectedCategory.saveConfirmationMessage)
         }
     }
 
@@ -228,7 +277,19 @@ struct SettingsView: View {
             }
         }
 
-        NSApp.keyWindow?.close()
+        showSaveSuccessToast()
+    }
+
+    private func showSaveSuccessToast() {
+        saveSuccessMessage = selectedCategory.saveSuccessMessage
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showSaveSuccess = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                showSaveSuccess = false
+            }
+        }
     }
 
     // MARK: - File I/O Helpers
