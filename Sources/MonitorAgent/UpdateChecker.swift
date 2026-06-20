@@ -54,6 +54,17 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
     // MARK: - Public
 
     func checkForUpdates(silent: Bool) {
+        guard currentVersion != nil else {
+            if !silent {
+                showResult(
+                    title: "Update check unavailable",
+                    detail: "Update checks are available for installed app builds only.",
+                    primary: ("OK", #selector(close))
+                )
+            }
+            return
+        }
+
         if silent {
             guard !isChecking else { return }
             let last = UserDefaults.standard.object(forKey: lastCheckKey) as? Date
@@ -94,7 +105,7 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
             if silent { closeWindow(); return }
             showResult(
                 title: "You're up to date",
-                detail: "MonitorAgent \(currentVersion) is the latest version.",
+                detail: "MonitorAgent \(currentVersion ?? AppVersion.display) is the latest version.",
                 primary: ("OK", #selector(close))
             )
         case .failure(let error):
@@ -404,17 +415,10 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
 
     // MARK: - Version Comparison
 
-    private var currentVersion: String { AppVersion.current }
+    private var currentVersion: String? { AppVersion.comparable }
 
     private func isNewer(_ remote: String) -> Bool {
-        let r = remote.split(separator: ".").compactMap { Int($0) }
-        let c = currentVersion.split(separator: ".").compactMap { Int($0) }
-        for i in 0..<max(r.count, c.count) {
-            let rv = i < r.count ? r[i] : 0
-            let cv = i < c.count ? c[i] : 0
-            if rv != cv { return rv > cv }
-        }
-        return false
+        VersionComparison.isRemoteVersionNewer(remote, than: currentVersion)
     }
 
     // MARK: - Errors
@@ -427,5 +431,22 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
             case .noAsset:         return "No downloadable asset found in the release."
             }
         }
+    }
+}
+
+enum VersionComparison {
+    static func isRemoteVersionNewer(_ remote: String, than current: String?) -> Bool {
+        guard let current else { return false }
+
+        let r = remote.split(separator: ".").compactMap { Int($0) }
+        let c = current.split(separator: ".").compactMap { Int($0) }
+        guard !r.isEmpty, !c.isEmpty else { return false }
+
+        for i in 0..<max(r.count, c.count) {
+            let rv = i < r.count ? r[i] : 0
+            let cv = i < c.count ? c[i] : 0
+            if rv != cv { return rv > cv }
+        }
+        return false
     }
 }

@@ -61,7 +61,7 @@ Sources/MonitorAgent/
 │   ├── ClaudeLogParser.swift      # Stateless: line Data → ParsedRecord?
 │   └── CodexLogParser.swift       # Stateful: line Data + CodexParseContext → ParsedRecord?
 └── Views/
-    ├── AboutView.swift            # About window (app icon, version, GitHub link) + AppVersion constant
+    ├── AboutView.swift            # About window (app icon, bundle version, GitHub link)
     ├── PopoverView.swift          # Panel container (620px, white 98%, rounded 12pt, light mode)
     ├── FilterBar.swift            # App toggle (All/Claude Code/Codex) + time range picker
     ├── SettingsView.swift         # Sidebar settings: General / Config / Prompt categories
@@ -78,7 +78,7 @@ Sources/MonitorAgent/
 
 1. **FilterBar** — `[All | Claude Code | Codex]` segmented + `[Today ▾]` time picker
 
-**About** — App icon (AppIcon.icns), name, tagline, version (`AppVersion.current`), GitHub button
+**About** — App icon (AppIcon.icns), name, tagline, bundle version (`AppVersion.display`), GitHub button
 
 **Settings** — Left sidebar (General / Config / Prompt) + right content area. Cancel closes window; Save shows "Saved" toast (no close). Save only applies to current category. Switching categories reloads from disk. Config/Prompt use Claude Code / Codex tab bar.
 

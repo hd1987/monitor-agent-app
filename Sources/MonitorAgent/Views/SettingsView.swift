@@ -367,10 +367,13 @@ struct GeneralSettingsView: View {
 
             SettingsRow(
                 title: "Launch at Login",
-                description: "Automatically start MonitorAgent when you log in."
+                description: SyncSettings.shared.canControlLaunchAtLogin
+                    ? "Automatically start MonitorAgent when you log in."
+                    : "Available only when running MonitorAgent from the installed app."
             ) {
                 Toggle("", isOn: $draftLaunchAtLogin)
                     .toggleStyle(.switch)
+                    .disabled(!SyncSettings.shared.canControlLaunchAtLogin)
             }
         }
         .padding(20)
