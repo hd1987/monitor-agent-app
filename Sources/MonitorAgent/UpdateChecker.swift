@@ -7,20 +7,15 @@ struct RestartCommand {
 }
 
 enum RestartLauncher {
-    static func makeCommand(
-        appURL: URL,
-        delay: TimeInterval,
-        processID: Int32 = ProcessInfo.processInfo.processIdentifier
-    ) -> RestartCommand {
+    static func makeCommand(appURL: URL, delay: TimeInterval) -> RestartCommand {
         let delayValue = String(format: "%.1f", delay)
         let appPath = shellQuoted(appURL.path)
+        let launchScript = "/bin/sleep \(delayValue); /usr/bin/open -n \(appPath)"
         return RestartCommand(
             executablePath: "/bin/sh",
             arguments: [
                 "-c",
-                "/bin/sleep \(delayValue); " +
-                "while /bin/kill -0 \(processID) 2>/dev/null; do /bin/sleep 0.1; done; " +
-                "/usr/bin/open -n \(appPath)"
+                "/usr/bin/nohup /bin/sh -c \(shellQuoted(launchScript)) >/dev/null 2>&1 &"
             ]
         )
     }
