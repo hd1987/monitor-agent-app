@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-06-20
+
 ### Added
 - Save confirmation dialog for General, Config, and Prompt settings pages
 - Green top saved toast after confirmed settings saves
