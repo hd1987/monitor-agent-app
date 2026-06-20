@@ -21,4 +21,17 @@ final class AppVersionTests: XCTestCase {
         XCTAssertFalse(VersionComparison.isRemoteVersionNewer("0.2.2", than: "0.2.2"))
         XCTAssertTrue(VersionComparison.isRemoteVersionNewer("0.2.3", than: "0.2.2"))
     }
+
+    func testRestartCommandWaitsForCurrentProcessAndLaunchesNewInstance() {
+        let command = RestartLauncher.makeCommand(
+            appURL: URL(fileURLWithPath: "/Applications/MonitorAgent.app"),
+            delay: 0.5,
+            processID: 12345
+        )
+
+        XCTAssertEqual(command.executablePath, "/bin/sh")
+        XCTAssertEqual(command.arguments.first, "-c")
+        XCTAssertTrue(command.arguments[1].contains("/bin/kill -0 12345"))
+        XCTAssertTrue(command.arguments[1].contains("/usr/bin/open -n '/Applications/MonitorAgent.app'"))
+    }
 }
