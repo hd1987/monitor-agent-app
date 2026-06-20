@@ -6,12 +6,20 @@ final class DatabaseManager {
 
     private var dbQueue: DatabaseQueue?
 
-    private init() {
+    private convenience init() {
+        self.init(inMemory: false)
+    }
+
+    init(inMemory: Bool) {
         let dir = NSHomeDirectory() + "/.monitor-agent"
         let path = dir + "/monitor.db"
         do {
-            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-            dbQueue = try DatabaseQueue(path: path)
+            if inMemory {
+                dbQueue = try DatabaseQueue()
+            } else {
+                try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+                dbQueue = try DatabaseQueue(path: path)
+            }
             try setupSchema()
         } catch {
             print("Failed to open db: \(error)")
@@ -191,6 +199,65 @@ final class DatabaseManager {
                 """, arguments: StatementArguments(args))
             return rows.map { DayActivity(date: $0["day"], count: $0["cnt"]) }
         }) ?? []
+    }
+
+    func fetchHourlyTokenUsage(app: AppFilter, date: String) -> [HourlyTokenUsage] {
+        guard let db = dbQueue else { return [] }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        guard
+            let startDate = formatter.date(from: date),
+            let endDate = Calendar.current.date(byAdding: .day, value: 1, to: startDate)
+        else {
+            return []
+        }
+
+        var conditions = ["created_at >= ?", "created_at < ?"]
+        var args: [any DatabaseValueConvertible] = [
+            Int(startDate.timeIntervalSince1970),
+            Int(endDate.timeIntervalSince1970),
+        ]
+
+        if let dbValues = app.dbValues {
+            let placeholders = dbValues.map { _ in "?" }.joined(separator: ", ")
+            conditions.append("app_type IN (\(placeholders))")
+            args.append(contentsOf: dbValues)
+        }
+
+        let whereSQL = "WHERE " + conditions.joined(separator: " AND ")
+        var values = (0..<24).map {
+            HourlyTokenUsage(hour: $0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0)
+        }
+
+        guard let rows = try? db.read({ db in
+            try Row.fetchAll(db, sql: """
+                SELECT
+                    CAST(strftime('%H', created_at, 'unixepoch', 'localtime') AS INTEGER) AS hour,
+                    COALESCE(SUM(input_tokens), 0) AS input_tk,
+                    COALESCE(SUM(output_tokens), 0) AS output_tk,
+                    COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tk
+                FROM request_logs \(whereSQL)
+                GROUP BY hour ORDER BY hour
+                """, arguments: StatementArguments(args))
+        }) else {
+            return values
+        }
+
+        for row in rows {
+            let hour: Int = row["hour"]
+            guard values.indices.contains(hour) else { continue }
+            values[hour] = HourlyTokenUsage(
+                hour: hour,
+                inputTokens: row["input_tk"],
+                outputTokens: row["output_tk"],
+                cacheReadTokens: row["cache_read_tk"]
+            )
+        }
+
+        return values
     }
 
     func fetchModelDistribution(app: AppFilter, range: TimeRange) -> [ModelShare] {

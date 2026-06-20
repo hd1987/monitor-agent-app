@@ -1,3 +1,5 @@
+import AppKit
+import Charts
 import SwiftUI
 
 struct HeatmapView: View {
@@ -6,6 +8,7 @@ struct HeatmapView: View {
     @State private var hoveredCell: String?
     @State private var hoveredCount: Int = 0
     @State private var hoverAnchor: CGPoint = .zero
+    @State private var activityFrameInWindow: CGRect = .null
 
     private let rows = 7
     private let cellSpacing: CGFloat = 3
@@ -13,6 +16,9 @@ struct HeatmapView: View {
     private let hPadding: CGFloat = 16
     /// Panel width minus padding → available width for grid
     private var availableWidth: CGFloat { 620 - hPadding * 2 }
+    private var hasSelectedActivityTokenUsage: Bool {
+        store.hourlyTokenUsage.contains(where: \.hasTokenUsage)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -53,6 +59,7 @@ struct HeatmapView: View {
                                 RoundedRectangle(cornerRadius: 2)
                                     .fill(cellColor(count: entry.count, isPlaceholder: entry.isPlaceholder))
                                     .frame(width: cellSize, height: cellSize)
+                                    .contentShape(Rectangle())
                                     .background(GeometryReader { geo in
                                         Color.clear.preference(
                                             key: CellFrameKey.self,
@@ -61,6 +68,12 @@ struct HeatmapView: View {
                                                 : nil
                                         )
                                     })
+                                    .overlay {
+                                        if store.selectedActivityDate == entry.date && hasSelectedActivityTokenUsage {
+                                            RoundedRectangle(cornerRadius: 2)
+                                                .stroke(Color.accentColor, lineWidth: 1.5)
+                                        }
+                                    }
                                     .onHover { hovering in
                                         if !entry.isPlaceholder {
                                             if hovering {
@@ -69,6 +82,11 @@ struct HeatmapView: View {
                                             } else if hoveredCell == entry.date {
                                                 hoveredCell = nil
                                             }
+                                        }
+                                    }
+                                    .onTapGesture {
+                                        if !entry.isPlaceholder && entry.count > 0 {
+                                            store.selectActivityDate(entry.date)
                                         }
                                     }
                             }
@@ -109,9 +127,37 @@ struct HeatmapView: View {
                         .frame(width: CGFloat(label.span) * (cellSize + cellSpacing), alignment: .leading)
                 }
             }
+
+            if let selectedDate = store.selectedActivityDate, hasSelectedActivityTokenUsage {
+                ActivityTokenChart(date: selectedDate, usage: store.hourlyTokenUsage)
+                    .environmentObject(theme)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
         .padding(.horizontal, hPadding)
         .padding(.vertical, 12)
+        .background(
+            ZStack {
+                WindowFrameReader { frame in
+                    activityFrameInWindow = frame
+                }
+                ActivityChartClickMonitor(
+                    isActive: store.selectedActivityDate != nil && hasSelectedActivityTokenUsage,
+                    excludedFrames: [activityFrameInWindow],
+                    onOutsideClick: {
+                        store.clearSelectedActivityDate()
+                    }
+                )
+            }
+        )
+        .onChange(of: store.selectedActivityDate) { _, selectedDate in
+            if selectedDate == nil {
+                activityFrameInWindow = .null
+            }
+        }
+        .onChange(of: store.selectedYear) { _, _ in
+            store.clearSelectedActivityDate()
+        }
     }
 
     // MARK: - Tooltip
@@ -277,5 +323,233 @@ private struct CellFrameKey: PreferenceKey {
     static var defaultValue: CGRect? = nil
     static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) {
         value = nextValue() ?? value
+    }
+}
+
+// MARK: - Activity Token Chart
+
+private struct ActivityTokenChart: View {
+    @EnvironmentObject var theme: ThemeManager
+    let date: String
+    let usage: [HourlyTokenUsage]
+
+    private var points: [TokenSeriesPoint] {
+        usage.flatMap { item in
+            [
+                TokenSeriesPoint(metric: "Input Tokens", hour: item.hour, value: Double(item.inputTokens)),
+                TokenSeriesPoint(metric: "Output Tokens", hour: item.hour, value: Double(item.outputTokens)),
+                TokenSeriesPoint(metric: "Cache Read", hour: item.hour, value: Double(item.cacheReadTokens)),
+            ]
+        }
+    }
+
+    private var maxValue: Double {
+        max(points.map(\.value).max() ?? 0, 1)
+    }
+
+    private var totalTokens: Int64 {
+        usage.reduce(Int64(0)) { total, item in
+            total + item.inputTokens + item.outputTokens + item.cacheReadTokens
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(chartTitle)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text(formatTokens(totalTokens))
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+
+            Chart(points) { point in
+                LineMark(
+                    x: .value("Hour", point.hour),
+                    y: .value("Tokens", point.value)
+                )
+                .interpolationMethod(.catmullRom)
+                .foregroundStyle(by: .value("Metric", point.metric))
+            }
+            .chartForegroundStyleScale([
+                "Input Tokens": Color.blue,
+                "Output Tokens": Color.green,
+                "Cache Read": Color.orange,
+            ])
+            .chartXScale(domain: 0...23)
+            .chartYScale(domain: 0...maxValue)
+            .chartXAxis {
+                AxisMarks(values: [0, 6, 12, 18, 23]) { value in
+                    AxisGridLine()
+                    AxisTick()
+                    AxisValueLabel {
+                        if let hour = value.as(Int.self) {
+                            Text("\(hour)")
+                        }
+                    }
+                }
+            }
+            .chartLegend(position: .bottom, alignment: .leading)
+            .frame(height: 128)
+        }
+        .padding(10)
+        .background(theme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(theme.cardBorder, lineWidth: 0.5)
+        )
+        .accessibilityLabel("Hourly token usage for \(date)")
+    }
+
+    private var chartTitle: String {
+        let input = DateFormatter()
+        input.locale = Locale(identifier: "en_US_POSIX")
+        input.dateFormat = "yyyy-MM-dd"
+
+        let output = DateFormatter()
+        output.setLocalizedDateFormatFromTemplate("MMM d, yyyy")
+
+        guard let parsedDate = input.date(from: date) else { return date }
+        return output.string(from: parsedDate)
+    }
+}
+
+private struct TokenSeriesPoint: Identifiable {
+    let metric: String
+    let hour: Int
+    let value: Double
+    var id: String { "\(metric)-\(hour)" }
+}
+
+// MARK: - Outside Click Handling
+
+private struct WindowFrameReader: NSViewRepresentable {
+    let onChange: (CGRect) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        FrameReportingView(onChange: onChange)
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        guard let view = nsView as? FrameReportingView else { return }
+        view.onChange = onChange
+        view.reportFrame()
+    }
+}
+
+private final class FrameReportingView: NSView {
+    var onChange: (CGRect) -> Void
+
+    init(onChange: @escaping (CGRect) -> Void) {
+        self.onChange = onChange
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        reportFrame()
+    }
+
+    override func layout() {
+        super.layout()
+        reportFrame()
+    }
+
+    func reportFrame() {
+        guard let superview else { return }
+        let frame = convert(bounds, to: nil)
+        let superviewFrame = superview.convert(superview.bounds, to: nil)
+        let resolvedFrame = frame.isEmpty ? superviewFrame : frame
+        DispatchQueue.main.async {
+            self.onChange(resolvedFrame)
+        }
+    }
+}
+
+private struct ActivityChartClickMonitor: NSViewRepresentable {
+    let isActive: Bool
+    let excludedFrames: [CGRect]
+    let onOutsideClick: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        context.coordinator.update(
+            isActive: isActive,
+            excludedFrames: excludedFrames,
+            onOutsideClick: onOutsideClick,
+            owner: view
+        )
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.update(
+            isActive: isActive,
+            excludedFrames: excludedFrames,
+            onOutsideClick: onOutsideClick,
+            owner: nsView
+        )
+    }
+
+    final class Coordinator {
+        private var monitor: Any?
+        private weak var owner: NSView?
+        private var isActive = false
+        private var excludedFrames: [CGRect] = []
+        private var onOutsideClick: () -> Void = {}
+
+        deinit {
+            removeMonitor()
+        }
+
+        func update(
+            isActive: Bool,
+            excludedFrames: [CGRect],
+            onOutsideClick: @escaping () -> Void,
+            owner: NSView
+        ) {
+            self.isActive = isActive
+            self.excludedFrames = excludedFrames.filter { !$0.isNull && !$0.isEmpty }
+            self.onOutsideClick = onOutsideClick
+            self.owner = owner
+
+            if monitor == nil {
+                monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+                    self?.handle(event) ?? event
+                }
+            }
+        }
+
+        private func handle(_ event: NSEvent) -> NSEvent {
+            guard isActive, event.window === owner?.window else { return event }
+            let point = event.locationInWindow
+            if excludedFrames.contains(where: { $0.contains(point) }) {
+                return event
+            }
+
+            DispatchQueue.main.async {
+                self.onOutsideClick()
+            }
+            return event
+        }
+
+        private func removeMonitor() {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+            }
+            monitor = nil
+        }
     }
 }
