@@ -6,6 +6,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-06-20
+
+### Added
+- Date range dropdown with one-row presets and calendar-based single-day or range selection
+
+### Changed
+- Enlarged calendar day hit targets in the date range dropdown
+- Removed the border from the date range button
+- Aligned the date range dropdown arrow closer to the end date
+- Removed the selected date summary from the bottom of the date range dropdown
+- Reduced the date range dropdown width and realigned its arrow to the start of the end date
+- Shifted the date range dropdown lower and reduced its compact calendar size
+
+### Fixed
+- Prevented the date range dropdown from jittering when selecting preset ranges
+- Show a single date in the filter bar when a custom range starts and ends on the same day
+- Clear calendar selection highlights when choosing preset ranges
+- Show `Today` in the filter bar after selecting the Today preset
+
 ## [0.2.4] - 2026-06-20
 
 ### Fixed

@@ -119,28 +119,18 @@ final class DatabaseManager {
             args.append(contentsOf: dbValues)
         }
 
-        if let start = startTimestamp(for: range) {
+        let bounds = range.bounds()
+        if let start = bounds.start {
             conditions.append("created_at >= ?")
             args.append(start)
+        }
+        if let end = bounds.end {
+            conditions.append("created_at < ?")
+            args.append(end)
         }
 
         let sql = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
         return (sql, args)
-    }
-
-    private func startTimestamp(for range: TimeRange) -> Int? {
-        let cal = Calendar.current
-        let now = Date()
-        switch range {
-        case .today:
-            return Int(cal.startOfDay(for: now).timeIntervalSince1970)
-        case .last7:
-            return Int(cal.date(byAdding: .day, value: -6, to: cal.startOfDay(for: now))!.timeIntervalSince1970)
-        case .last30:
-            return Int(cal.date(byAdding: .day, value: -29, to: cal.startOfDay(for: now))!.timeIntervalSince1970)
-        case .allTime:
-            return nil
-        }
     }
 
     // MARK: - Queries

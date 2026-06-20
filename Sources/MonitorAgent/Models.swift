@@ -19,13 +19,129 @@ enum AppFilter: String, CaseIterable, Identifiable {
     }
 }
 
-enum TimeRange: String, CaseIterable, Identifiable {
-    case today = "Today"
-    case last7 = "7 Days"
-    case last30 = "30 Days"
-    case allTime = "All Time"
+struct TimeBounds: Equatable {
+    let start: Int?
+    let end: Int?
+}
 
-    var id: String { rawValue }
+struct CalendarRangeSelection: Equatable {
+    var start: Date?
+    var end: Date?
+    private var isComplete = false
+
+    init(start: Date? = nil, end: Date? = nil) {
+        self.start = start
+        self.end = end
+        self.isComplete = start != nil && end != nil
+    }
+
+    mutating func select(_ date: Date, calendar: Calendar = .current) {
+        let day = calendar.startOfDay(for: date)
+
+        if start == nil || isComplete {
+            start = day
+            end = day
+            isComplete = false
+            return
+        }
+
+        guard let currentStart = start else { return }
+        start = min(currentStart, day)
+        end = max(currentStart, day)
+        isComplete = true
+    }
+}
+
+enum TimeRange: Equatable, Identifiable {
+    case today
+    case last7
+    case last30
+    case allTime
+    case custom(start: Date, end: Date)
+
+    static let presets: [TimeRange] = [.today, .last7, .last30, .allTime]
+
+    var id: String {
+        switch self {
+        case .today: return "today"
+        case .last7: return "last7"
+        case .last30: return "last30"
+        case .allTime: return "allTime"
+        case .custom(let start, let end):
+            return "custom-\(Int(start.timeIntervalSince1970))-\(Int(end.timeIntervalSince1970))"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .today: return "Today"
+        case .last7: return "7 Days"
+        case .last30: return "30 Days"
+        case .allTime: return "All Time"
+        case .custom: return "Custom"
+        }
+    }
+
+    func bounds(now: Date = Date(), calendar: Calendar = .current) -> TimeBounds {
+        let today = calendar.startOfDay(for: now)
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+
+        switch self {
+        case .today:
+            return TimeBounds(
+                start: Int(today.timeIntervalSince1970),
+                end: Int(tomorrow.timeIntervalSince1970)
+            )
+        case .last7:
+            let start = calendar.date(byAdding: .day, value: -6, to: today)!
+            return TimeBounds(
+                start: Int(start.timeIntervalSince1970),
+                end: Int(tomorrow.timeIntervalSince1970)
+            )
+        case .last30:
+            let start = calendar.date(byAdding: .day, value: -29, to: today)!
+            return TimeBounds(
+                start: Int(start.timeIntervalSince1970),
+                end: Int(tomorrow.timeIntervalSince1970)
+            )
+        case .allTime:
+            return TimeBounds(start: nil, end: nil)
+        case .custom(let start, let end):
+            let normalizedStart = calendar.startOfDay(for: min(start, end))
+            let normalizedEnd = calendar.startOfDay(for: max(start, end))
+            let exclusiveEnd = calendar.date(byAdding: .day, value: 1, to: normalizedEnd)!
+            return TimeBounds(
+                start: Int(normalizedStart.timeIntervalSince1970),
+                end: Int(exclusiveEnd.timeIntervalSince1970)
+            )
+        }
+    }
+
+    func displayTitle(now: Date = Date(), formatter: DateFormatter, calendar: Calendar = .current) -> String {
+        switch self {
+        case .today:
+            return title
+        case .last7, .last30:
+            let bounds = bounds(now: now, calendar: calendar)
+            guard
+                let start = bounds.start,
+                let end = bounds.end,
+                let endDate = calendar.date(byAdding: .day, value: -1, to: Date(timeIntervalSince1970: TimeInterval(end)))
+            else {
+                return title
+            }
+            return "\(formatter.string(from: Date(timeIntervalSince1970: TimeInterval(start)))) - \(formatter.string(from: endDate))"
+        case .allTime:
+            return title
+        case .custom(let start, let end):
+            let normalizedStart = min(start, end)
+            let normalizedEnd = max(start, end)
+            if calendar.isDate(normalizedStart, inSameDayAs: normalizedEnd) {
+                return formatter.string(from: normalizedStart)
+            }
+            return "\(formatter.string(from: normalizedStart)) - \(formatter.string(from: normalizedEnd))"
+        }
+    }
 }
 
 // MARK: - Display Data
