@@ -33,7 +33,7 @@ struct AboutView: View {
             HStack(spacing: 8) {
                 Text("Version")
                     .foregroundStyle(.secondary)
-                Text(AppVersion.current)
+                Text(AppVersion.display)
             }
             .font(.system(size: 13))
 
@@ -57,7 +57,26 @@ struct AboutView: View {
     }
 }
 
-/// Single source of truth for app version — update alongside git tag at release
+/// Reads the installed app version from the bundle created during release.
 enum AppVersion {
-    static let current = "0.2.1"
+    static var display: String {
+        displayVersion(infoDictionary: Bundle.main.infoDictionary ?? [:])
+    }
+
+    static var comparable: String? {
+        comparableVersion(infoDictionary: Bundle.main.infoDictionary ?? [:])
+    }
+
+    static func displayVersion(infoDictionary: [String: Any]) -> String {
+        comparableVersion(infoDictionary: infoDictionary) ?? "Development"
+    }
+
+    static func comparableVersion(infoDictionary: [String: Any]) -> String? {
+        guard let version = infoDictionary["CFBundleShortVersionString"] as? String else {
+            return nil
+        }
+
+        let trimmed = version.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 }
