@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-06-20
+
 ### Added
 - Date range dropdown with one-row presets and calendar-based single-day or range selection
 
