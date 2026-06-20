@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Fixed
+- Prevent debug executable runs from registering MonitorAgent as a login item
+
 ## [0.2.2] - 2026-06-20
 
 ### Fixed

@@ -15,5 +15,9 @@ let package = Package(
             ],
             path: "Sources/MonitorAgent"
         ),
+        .testTarget(
+            name: "MonitorAgentTests",
+            dependencies: ["MonitorAgent"]
+        ),
     ]
 )

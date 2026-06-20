@@ -37,16 +37,27 @@ final class SyncSettings: ObservableObject {
 
     /// Launch at login via SMAppService (only works for .app bundles)
     var launchAtLogin: Bool {
-        get { SMAppService.mainApp.status == .enabled }
+        get {
+            guard canControlLaunchAtLogin else { return false }
+            return SMAppService.mainApp.status == .enabled
+        }
         set {
             objectWillChange.send()
+            guard canControlLaunchAtLogin else { return }
             try? newValue ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister()
         }
     }
 
     /// Whether the app is running as a proper .app bundle (SMAppService requires it)
     var canControlLaunchAtLogin: Bool {
-        Bundle.main.bundleIdentifier != nil && Bundle.main.bundlePath.hasSuffix(".app")
+        Self.canRegisterLaunchAtLogin(
+            bundlePath: Bundle.main.bundlePath,
+            bundleIdentifier: Bundle.main.bundleIdentifier
+        )
+    }
+
+    static func canRegisterLaunchAtLogin(bundlePath: String, bundleIdentifier: String?) -> Bool {
+        bundleIdentifier != nil && bundlePath.hasSuffix(".app")
     }
 
     private init() {
