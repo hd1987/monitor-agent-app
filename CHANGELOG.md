@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-06-20
+
 ### Fixed
 - Restart after update now waits for the old process to exit before launching the new app bundle
 
