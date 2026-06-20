@@ -63,7 +63,7 @@ Sources/MonitorAgent/
 └── Views/
     ├── AboutView.swift            # About window (app icon, bundle version, GitHub link)
     ├── PopoverView.swift          # Panel container (620px, white 98%, rounded 12pt, light mode)
-    ├── FilterBar.swift            # App toggle (All/Claude Code/Codex) + time range picker
+    ├── FilterBar.swift            # App toggle (All/Claude Code/Codex) + date range dropdown
     ├── SettingsView.swift         # Sidebar settings: General / Config / Prompt categories
     ├── StatCardsView.swift        # 6 stat cards in HStack
     ├── HeatmapView.swift          # Year heatmap grid + hover tooltip overlay
@@ -76,7 +76,7 @@ Sources/MonitorAgent/
 
 **Panel** (top → bottom):
 
-1. **FilterBar** — `[All | Claude Code | Codex]` segmented + `[Today ▾]` time picker
+1. **FilterBar** — `[All | Claude Code | Codex]` segmented + right-aligned date range dropdown. The dropdown shows `Today | 7 Days | 30 Days | All Time` in one row, with a calendar grid below for single-day or start/end range selection.
 
 **About** — App icon (AppIcon.icns), name, tagline, bundle version (`AppVersion.display`), GitHub button
 
