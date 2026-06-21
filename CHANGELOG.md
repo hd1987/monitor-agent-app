@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ### Changed
 - Limit General sync interval choices to 10s, 30s, 60s, and Never
+- Refresh project documentation for the current settings UI, Activity drill-down, Codex sync behavior, and release workflow
 
 ## [0.2.12] - 2026-06-21
 

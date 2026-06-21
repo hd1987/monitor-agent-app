@@ -8,7 +8,11 @@ macOS menu bar app that displays usage statistics for Claude Code and Codex.
 
 - Swift 5.10 / SwiftUI + AppKit / macOS 14+
 - SQLite via GRDB (Swift Package Manager)
-- Build: `swift build` / Run: `swift run MonitorAgent &` / Stop: `pkill -f MonitorAgent`
+- Build: `swift build`
+- Test: `swift test`
+- Release build: `swift build -c release`
+- Run locally: `swift run MonitorAgent &`
+- Stop locally: `pkill -f MonitorAgent`
 
 ## Data Source
 
@@ -77,22 +81,22 @@ Sources/MonitorAgent/
 
 ## UI Layout
 
-**Menu Bar**: Robot icon (SVG template image). Left-click → panel (triggers sync). Right-click → About / General / Config / Prompt / Check for Updates / Quit. Activation policy `.accessory` (no Dock icon). Re-clicking app icon shows panel via `applicationShouldHandleReopen`.
+**Menu Bar**: Robot icon (template image from bundled SVG). Left-click opens the panel and triggers an on-demand sync. Right-click opens About / General / Config / Prompt / Check for Updates / Quit. Activation policy is `.accessory` (no Dock icon). Re-clicking the app icon shows the panel via `applicationShouldHandleReopen`.
 
 **Panel** (top → bottom):
 
-1. **FilterBar** — `[All | Claude Code | Codex]` segmented + right-aligned date range dropdown. The dropdown shows `Today | 7 Days | 30 Days | All Time` in one row, with a calendar grid below for single-day or start/end range selection.
+1. **FilterBar** — `[All | Claude Code | Codex]` segmented control plus right-aligned date range dropdown. Presets are `Today | 7 Days | 30 Days | All Time`; the calendar supports single-day and start/end range selection.
+2. **StatCards** — `Requests | Sessions | Input Tokens | Output Tokens | Cache Read | Cache Hit`.
+3. **Activity** — GitHub-style heatmap with `Default` trailing-365-day mode and per-year mode. Hover shows the daily request count. Days with no activity are not selectable. Clicking an active day filters the whole panel to that date and opens a fixed-height hourly token chart for Input Tokens, Output Tokens, and Cache Read when token data exists. Clicking outside Activity hides the chart without restoring the previous date range; switching All / Claude Code / Codex keeps the chart open when data remains available.
+4. **ModelDistribution** — stacked proportion bar plus three-column legend for top models.
 
-**About** — App icon (AppIcon.icns), name, tagline, bundle version (`AppVersion.display`), GitHub button
+**About** — App icon (`AppIcon.icns`), name, tagline, bundle version from `AppVersion.display`, GitHub button.
 
-**Settings** — Left sidebar (General / Config / Prompt) + right content area. Cancel closes window; Save asks for confirmation before applying the current category, then shows a top saved toast and keeps the window open. Save only applies to current category. Switching categories reloads from disk. Config/Prompt use Claude Code / Codex tab bar.
+**Settings** — Left sidebar (General / Config / Prompt) plus right content area. Cancel closes the window. Save asks for confirmation before applying the current category, then keeps the window open and shows a top green success toast. Save only applies to the current category. Switching categories reloads from disk. Config/Prompt use a Claude Code / Codex tab bar.
 
 - **General** — Theme (System/Light/Dark), Sync Interval (10s/30s/60s/Never), Keep in Background toggle, Launch at Login toggle
 - **Config** — TextEditor for `~/.claude/settings.json` (JSON validated on save) and `~/.codex/config.toml`; shows "File not found" if missing
 - **Prompt** — TextEditor for `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`; shows "File not found" if missing
-2. **StatCards** — `Requests | Sessions | Input Tokens | Output Tokens | Cache Read | Cache Hit`
-3. **Heatmap** — GitHub-style year grid, auto-sized cells, year switcher, hover tooltip ("6 contributions on May 21st"). Days with no activity are not selectable. Clicking a day changes the whole panel to that single-day range and expands a fixed-height drawer with an hourly line chart for Input Tokens, Output Tokens, and Cache Read when token data exists; clicking outside the Activity area hides the chart without restoring the previous range. The app filter segmented control is excluded from chart dismissal so All / Claude Code / Codex switching keeps the selected-day chart open when data remains available.
-4. **ModelDistribution** — stacked color bar + legend (top 6 models, 3 columns)
 
 ## Branches
 
@@ -102,9 +106,9 @@ Sources/MonitorAgent/
 ## Release
 
 See [RELEASE.md](RELEASE.md) for full workflow. Summary:
-1. Agent: update CHANGELOG → commit → tag
-2. You: push develop + tags → create PR → merge
-3. GitHub Actions: build → sign → package .app → create Release
+1. Agent: verify → move `[Unreleased]` entries → commit → tag on `develop`
+2. You: push `develop` + tags, create PR, merge `develop` into `main`
+3. GitHub Actions: release only after `main` receives a reachable unreleased tag
 
 ## Conventions
 
@@ -112,3 +116,4 @@ See [RELEASE.md](RELEASE.md) for full workflow. Summary:
 - Code comments: English only
 - Update CHANGELOG.md `[Unreleased]` section with every code change
 - Update this file when architecture, schema, UI layout, or project structure changes
+- Do not call a release published until the tagged commit is on `main` and the GitHub Release workflow completes
