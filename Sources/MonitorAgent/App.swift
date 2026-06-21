@@ -1,6 +1,24 @@
 import SwiftUI
 import AppKit
 import Combine
+import Darwin
+
+enum ForceTermination {
+    static let fallbackDelay: TimeInterval = 0.2
+
+    static func scheduleFallbackExit(
+        scheduler: @escaping (TimeInterval, @escaping () -> Void) -> Void = { delay, block in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { block() }
+        },
+        exit: @escaping (Int32) -> Void = { Darwin.exit($0) }
+    ) {
+        scheduler(fallbackDelay) { exit(0) }
+    }
+
+    static func exitImmediately(exit: (Int32) -> Void = { Darwin.exit($0) }) {
+        exit(0)
+    }
+}
 
 @main
 struct MonitorAgentApp: App {
@@ -250,6 +268,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func forceTerminate() {
         forceQuit = true
         NSApplication.shared.terminate(nil)
+        ForceTermination.scheduleFallbackExit()
     }
 
     @objc private func quitApp(_ sender: AnyObject?) {
