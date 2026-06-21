@@ -83,13 +83,16 @@ final class AppStore: ObservableObject {
     }
 
     func selectActivityDate(_ date: String) {
-        if selectedActivityDate == date {
-            clearSelectedActivityDate()
-            return
-        }
+        guard let range = TimeRange.activityDay(date) else { return }
 
         selectedActivityDate = date
+        timeRange = range
         loadHourlyTokenUsage(for: date)
+    }
+
+    func setTimeRangeFromFilter(_ range: TimeRange) {
+        clearSelectedActivityDate()
+        timeRange = range
     }
 
     func clearSelectedActivityDate() {

@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-06-21
+
+### Changed
+- Activity token charts now use a fixed-height drawer below the heatmap
+- Clicking an Activity day now filters the whole panel to that day while opening the token chart
+- Switching the app filter no longer dismisses the Activity token chart
+- Shared window frame tracking between Activity and filter controls
+- Kept Activity chart click-exclusion frame state local to the popover UI
+
 ## [0.2.8] - 2026-06-21
 
 ### Fixed

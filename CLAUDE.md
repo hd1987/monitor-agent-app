@@ -53,6 +53,7 @@ sync_state (
 Sources/MonitorAgent/
 ├── App.swift                      # NSStatusItem + FloatingPanel (borderless NSPanel)
 ├── AppStore.swift                 # ObservableObject, Combine filter → reload, selected activity detail, manages sync lifecycle
+├── ActivityTokenChartLayout.swift # Fixed layout constants for the Activity selected-day drawer
 ├── DatabaseManager.swift          # GRDB r/w, schema setup, all queries + insert/sync methods
 ├── Models.swift                   # AppFilter, TimeRange, UsageStats, DayActivity, HourlyTokenUsage, ParsedRecord, SyncState
 ├── SyncSettings.swift             # SyncInterval enum + UserDefaults persistence (default 30s)
@@ -66,7 +67,9 @@ Sources/MonitorAgent/
     ├── FilterBar.swift            # App toggle (All/Claude Code/Codex) + date range dropdown
     ├── SettingsView.swift         # Sidebar settings: General / Config / Prompt categories
     ├── StatCardsView.swift        # 6 stat cards in HStack
+    ├── ActivityTokenChartView.swift # Fixed-height selected-day hourly token chart
     ├── HeatmapView.swift          # Year heatmap grid + hover tooltip + selected-day token chart
+    ├── WindowFrameReader.swift    # Shared AppKit frame reporter for outside-click exclusions
     └── ModelDistributionView.swift # Stacked proportion bar + 3-col legend
 ```
 
@@ -86,7 +89,7 @@ Sources/MonitorAgent/
 - **Config** — TextEditor for `~/.claude/settings.json` (JSON validated on save) and `~/.codex/config.toml`; shows "File not found" if missing
 - **Prompt** — TextEditor for `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`; shows "File not found" if missing
 2. **StatCards** — `Requests | Sessions | Input Tokens | Output Tokens | Cache Read | Cache Hit`
-3. **Heatmap** — GitHub-style year grid, auto-sized cells, year switcher, hover tooltip ("6 contributions on May 21st"). Days with no activity are not selectable. Clicking a day expands an hourly line chart for Input Tokens, Output Tokens, and Cache Read when token data exists; clicking outside the Activity area hides it.
+3. **Heatmap** — GitHub-style year grid, auto-sized cells, year switcher, hover tooltip ("6 contributions on May 21st"). Days with no activity are not selectable. Clicking a day changes the whole panel to that single-day range and expands a fixed-height drawer with an hourly line chart for Input Tokens, Output Tokens, and Cache Read when token data exists; clicking outside the Activity area hides the chart without restoring the previous range. The app filter segmented control is excluded from chart dismissal so All / Claude Code / Codex switching keeps the selected-day chart open when data remains available.
 4. **ModelDistribution** — stacked color bar + legend (top 6 models, 3 columns)
 
 ## Branches
