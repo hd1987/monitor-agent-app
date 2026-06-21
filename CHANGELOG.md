@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Fixed
+- Old app instance now force-exits after update restart to prevent duplicate menu bar icons
+
 ## [0.2.7] - 2026-06-20
 
 ### Added

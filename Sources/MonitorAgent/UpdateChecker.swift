@@ -368,7 +368,7 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
             if let delegate = NSApplication.shared.delegate as? AppDelegate {
                 delegate.forceTerminate()
             } else {
-                NSApplication.shared.terminate(nil)
+                ForceTermination.exitImmediately()
             }
         } catch {
             showResult(title: "Restart failed", detail: error.localizedDescription,
