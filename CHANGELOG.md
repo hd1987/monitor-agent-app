@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Fixed
+- Normalize Codex input tokens by excluding cached input before calculating Input Tokens and Cache Hit
+
 ## [0.2.11] - 2026-06-21
 
 ### Fixed

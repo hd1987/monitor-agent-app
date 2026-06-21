@@ -58,11 +58,29 @@ final class CodexSyncStateTests: XCTestCase {
         let record = try XCTUnwrap(CodexLogParser.parse(lineData: nextTurn, context: &context))
 
         XCTAssertEqual(record.requestId, "codex:session-1:5")
-        XCTAssertEqual(record.inputTokens, 38_601)
+        XCTAssertEqual(record.inputTokens, 33_609)
         XCTAssertEqual(record.outputTokens, 701)
         XCTAssertEqual(record.cacheReadTokens, 4_992)
         XCTAssertEqual(context.lastTotalIn, 175_245)
         XCTAssertEqual(context.lastTotalOut, 3_461)
+    }
+
+    func testCodexInputTokensExcludeCachedInputTokens() throws {
+        var context = CodexParseContext(sessionId: "session-1")
+        let line = codexTokenCountLine(
+            timestamp: "2026-06-21T14:04:17.347Z",
+            totalInput: 18_040,
+            totalOutput: 260,
+            lastInput: 18_040,
+            lastOutput: 260,
+            lastCacheRead: 7_040
+        )
+
+        let record = try XCTUnwrap(CodexLogParser.parse(lineData: line, context: &context))
+
+        XCTAssertEqual(record.inputTokens, 11_000)
+        XCTAssertEqual(record.cacheReadTokens, 7_040)
+        XCTAssertEqual(record.outputTokens, 260)
     }
 
     private func codexTokenCountLine(

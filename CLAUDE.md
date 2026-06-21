@@ -17,7 +17,7 @@ Self-owned JSONL parsing, no third-party dependency.
 | Source | Path | Parser |
 |--------|------|--------|
 | Claude Code | `~/.claude/projects/**/*.jsonl` | `ClaudeLogParser` — extracts `message.usage` from `type == "assistant"` lines |
-| Codex | `~/.codex/sessions/**/rollout-*.jsonl` + `~/.codex/archived_sessions/rollout-*.jsonl` | `CodexLogParser` — stateful, extracts `token_count` events with heartbeat dedup |
+| Codex | `~/.codex/sessions/**/rollout-*.jsonl` + `~/.codex/archived_sessions/rollout-*.jsonl` | `CodexLogParser` — stateful, extracts `token_count` events with heartbeat dedup and stores uncached input tokens |
 
 Database: `~/.monitor-agent/monitor.db`
 
@@ -28,7 +28,7 @@ request_logs (
     request_id TEXT PK,          -- "session:{msg_id}" or "codex:{sid}:{turn}"
     app_type TEXT,               -- "claude" | "codex"
     model TEXT,
-    input_tokens INTEGER,
+    input_tokens INTEGER,        -- uncached input tokens; Codex raw input includes cache and is normalized
     output_tokens INTEGER,
     cache_read_tokens INTEGER,
     cache_creation_tokens INTEGER,
