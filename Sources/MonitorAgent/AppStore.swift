@@ -5,7 +5,7 @@ import Combine
 final class AppStore: ObservableObject {
     @Published var appFilter: AppFilter = .all
     @Published var timeRange: TimeRange = .today
-    @Published var selectedYear: Int
+    @Published var heatmapMode: HeatmapMode = .trailing
 
     @Published var stats = UsageStats()
     @Published var heatmap: [DayActivity] = []
@@ -20,10 +20,8 @@ final class AppStore: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     init() {
-        self.selectedYear = Calendar.current.component(.year, from: Date())
-
         // React to filter changes
-        Publishers.CombineLatest3($appFilter, $timeRange, $selectedYear)
+        Publishers.CombineLatest3($appFilter, $timeRange, $heatmapMode)
             .debounce(for: .milliseconds(100), scheduler: DispatchQueue.main)
             .sink { [weak self] _, _, _ in
                 self?.reload()
@@ -59,7 +57,19 @@ final class AppStore: ObservableObject {
     func reload() {
         DispatchQueue.global(qos: .userInitiated).async { [self] in
             let s = db.fetchStats(app: appFilter, range: timeRange)
-            let h = db.fetchHeatmap(app: appFilter, year: selectedYear)
+            let cal = Calendar.current
+            let h: [DayActivity]
+            switch heatmapMode {
+            case .trailing:
+                let today = cal.startOfDay(for: Date())
+                let start = cal.date(byAdding: .day, value: -364, to: today)!
+                let end = cal.date(byAdding: .day, value: 1, to: today)!
+                h = db.fetchHeatmap(app: appFilter, from: start, to: end)
+            case .year(let year):
+                let start = cal.date(from: DateComponents(year: year, month: 1, day: 1))!
+                let end = cal.date(from: DateComponents(year: year + 1, month: 1, day: 1))!
+                h = db.fetchHeatmap(app: appFilter, from: start, to: end)
+            }
             let hourly = selectedActivityDate.map {
                 db.fetchHourlyTokenUsage(app: appFilter, date: $0)
             } ?? []
@@ -73,10 +83,6 @@ final class AppStore: ObservableObject {
                 self.modelDistribution = m
                 if !years.isEmpty {
                     self.availableYears = years
-                    // Keep selectedYear if valid, else use latest
-                    if !years.contains(self.selectedYear) {
-                        self.selectedYear = years.first!
-                    }
                 }
             }
         }

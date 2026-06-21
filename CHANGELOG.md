@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Added
+- Activity heatmap mode toggle: "Trailing" (past 365 days) and "Year" (calendar year)
+- Trailing mode shows a GitHub-style rolling window ending today with cross-year month labels
+
 ## [0.2.9] - 2026-06-21
 
 ### Changed
