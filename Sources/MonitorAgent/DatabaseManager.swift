@@ -171,12 +171,10 @@ final class DatabaseManager {
         }) ?? UsageStats()
     }
 
-    func fetchHeatmap(app: AppFilter, year: Int) -> [DayActivity] {
+    /// Fetch heatmap data for a given date range
+    func fetchHeatmap(app: AppFilter, from startDate: Date, to endDate: Date) -> [DayActivity] {
         guard let db = dbQueue else { return [] }
 
-        let cal = Calendar.current
-        let startDate = cal.date(from: DateComponents(year: year, month: 1, day: 1))!
-        let endDate = cal.date(from: DateComponents(year: year + 1, month: 1, day: 1))!
         let startTs = Int(startDate.timeIntervalSince1970)
         let endTs = Int(endDate.timeIntervalSince1970)
 

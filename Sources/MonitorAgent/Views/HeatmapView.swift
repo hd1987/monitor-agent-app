@@ -22,24 +22,28 @@ struct HeatmapView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Header
+            // Header — tap to dismiss activity chart
             HStack {
                 Text("Activity")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer()
-                if store.availableYears.count > 1 {
-                    Picker("", selection: $store.selectedYear) {
-                        ForEach(store.availableYears, id: \.self) { year in
-                            Text(String(year)).tag(year)
-                        }
+                // Unified mode picker: Default | 2025 | 2026 …
+                let options = heatmapModeOptions
+                HStack(spacing: 12) {
+                    ForEach(options, id: \.self) { mode in
+                        let isActive = store.heatmapMode == mode
+                        Text(heatmapModeLabel(mode))
+                            .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                            .foregroundStyle(isActive ? .secondary : .tertiary)
+                            .onTapGesture { store.heatmapMode = mode }
                     }
-                    .pickerStyle(.menu)
-                    .frame(width: 80)
-                } else {
-                    Text(String(store.selectedYear))
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if store.selectedActivityDate != nil {
+                    store.clearSelectedActivityDate()
                 }
             }
 
@@ -155,8 +159,26 @@ struct HeatmapView: View {
                 activityFrameInWindow = .null
             }
         }
-        .onChange(of: store.selectedYear) { _, _ in
+        .onChange(of: store.heatmapMode) { _, _ in
             store.clearSelectedActivityDate()
+        }
+    }
+
+    // MARK: - Heatmap Mode Helpers
+
+    /// Build the list of picker options: [.trailing, .year(2025), .year(2026), ...]
+    private var heatmapModeOptions: [HeatmapMode] {
+        var options: [HeatmapMode] = [.trailing]
+        for year in store.availableYears {
+            options.append(.year(year))
+        }
+        return options
+    }
+
+    private func heatmapModeLabel(_ mode: HeatmapMode) -> String {
+        switch mode {
+        case .trailing: return "Default"
+        case .year(let y): return String(y)
         }
     }
 
@@ -193,43 +215,62 @@ struct HeatmapView: View {
         let isPlaceholder: Bool
     }
 
-    /// Build a [week][weekday] grid for the selected year
+    /// Build a [week][weekday] grid based on current heatmap mode
     private func buildGrid() -> [[CellEntry]] {
+        if store.heatmapMode == .trailing {
+            return buildTrailingGrid()
+        }
+        return buildYearGrid()
+    }
+
+    /// Build grid for a calendar year (Jan 1 – Dec 31)
+    private func buildYearGrid() -> [[CellEntry]] {
+        guard case .year(let year) = store.heatmapMode else { return [] }
         let cal = Calendar(identifier: .gregorian)
-        let year = store.selectedYear
 
         guard let startOfYear = cal.date(from: DateComponents(year: year, month: 1, day: 1)),
               let endOfYear = cal.date(from: DateComponents(year: year, month: 12, day: 31)) else {
             return []
         }
 
+        return buildGridRange(from: startOfYear, to: endOfYear)
+    }
+
+    /// Build grid for trailing 365 days ending today
+    private func buildTrailingGrid() -> [[CellEntry]] {
+        let cal = Calendar(identifier: .gregorian)
+        let today = cal.startOfDay(for: Date())
+        let start = cal.date(byAdding: .day, value: -364, to: today)!
+
+        // Align start to the Monday of that week
+        let startWeekday = weekdayIndex(start, cal: cal)
+        let alignedStart = cal.date(byAdding: .day, value: -startWeekday, to: start)!
+
+        return buildGridRange(from: alignedStart, to: today)
+    }
+
+    /// Shared grid builder for any date range
+    private func buildGridRange(from startDate: Date, to endDate: Date) -> [[CellEntry]] {
+        let cal = Calendar(identifier: .gregorian)
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
 
-        // Build lookup
         var lookup: [String: Int] = [:]
         for item in store.heatmap {
             lookup[item.date] = item.count
         }
 
-        // weekday: 1=Sun ... 7=Sat → remap to Mon=0 ... Sun=6
-        func weekdayIndex(_ date: Date) -> Int {
-            let wd = cal.component(.weekday, from: date) // 1=Sun
-            return (wd + 5) % 7 // Mon=0, Tue=1 ... Sun=6
-        }
-
         var weeks: [[CellEntry]] = []
         var currentWeek = Array(repeating: CellEntry(date: "", count: 0, isPlaceholder: true), count: 7)
 
-        var day = startOfYear
-        // Fill leading placeholders
-        let firstDayIndex = weekdayIndex(startOfYear)
+        var day = startDate
+        let firstDayIndex = weekdayIndex(startDate, cal: cal)
         for i in 0..<firstDayIndex {
             currentWeek[i] = CellEntry(date: "", count: 0, isPlaceholder: true)
         }
 
-        while day <= endOfYear {
-            let idx = weekdayIndex(day)
+        while day <= endDate {
+            let idx = weekdayIndex(day, cal: cal)
             let key = formatter.string(from: day)
             let count = lookup[key] ?? 0
             currentWeek[idx] = CellEntry(date: key, count: count, isPlaceholder: false)
@@ -241,12 +282,17 @@ struct HeatmapView: View {
             day = cal.date(byAdding: .day, value: 1, to: day)!
         }
 
-        // Flush last partial week
         if currentWeek.contains(where: { !$0.isPlaceholder }) {
             weeks.append(currentWeek)
         }
 
         return weeks
+    }
+
+    /// Remap weekday: Mon=0 ... Sun=6
+    private func weekdayIndex(_ date: Date, cal: Calendar) -> Int {
+        let wd = cal.component(.weekday, from: date) // 1=Sun
+        return (wd + 5) % 7
     }
 
     private func cellColor(count: Int, isPlaceholder: Bool) -> Color {
@@ -278,36 +324,58 @@ struct HeatmapView: View {
         guard columns > 0 else { return [] }
 
         let cal = Calendar(identifier: .gregorian)
-        let year = store.selectedYear
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM"
 
+        // Determine the actual start date of the grid
+        let gridStartDate: Date
+        switch store.heatmapMode {
+        case .trailing:
+            let today = cal.startOfDay(for: Date())
+            let trailingStart = cal.date(byAdding: .day, value: -364, to: today)!
+            let startWeekday = weekdayIndex(trailingStart, cal: cal)
+            gridStartDate = cal.date(byAdding: .day, value: -startWeekday, to: trailingStart)!
+        case .year(let year):
+            gridStartDate = cal.date(from: DateComponents(year: year, month: 1, day: 1))!
+        }
+
         var labels: [MonthLabel] = []
+        // Track by year-month to handle cross-year correctly
+        var prevYearMonth = ""
         var prevMonth = -1
         var currentStart = 0
 
         for week in 0..<columns {
-            // Approximate: week 0 starts Jan 1, each week = 7 days
-            let approxDate = cal.date(byAdding: .day, value: week * 7, to:
-                cal.date(from: DateComponents(year: year, month: 1, day: 1))!)!
+            let approxDate = cal.date(byAdding: .day, value: week * 7, to: gridStartDate)!
             let month = cal.component(.month, from: approxDate)
+            let year = cal.component(.year, from: approxDate)
+            let yearMonth = "\(year)-\(month)"
 
-            if month != prevMonth {
-                if prevMonth != -1 {
+            if yearMonth != prevYearMonth {
+                if !prevYearMonth.isEmpty {
+                    let labelDate = cal.date(from: DateComponents(
+                        year: Int(prevYearMonth.split(separator: "-").first!)!,
+                        month: prevMonth
+                    ))!
                     labels.append(MonthLabel(
-                        name: formatter.string(from: cal.date(from: DateComponents(year: year, month: prevMonth))!),
+                        name: formatter.string(from: labelDate),
                         offset: currentStart,
                         span: week - currentStart
                     ))
                 }
                 currentStart = week
                 prevMonth = month
+                prevYearMonth = yearMonth
             }
         }
         // Last month
-        if prevMonth != -1 {
+        if !prevYearMonth.isEmpty {
+            let labelDate = cal.date(from: DateComponents(
+                year: Int(prevYearMonth.split(separator: "-").first!)!,
+                month: prevMonth
+            ))!
             labels.append(MonthLabel(
-                name: formatter.string(from: cal.date(from: DateComponents(year: year, month: prevMonth))!),
+                name: formatter.string(from: labelDate),
                 offset: currentStart,
                 span: columns - currentStart
             ))

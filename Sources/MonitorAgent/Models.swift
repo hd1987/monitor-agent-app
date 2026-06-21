@@ -160,6 +160,13 @@ enum TimeRange: Equatable, Identifiable {
     }
 }
 
+// MARK: - Heatmap Mode
+
+enum HeatmapMode: Hashable {
+    case trailing
+    case year(Int)
+}
+
 // MARK: - Display Data
 
 struct UsageStats {
