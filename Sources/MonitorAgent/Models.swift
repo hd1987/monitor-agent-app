@@ -61,6 +61,22 @@ enum TimeRange: Equatable, Identifiable {
 
     static let presets: [TimeRange] = [.today, .last7, .last30, .allTime]
 
+    static func activityDay(_ dateString: String, calendar: Calendar = .current) -> TimeRange? {
+        let parts = dateString.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+
+        guard let date = calendar.date(from: DateComponents(
+            year: parts[0],
+            month: parts[1],
+            day: parts[2]
+        )) else {
+            return nil
+        }
+
+        let day = calendar.startOfDay(for: date)
+        return .custom(start: day, end: day)
+    }
+
     var id: String {
         switch self {
         case .today: return "today"

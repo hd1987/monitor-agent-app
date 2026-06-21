@@ -53,6 +53,15 @@ final class TimeRangeTests: XCTestCase {
         XCTAssertEqual(title, "Jun 20")
     }
 
+    func testSingleDayActivityRangeParsesDateString() {
+        let range = TimeRange.activityDay("2026-06-20", calendar: calendar)
+
+        XCTAssertEqual(range, .custom(
+            start: date(year: 2026, month: 6, day: 20),
+            end: date(year: 2026, month: 6, day: 20)
+        ))
+    }
+
     func testCustomRangeDisplayTitleShowsStartAndEndDates() {
         let start = date(year: 2026, month: 6, day: 18)
         let end = date(year: 2026, month: 6, day: 20)

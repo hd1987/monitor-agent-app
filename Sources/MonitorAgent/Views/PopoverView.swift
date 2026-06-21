@@ -3,14 +3,17 @@ import SwiftUI
 struct PopoverView: View {
     @EnvironmentObject var store: AppStore
     @EnvironmentObject var theme: ThemeManager
+    @State private var appFilterFrameInWindow: CGRect = .null
 
     var body: some View {
         VStack(spacing: 0) {
-            FilterBar()
+            FilterBar { frame in
+                appFilterFrameInWindow = frame
+            }
             Divider().opacity(theme.dividerOpacity)
             StatCardsView()
             Divider().opacity(theme.dividerOpacity).padding(.horizontal, 16)
-            HeatmapView()
+            HeatmapView(appFilterFrameInWindow: appFilterFrameInWindow)
             Divider().opacity(theme.dividerOpacity).padding(.horizontal, 16)
             ModelDistributionView()
         }

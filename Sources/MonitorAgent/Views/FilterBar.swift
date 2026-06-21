@@ -3,6 +3,7 @@ import SwiftUI
 struct FilterBar: View {
     @EnvironmentObject var store: AppStore
     @EnvironmentObject var theme: ThemeManager
+    let onAppFilterFrameChange: (CGRect) -> Void
 
     @State private var isTimeRangePopoverPresented = false
     @State private var calendarSelection = CalendarRangeSelection()
@@ -36,6 +37,12 @@ struct FilterBar: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(theme.cardBorder, lineWidth: 0.5)
+            )
+            .overlay(
+                WindowFrameReader { frame in
+                    onAppFilterFrameChange(frame)
+                }
+                .allowsHitTesting(false)
             )
 
             Spacer()
@@ -93,7 +100,7 @@ struct FilterBar: View {
     private func presetButton(for range: TimeRange) -> some View {
         Button {
             withTransaction(Transaction(animation: nil)) {
-                store.timeRange = range
+                store.setTimeRangeFromFilter(range)
                 calendarSelection = CalendarRangeSelection()
             }
         } label: {
@@ -195,7 +202,7 @@ struct FilterBar: View {
     private func selectCalendarDate(_ date: Date) {
         calendarSelection.select(date)
         guard let start = calendarSelection.start, let end = calendarSelection.end else { return }
-        store.timeRange = .custom(start: start, end: end)
+        store.setTimeRangeFromFilter(.custom(start: start, end: end))
     }
 
     private func moveDisplayedMonth(by value: Int) {
