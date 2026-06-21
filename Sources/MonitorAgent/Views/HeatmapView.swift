@@ -22,7 +22,7 @@ struct HeatmapView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Header
+            // Header — tap to dismiss activity chart
             HStack {
                 Text("Activity")
                     .font(.system(size: 12, weight: .medium))
@@ -38,6 +38,12 @@ struct HeatmapView: View {
                             .foregroundStyle(isActive ? .secondary : .tertiary)
                             .onTapGesture { store.heatmapMode = mode }
                     }
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if store.selectedActivityDate != nil {
+                    store.clearSelectedActivityDate()
                 }
             }
 
