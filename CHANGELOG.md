@@ -6,9 +6,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-06-21
+
 ### Added
-- Activity heatmap mode toggle: "Trailing" (past 365 days) and "Year" (calendar year)
+- Activity heatmap mode toggle: "Default" (trailing 365 days) and per-year view
 - Trailing mode shows a GitHub-style rolling window ending today with cross-year month labels
+- Tap Activity header to dismiss the hourly token chart
 
 ## [0.2.9] - 2026-06-21
 
