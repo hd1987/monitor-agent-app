@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Limit General sync interval choices to 10s, 30s, 60s, and Never
+
 ## [0.2.12] - 2026-06-21
 
 ### Fixed

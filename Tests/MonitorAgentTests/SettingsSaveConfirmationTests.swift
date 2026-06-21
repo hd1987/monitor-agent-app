@@ -26,4 +26,8 @@ final class SettingsSaveConfirmationTests: XCTestCase {
     func testSaveSuccessToastUsesGreenBackground() {
         XCTAssertEqual(SaveSuccessToastStyle.backgroundColorName, "green")
     }
+
+    func testSyncIntervalOptionsMatchGeneralSettingsMenu() {
+        XCTAssertEqual(SyncInterval.allCases.map(\.displayName), ["10s", "30s", "60s", "Never"])
+    }
 }

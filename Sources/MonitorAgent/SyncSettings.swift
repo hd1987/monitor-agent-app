@@ -5,10 +5,7 @@ import ServiceManagement
 /// Sync interval options (seconds). `0` means manual-only (sync on panel open).
 enum SyncInterval: Int, CaseIterable, Identifiable {
     case ten = 10
-    case twenty = 20
     case thirty = 30
-    case forty = 40
-    case fifty = 50
     case sixty = 60
     case never = 0
 

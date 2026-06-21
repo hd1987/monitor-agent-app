@@ -87,7 +87,7 @@ Sources/MonitorAgent/
 
 **Settings** — Left sidebar (General / Config / Prompt) + right content area. Cancel closes window; Save asks for confirmation before applying the current category, then shows a top saved toast and keeps the window open. Save only applies to current category. Switching categories reloads from disk. Config/Prompt use Claude Code / Codex tab bar.
 
-- **General** — Theme (System/Light/Dark), Sync Interval (10–60s/Never), Keep in Background toggle, Launch at Login toggle
+- **General** — Theme (System/Light/Dark), Sync Interval (10s/30s/60s/Never), Keep in Background toggle, Launch at Login toggle
 - **Config** — TextEditor for `~/.claude/settings.json` (JSON validated on save) and `~/.codex/config.toml`; shows "File not found" if missing
 - **Prompt** — TextEditor for `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`; shows "File not found" if missing
 2. **StatCards** — `Requests | Sessions | Input Tokens | Output Tokens | Cache Read | Cache Hit`
