@@ -81,19 +81,20 @@ enum CodexLogParser {
             context.turnCount += 1
 
             // Extract per-turn usage from last_token_usage if available, else derive delta
-            let inputTokens: Int
+            let rawInputTokens: Int
             let outputTokens: Int
             let cacheRead: Int
 
             if let lastUsage = info["last_token_usage"] as? [String: Any] {
-                inputTokens = lastUsage["input_tokens"] as? Int ?? 0
+                rawInputTokens = lastUsage["input_tokens"] as? Int ?? 0
                 outputTokens = lastUsage["output_tokens"] as? Int ?? 0
                 cacheRead = lastUsage["cached_input_tokens"] as? Int ?? 0
             } else {
-                inputTokens = totalIn
+                rawInputTokens = totalIn
                 outputTokens = totalOut
                 cacheRead = totalUsage["cached_input_tokens"] as? Int ?? 0
             }
+            let inputTokens = max(rawInputTokens - cacheRead, 0)
 
             guard let timestamp = json["timestamp"] as? String,
                   let createdAt = unixSeconds(from: timestamp) else {
