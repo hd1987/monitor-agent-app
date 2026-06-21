@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-06-21
+
 ### Changed
 - Activity token charts now use a fixed-height drawer below the heatmap
 - Clicking an Activity day now filters the whole panel to that day while opening the token chart
