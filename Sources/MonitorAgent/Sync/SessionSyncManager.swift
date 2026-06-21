@@ -133,11 +133,7 @@ final class SessionSyncManager {
         var records: [ParsedRecord] = []
 
         if isCodex {
-            var context = CodexParseContext(
-                sessionId: existing?.sessionId,
-                currentModel: existing?.model ?? "gpt-5.5",
-                turnCount: existing?.recordCount ?? 0
-            )
+            var context = CodexParseContext(syncState: existing)
             for range in lineRanges {
                 let lineData = data.subdata(in: range)
                 if let record = CodexLogParser.parse(lineData: lineData, context: &context) {
@@ -152,7 +148,9 @@ final class SessionSyncManager {
                 sessionId: context.sessionId,
                 model: context.currentModel,
                 lastModified: fileMtime,
-                lastSyncedAt: Int(Date().timeIntervalSince1970)
+                lastSyncedAt: Int(Date().timeIntervalSince1970),
+                lastTotalInputTokens: context.lastTotalIn,
+                lastTotalOutputTokens: context.lastTotalOut
             )
             db.insertRecords(records)
             db.updateSyncState(state)

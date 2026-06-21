@@ -42,6 +42,8 @@ sync_state (
     record_count INTEGER,
     session_id TEXT,              -- Codex: carried across lines
     model TEXT,                   -- Codex: carried across lines
+    last_total_input_tokens INTEGER,  -- Codex: heartbeat dedup across sync batches
+    last_total_output_tokens INTEGER, -- Codex: heartbeat dedup across sync batches
     last_modified INTEGER,
     last_synced_at INTEGER
 )

@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-06-21
+
+### Fixed
+- Persist Codex cumulative token totals in sync state to prevent cross-batch heartbeat rows from shifting request counts
+
 ## [0.2.10] - 2026-06-21
 
 ### Added
