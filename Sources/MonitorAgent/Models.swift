@@ -232,6 +232,8 @@ struct SyncState {
     var model: String?
     var lastModified: Int       // file mtime, Unix seconds
     var lastSyncedAt: Int       // Unix seconds
+    var lastTotalInputTokens: Int = 0
+    var lastTotalOutputTokens: Int = 0
 }
 
 // MARK: - Utilities

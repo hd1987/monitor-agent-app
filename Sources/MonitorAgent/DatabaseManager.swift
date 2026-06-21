@@ -52,11 +52,31 @@ final class DatabaseManager {
                     record_count INTEGER NOT NULL DEFAULT 0,
                     session_id TEXT,
                     model TEXT,
+                    last_total_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    last_total_output_tokens INTEGER NOT NULL DEFAULT 0,
                     last_modified INTEGER NOT NULL,
                     last_synced_at INTEGER NOT NULL
                 );
                 """)
+            try addColumnIfMissing(
+                db,
+                table: "sync_state",
+                column: "last_total_input_tokens",
+                definition: "INTEGER NOT NULL DEFAULT 0"
+            )
+            try addColumnIfMissing(
+                db,
+                table: "sync_state",
+                column: "last_total_output_tokens",
+                definition: "INTEGER NOT NULL DEFAULT 0"
+            )
         }
+    }
+
+    private func addColumnIfMissing(_ db: Database, table: String, column: String, definition: String) throws {
+        let columns = try Row.fetchAll(db, sql: "PRAGMA table_info(\(table))").map { $0["name"] as String }
+        guard !columns.contains(column) else { return }
+        try db.execute(sql: "ALTER TABLE \(table) ADD COLUMN \(column) \(definition)")
     }
 
     // MARK: - Write Methods
@@ -95,7 +115,9 @@ final class DatabaseManager {
                 sessionId: row["session_id"],
                 model: row["model"],
                 lastModified: row["last_modified"],
-                lastSyncedAt: row["last_synced_at"]
+                lastSyncedAt: row["last_synced_at"],
+                lastTotalInputTokens: row["last_total_input_tokens"],
+                lastTotalOutputTokens: row["last_total_output_tokens"]
             )
         }
     }
@@ -106,11 +128,21 @@ final class DatabaseManager {
             try db.execute(
                 sql: """
                     INSERT OR REPLACE INTO sync_state
-                    (file_path, byte_offset, record_count, session_id, model, last_modified, last_synced_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (file_path, byte_offset, record_count, session_id, model,
+                     last_modified, last_synced_at, last_total_input_tokens, last_total_output_tokens)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                arguments: [state.filePath, state.byteOffset, state.recordCount,
-                            state.sessionId, state.model, state.lastModified, state.lastSyncedAt]
+                arguments: [
+                    state.filePath,
+                    state.byteOffset,
+                    state.recordCount,
+                    state.sessionId,
+                    state.model,
+                    state.lastModified,
+                    state.lastSyncedAt,
+                    state.lastTotalInputTokens,
+                    state.lastTotalOutputTokens,
+                ]
             )
         }
     }

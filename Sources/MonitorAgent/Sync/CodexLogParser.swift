@@ -7,6 +7,30 @@ struct CodexParseContext {
     var turnCount: Int = 0
     var lastTotalIn: Int = 0
     var lastTotalOut: Int = 0
+
+    init(
+        sessionId: String? = nil,
+        currentModel: String = "gpt-5.5",
+        turnCount: Int = 0,
+        lastTotalIn: Int = 0,
+        lastTotalOut: Int = 0
+    ) {
+        self.sessionId = sessionId
+        self.currentModel = currentModel
+        self.turnCount = turnCount
+        self.lastTotalIn = lastTotalIn
+        self.lastTotalOut = lastTotalOut
+    }
+
+    init(syncState: SyncState?) {
+        self.init(
+            sessionId: syncState?.sessionId,
+            currentModel: syncState?.model ?? "gpt-5.5",
+            turnCount: syncState?.recordCount ?? 0,
+            lastTotalIn: syncState?.lastTotalInputTokens ?? 0,
+            lastTotalOut: syncState?.lastTotalOutputTokens ?? 0
+        )
+    }
 }
 
 /// Parse Codex JSONL session logs.
