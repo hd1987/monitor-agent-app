@@ -87,7 +87,7 @@ Sources/MonitorAgent/
 
 1. **FilterBar** — `[All | Claude Code | Codex]` segmented control plus right-aligned date range dropdown. Presets are `Today | 7 Days | 30 Days | All Time`; the calendar supports single-day and start/end range selection.
 2. **StatCards** — `Requests | Sessions | Input Tokens | Output Tokens | Cache Read | Cache Hit`.
-3. **Activity** — GitHub-style heatmap with `Default` trailing-365-day mode and per-year mode. Hover shows the daily request count with the tooltip kept inside the heatmap width. Days with no activity are not selectable. Clicking an active day filters the whole panel to that date and opens a fixed-height hourly token chart for Input Tokens, Output Tokens, and Cache Read when token data exists. Clicking outside Activity hides the chart without restoring the previous date range; switching All / Claude Code / Codex keeps the chart open when data remains available.
+3. **Activity** — GitHub-style heatmap with `Default` trailing-365-day mode and per-year mode. Hover shows the daily request count with the tooltip kept inside the heatmap width. Days with no activity are not selectable. Clicking an active day filters the whole panel to that date and opens a fixed-height hourly token chart for Input Tokens, Output Tokens, and Cache Read when token data exists. The chart x-axis shows 3-hour labels from `0h` through `21h`. Clicking outside Activity hides the chart without restoring the previous date range; switching All / Claude Code / Codex keeps the chart open when data remains available.
 4. **ModelDistribution** — stacked proportion bar plus three-column legend for top models.
 
 **About** — App icon (`AppIcon.icns`), name, tagline, bundle version from `AppVersion.display`, GitHub button.

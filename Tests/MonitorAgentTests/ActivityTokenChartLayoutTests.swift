@@ -7,6 +7,23 @@ final class ActivityTokenChartLayoutTests: XCTestCase {
         XCTAssertEqual(ActivityTokenChartLayout.chartHeight, 128)
     }
 
+    func testHourAxisMarksUseThreeHourCadence() {
+        XCTAssertEqual(ActivityTokenChartLayout.hourAxisMarks.first, 0)
+        XCTAssertEqual(ActivityTokenChartLayout.hourAxisMarks.last, ActivityTokenChartLayout.lastHourAxisMark)
+        let intervals = zip(
+            ActivityTokenChartLayout.hourAxisMarks,
+            ActivityTokenChartLayout.hourAxisMarks.dropFirst()
+        ).map { current, next in
+            next - current
+        }
+        XCTAssertTrue(intervals.allSatisfy { $0 == ActivityTokenChartLayout.hourAxisMarkInterval })
+    }
+
+    func testHourAxisLabelsUseHourSuffix() {
+        XCTAssertEqual(ActivityTokenChartLayout.hourAxisLabel(for: 0), "0h")
+        XCTAssertEqual(ActivityTokenChartLayout.hourAxisLabel(for: ActivityTokenChartLayout.lastHourAxisMark), "21h")
+    }
+
     func testTooltipOffsetStaysInsideRightEdge() {
         let offset = ActivityTokenChartLayout.tooltipXOffset(
             anchorX: 588,

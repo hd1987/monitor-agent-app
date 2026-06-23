@@ -7,6 +7,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 ## [Unreleased]
 
 ### Fixed
+- Show Activity hourly chart x-axis labels every 3 hours from 0h through 21h
 - Keep Activity hover tooltips inside the heatmap width so right-edge text is not clipped
 
 ## [0.2.13] - 2026-06-21

@@ -54,12 +54,12 @@ struct ActivityTokenChartView: View {
             .chartXScale(domain: 0...23)
             .chartYScale(domain: 0...maxValue)
             .chartXAxis {
-                AxisMarks(values: [0, 6, 12, 18, 23]) { value in
+                AxisMarks(values: ActivityTokenChartLayout.hourAxisMarks) { value in
                     AxisGridLine()
                     AxisTick()
                     AxisValueLabel {
                         if let hour = value.as(Int.self) {
-                            Text("\(hour)")
+                            Text(ActivityTokenChartLayout.hourAxisLabel(for: hour))
                         }
                     }
                 }
