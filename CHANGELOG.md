@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-06-23
+
 ### Added
 - Show exact hourly token values when hovering inside the Activity hourly chart
 - Include the hourly request count in the Activity chart hover tooltip
