@@ -16,9 +16,9 @@ final class DatabaseManagerHourlyActivityTests: XCTestCase {
         let usage = database.fetchHourlyTokenUsage(app: .claude, date: "2026-06-20")
 
         XCTAssertEqual(usage.count, 24)
-        XCTAssertEqual(usage[8], HourlyTokenUsage(hour: 8, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0))
-        XCTAssertEqual(usage[9], HourlyTokenUsage(hour: 9, inputTokens: 130, outputTokens: 50, cacheReadTokens: 25))
-        XCTAssertEqual(usage[10], HourlyTokenUsage(hour: 10, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0))
+        XCTAssertEqual(usage[8], HourlyTokenUsage(hour: 8, requestCount: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0))
+        XCTAssertEqual(usage[9], HourlyTokenUsage(hour: 9, requestCount: 2, inputTokens: 130, outputTokens: 50, cacheReadTokens: 25))
+        XCTAssertEqual(usage[10], HourlyTokenUsage(hour: 10, requestCount: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0))
     }
 
     private func record(

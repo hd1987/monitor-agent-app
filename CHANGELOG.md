@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Added
+- Show exact hourly token values when hovering inside the Activity hourly chart
+- Include the hourly request count in the Activity chart hover tooltip
+
 ### Fixed
 - Show Activity hourly chart x-axis labels every 3 hours from 0h through 21h
 - Keep Activity hover tooltips inside the heatmap width so right-edge text is not clipped

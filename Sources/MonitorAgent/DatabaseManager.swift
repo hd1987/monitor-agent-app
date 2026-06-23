@@ -259,13 +259,14 @@ final class DatabaseManager {
 
         let whereSQL = "WHERE " + conditions.joined(separator: " AND ")
         var values = (0..<24).map {
-            HourlyTokenUsage(hour: $0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0)
+            HourlyTokenUsage(hour: $0, requestCount: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0)
         }
 
         guard let rows = try? db.read({ db in
             try Row.fetchAll(db, sql: """
                 SELECT
                     CAST(strftime('%H', created_at, 'unixepoch', 'localtime') AS INTEGER) AS hour,
+                    COUNT(*) AS request_count,
                     COALESCE(SUM(input_tokens), 0) AS input_tk,
                     COALESCE(SUM(output_tokens), 0) AS output_tk,
                     COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tk
@@ -281,6 +282,7 @@ final class DatabaseManager {
             guard values.indices.contains(hour) else { continue }
             values[hour] = HourlyTokenUsage(
                 hour: hour,
+                requestCount: row["request_count"],
                 inputTokens: row["input_tk"],
                 outputTokens: row["output_tk"],
                 cacheReadTokens: row["cache_read_tk"]

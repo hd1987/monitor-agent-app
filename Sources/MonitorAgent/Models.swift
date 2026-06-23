@@ -192,6 +192,7 @@ struct DayActivity: Identifiable {
 
 struct HourlyTokenUsage: Identifiable, Equatable {
     let hour: Int
+    let requestCount: Int
     let inputTokens: Int64
     let outputTokens: Int64
     let cacheReadTokens: Int64

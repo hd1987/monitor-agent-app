@@ -33,4 +33,15 @@ final class ActivityTokenChartLayoutTests: XCTestCase {
 
         XCTAssertLessThanOrEqual(offset + 160, 588)
     }
+
+    func testHoveredHourRoundsToNearestHourInsideChartDomain() {
+        XCTAssertEqual(ActivityTokenChartLayout.hoveredHour(forChartXValue: 0.2), 0)
+        XCTAssertEqual(ActivityTokenChartLayout.hoveredHour(forChartXValue: 8.6), 9)
+        XCTAssertEqual(ActivityTokenChartLayout.hoveredHour(forChartXValue: 22.6), 23)
+    }
+
+    func testHoveredHourClampsOutsideChartDomain() {
+        XCTAssertEqual(ActivityTokenChartLayout.hoveredHour(forChartXValue: -1.4), 0)
+        XCTAssertEqual(ActivityTokenChartLayout.hoveredHour(forChartXValue: 24.2), 23)
+    }
 }
