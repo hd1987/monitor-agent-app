@@ -9,6 +9,7 @@ struct HeatmapView: View {
     @State private var hoveredCount: Int = 0
     @State private var hoverAnchor: CGPoint = .zero
     @State private var activityFrameInWindow: CGRect = .null
+    @State private var tooltipSize: CGSize = .zero
 
     private let rows = 7
     private let cellSpacing: CGFloat = 3
@@ -18,6 +19,9 @@ struct HeatmapView: View {
     private var availableWidth: CGFloat { 620 - hPadding * 2 }
     private var hasSelectedActivityTokenUsage: Bool {
         store.hourlyTokenUsage.contains(where: \.hasTokenUsage)
+    }
+    private var tooltipWidth: CGFloat {
+        tooltipSize.width > 0 ? tooltipSize.width : ActivityTokenChartLayout.defaultTooltipWidth
     }
 
     var body: some View {
@@ -106,9 +110,19 @@ struct HeatmapView: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(theme.tooltipBackground)
+                        .background(GeometryReader { geo in
+                            Color.clear.preference(key: TooltipSizeKey.self, value: geo.size)
+                        })
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                         .fixedSize()
-                        .offset(x: max(0, hoverAnchor.x - 60), y: hoverAnchor.y - 28)
+                        .offset(
+                            x: ActivityTokenChartLayout.tooltipXOffset(
+                                anchorX: hoverAnchor.x,
+                                tooltipWidth: tooltipWidth,
+                                availableWidth: availableWidth
+                            ),
+                            y: hoverAnchor.y - 28
+                        )
                         .allowsHitTesting(false)
                         .transition(.opacity)
                 }
@@ -118,6 +132,9 @@ struct HeatmapView: View {
                 if let f = frame {
                     hoverAnchor = CGPoint(x: f.midX, y: f.minY)
                 }
+            }
+            .onPreferenceChange(TooltipSizeKey.self) { size in
+                tooltipSize = size
             }
             .animation(.easeOut(duration: 0.1), value: hoveredCell)
 
@@ -391,6 +408,13 @@ private struct CellFrameKey: PreferenceKey {
     static var defaultValue: CGRect? = nil
     static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) {
         value = nextValue() ?? value
+    }
+}
+
+private struct TooltipSizeKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        value = nextValue()
     }
 }
 

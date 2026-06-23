@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Fixed
+- Keep Activity hover tooltips inside the heatmap width so right-edge text is not clipped
+
 ## [0.2.13] - 2026-06-21
 
 ### Changed
