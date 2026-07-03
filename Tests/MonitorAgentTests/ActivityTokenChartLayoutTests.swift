@@ -24,6 +24,11 @@ final class ActivityTokenChartLayoutTests: XCTestCase {
         XCTAssertEqual(ActivityTokenChartLayout.hourAxisLabel(for: ActivityTokenChartLayout.lastHourAxisMark), "21h")
     }
 
+    func testHourRangeLabelsUseStartInclusiveOneHourWindow() {
+        XCTAssertEqual(ActivityTokenChartLayout.hourRangeLabel(for: 13), "13:00-14:00")
+        XCTAssertEqual(ActivityTokenChartLayout.hourRangeLabel(for: 23), "23:00-00:00")
+    }
+
     func testTooltipOffsetStaysInsideRightEdge() {
         let offset = ActivityTokenChartLayout.tooltipXOffset(
             anchorX: 588,

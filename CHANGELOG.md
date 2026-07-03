@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Fixed
+- Show Activity chart hover hours as explicit one-hour ranges
+
 ## [0.2.14] - 2026-06-23
 
 ### Added

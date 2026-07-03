@@ -14,6 +14,12 @@ enum ActivityTokenChartLayout {
         "\(hour)h"
     }
 
+    static func hourRangeLabel(for hour: Int) -> String {
+        let startHour = min(max(0, hour), lastChartHour)
+        let endHour = (startHour + 1) % 24
+        return String(format: "%02d:00-%02d:00", startHour, endHour)
+    }
+
     static func tooltipXOffset(anchorX: CGFloat, tooltipWidth: CGFloat, availableWidth: CGFloat) -> CGFloat {
         let proposedOffset = anchorX - tooltipWidth / 2
         let maxOffset = max(0, availableWidth - tooltipWidth)
