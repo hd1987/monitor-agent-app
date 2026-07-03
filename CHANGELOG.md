@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-07-03
+
 ### Added
 - Show the release commit SHA and release date in the About window
 - Show the current release commit SHA and release date in update-check results
