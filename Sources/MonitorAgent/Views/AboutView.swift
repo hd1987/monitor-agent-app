@@ -29,13 +29,16 @@ struct AboutView: View {
 
             Spacer().frame(height: 24)
 
-            // Version
-            HStack(spacing: 8) {
-                Text("Version")
-                    .foregroundStyle(.secondary)
-                Text(AppVersion.display)
+            VStack(spacing: 6) {
+                Text("Version: \(AppVersion.versionWithCommit)")
+                    .font(.system(size: 13))
+
+                if let releaseDate = AppVersion.releaseDate {
+                    Text("Released \(releaseDate)")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
             }
-            .font(.system(size: 13))
 
             Spacer().frame(height: 24)
 
@@ -59,8 +62,19 @@ struct AboutView: View {
 
 /// Reads the installed app version from the bundle created during release.
 enum AppVersion {
+    private static let commitKey = "MonitorAgentGitCommit"
+    private static let releaseDateKey = "MonitorAgentReleaseDate"
+
     static var display: String {
         displayVersion(infoDictionary: Bundle.main.infoDictionary ?? [:])
+    }
+
+    static var versionWithCommit: String {
+        versionWithCommitDisplay(infoDictionary: Bundle.main.infoDictionary ?? [:])
+    }
+
+    static var releaseDate: String? {
+        releaseDateDisplay(infoDictionary: Bundle.main.infoDictionary ?? [:])
     }
 
     static var comparable: String? {
@@ -71,12 +85,49 @@ enum AppVersion {
         comparableVersion(infoDictionary: infoDictionary) ?? "Development"
     }
 
+    static func versionWithCommitDisplay(infoDictionary: [String: Any]) -> String {
+        let version = displayVersion(infoDictionary: infoDictionary)
+        guard let commit = trimmedString(commitKey, in: infoDictionary) else {
+            return version
+        }
+
+        return "\(version) (\(commit))"
+    }
+
+    static func releaseDateDisplay(infoDictionary: [String: Any]) -> String? {
+        guard let rawDate = trimmedString(releaseDateKey, in: infoDictionary) else {
+            return nil
+        }
+
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.dateFormat = "yyyy-MM-dd"
+
+        guard let date = parser.date(from: rawDate) else {
+            return nil
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MMM d, yyyy"
+        return formatter.string(from: date)
+    }
+
     static func comparableVersion(infoDictionary: [String: Any]) -> String? {
         guard let version = infoDictionary["CFBundleShortVersionString"] as? String else {
             return nil
         }
 
         let trimmed = version.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func trimmedString(_ key: String, in infoDictionary: [String: Any]) -> String? {
+        guard let value = infoDictionary[key] as? String else {
+            return nil
+        }
+
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 }

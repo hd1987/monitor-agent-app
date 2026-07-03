@@ -153,7 +153,7 @@ struct ActivityTokenChartView: View {
 
     private func chartTooltip(for item: HourlyTokenUsage) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(ActivityTokenChartLayout.hourAxisLabel(for: item.hour))
+            Text(ActivityTokenChartLayout.hourRangeLabel(for: item.hour))
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(theme.tooltipForeground)
             requestRow(value: item.requestCount)

@@ -41,8 +41,18 @@ jobs:
             echo "skip=true" >> $GITHUB_OUTPUT
             exit 0
           fi
+          VERSION="${TAG#v}"
+          COMMIT_SHA=$(git rev-parse --short=7 "$TAG_COMMIT")
+          RELEASE_DATE=$(awk -v version="$VERSION" '$0 ~ "^## \\[" version "\\] - " { print $0; exit }' CHANGELOG.md | sed -E 's/^## \[[^]]+\] - //')
+          if [ -z "$RELEASE_DATE" ]; then
+            echo "Release date for $VERSION not found in CHANGELOG.md."
+            exit 1
+          fi
+
           echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "version=${TAG#v}" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
+          echo "release_date=$RELEASE_DATE" >> $GITHUB_OUTPUT
           echo "skip=false" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -60,6 +70,8 @@ jobs:
         run: |
           TAG="${{ steps.tag.outputs.tag }}"
           VERSION="${{ steps.tag.outputs.version }}"
+          COMMIT_SHA="${{ steps.tag.outputs.commit_sha }}"
+          RELEASE_DATE="${{ steps.tag.outputs.release_date }}"
 
           APP_DIR="MonitorAgent.app/Contents/MacOS"
           RES_DIR="MonitorAgent.app/Contents/Resources"
@@ -82,6 +94,10 @@ jobs:
             <string>${TAG}</string>
             <key>CFBundleShortVersionString</key>
             <string>${VERSION}</string>
+            <key>MonitorAgentGitCommit</key>
+            <string>${COMMIT_SHA}</string>
+            <key>MonitorAgentReleaseDate</key>
+            <string>${RELEASE_DATE}</string>
             <key>CFBundleExecutable</key>
             <string>MonitorAgent</string>
             <key>CFBundlePackageType</key>

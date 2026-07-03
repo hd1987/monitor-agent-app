@@ -16,6 +16,32 @@ final class AppVersionTests: XCTestCase {
         XCTAssertNil(AppVersion.comparableVersion(infoDictionary: [:]))
     }
 
+    func testVersionDisplayIncludesCommitWhenPresent() {
+        let info: [String: Any] = [
+            "CFBundleShortVersionString": "0.2.14",
+            "MonitorAgentGitCommit": "7e7950d"
+        ]
+
+        XCTAssertEqual(AppVersion.versionWithCommitDisplay(infoDictionary: info), "0.2.14 (7e7950d)")
+    }
+
+    func testVersionDisplayOmitsCommitWhenMissing() {
+        let info: [String: Any] = ["CFBundleShortVersionString": "0.2.14"]
+
+        XCTAssertEqual(AppVersion.versionWithCommitDisplay(infoDictionary: info), "0.2.14")
+    }
+
+    func testReleaseDateFormatsIsoDateForDisplay() {
+        let info: [String: Any] = ["MonitorAgentReleaseDate": "2026-06-23"]
+
+        XCTAssertEqual(AppVersion.releaseDateDisplay(infoDictionary: info), "Jun 23, 2026")
+    }
+
+    func testReleaseDateDisplayIsNilForMissingOrInvalidDate() {
+        XCTAssertNil(AppVersion.releaseDateDisplay(infoDictionary: [:]))
+        XCTAssertNil(AppVersion.releaseDateDisplay(infoDictionary: ["MonitorAgentReleaseDate": "Jun 23, 2026"]))
+    }
+
     func testVersionComparisonRequiresComparableCurrentVersion() {
         XCTAssertFalse(VersionComparison.isRemoteVersionNewer("0.2.2", than: nil))
         XCTAssertFalse(VersionComparison.isRemoteVersionNewer("0.2.2", than: "0.2.2"))
