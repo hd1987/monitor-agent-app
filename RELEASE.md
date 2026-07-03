@@ -34,7 +34,7 @@ Triggered by push to `main`. The workflow (`.github/workflows/release.yml`):
 2. Skips if no tag is reachable or the GitHub Release already exists
 3. Selects Xcode 16.4 on the macOS 15 runner
 4. Runs `swift build -c release`
-5. Packages `MonitorAgent.app` with `Info.plist` values derived from the tag (`CFBundleShortVersionString`, `CFBundleVersion`, `LSUIElement=true`)
+5. Packages `MonitorAgent.app` with `Info.plist` values derived from the tag and changelog (`CFBundleShortVersionString`, `CFBundleVersion`, `MonitorAgentGitCommit`, `MonitorAgentReleaseDate`, `LSUIElement=true`)
 6. Copies `AppIcon.icns` into the app bundle
 7. Ad-hoc code signs the app (`codesign -s -`)
 8. Compresses to `MonitorAgent.zip` via `ditto`

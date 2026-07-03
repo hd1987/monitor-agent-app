@@ -68,7 +68,7 @@ Sources/MonitorAgent/
 │   ├── ClaudeLogParser.swift      # Stateless: line Data → ParsedRecord?
 │   └── CodexLogParser.swift       # Stateful: line Data + CodexParseContext → ParsedRecord?
 └── Views/
-    ├── AboutView.swift            # About window (app icon, bundle version, GitHub link)
+    ├── AboutView.swift            # About window (app icon, bundle version/SHA/date, GitHub link)
     ├── PopoverView.swift          # Panel container (620px, white 98%, rounded 12pt, light mode)
     ├── FilterBar.swift            # App toggle (All/Claude Code/Codex) + date range dropdown
     ├── SettingsView.swift         # Sidebar settings: General / Config / Prompt categories
@@ -90,7 +90,7 @@ Sources/MonitorAgent/
 3. **Activity** — GitHub-style heatmap with `Default` trailing-365-day mode and per-year mode. Hover shows the daily request count with the tooltip kept inside the heatmap width. Days with no activity are not selectable. Clicking an active day filters the whole panel to that date and opens a fixed-height hourly token chart for Input Tokens, Output Tokens, Cache Read, and request count when token data exists. The chart x-axis shows 3-hour labels from `0h` through `21h`; hovering inside the chart shows the nearest start-inclusive one-hour range plus its exact request count and token values. Clicking outside Activity hides the chart without restoring the previous date range; switching All / Claude Code / Codex keeps the chart open when data remains available.
 4. **ModelDistribution** — stacked proportion bar plus three-column legend for top models.
 
-**About** — App icon (`AppIcon.icns`), name, tagline, bundle version from `AppVersion.display`, GitHub button.
+**About** — App icon (`AppIcon.icns`), name, tagline, bundle version plus release commit SHA from `AppVersion.versionWithCommit`, optional release date from `AppVersion.releaseDate`, GitHub button.
 
 **Settings** — Left sidebar (General / Config / Prompt) plus right content area. Cancel closes the window. Save asks for confirmation before applying the current category, then keeps the window open and shows a top green success toast. Save only applies to the current category. Switching categories reloads from disk. Config/Prompt use a Claude Code / Codex tab bar.
 

@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Added
+- Show the release commit SHA and release date in the About window
+
 ### Fixed
 - Show Activity chart hover hours as explicit one-hour ranges
 
