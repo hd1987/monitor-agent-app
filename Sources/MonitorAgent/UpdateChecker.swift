@@ -99,7 +99,11 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
             pendingRelease = release
             showResult(
                 title: "New version \(release!.tagName) available",
-                detail: release!.body.isEmpty ? "A new version is ready to download." : release!.body,
+                detail: UpdateCheckMessage.newVersionDetail(
+                    releaseBody: release!.body,
+                    currentVersionWithCommit: AppVersion.versionWithCommit,
+                    currentReleaseDate: AppVersion.releaseDate
+                ),
                 primary: ("Update", #selector(startDownload)),
                 secondary: ("Later", #selector(close))
             )
@@ -107,7 +111,10 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
             if silent { closeWindow(); return }
             showResult(
                 title: "You're up to date",
-                detail: "MonitorAgent \(currentVersion ?? AppVersion.display) is the latest version.",
+                detail: UpdateCheckMessage.upToDateDetail(
+                    versionWithCommit: AppVersion.versionWithCommit,
+                    releaseDate: AppVersion.releaseDate
+                ),
                 primary: ("OK", #selector(close))
             )
         case .failure(let error):
@@ -215,7 +222,7 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
     }
 
     private func createWindow() {
-        let w: CGFloat = 380, h: CGFloat = 150
+        let w: CGFloat = 420, h: CGFloat = 210
 
         let win = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: w, height: h),
@@ -235,11 +242,12 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: w, height: h))
         win.contentView = container
 
-        titleLabel = makeLabel(in: container, frame: .init(x: 20, y: 110, width: w - 40, height: 20),
+        titleLabel = makeLabel(in: container, frame: .init(x: 20, y: 170, width: w - 40, height: 20),
                                font: .boldSystemFont(ofSize: 13))
-        detailLabel = makeLabel(in: container, frame: .init(x: 20, y: 85, width: w - 40, height: 20),
+        detailLabel = makeLabel(in: container, frame: .init(x: 20, y: 70, width: w - 40, height: 82),
                                 font: .systemFont(ofSize: 11), color: .secondaryLabelColor)
-        detailLabel?.lineBreakMode = .byTruncatingTail
+        detailLabel?.lineBreakMode = .byWordWrapping
+        detailLabel?.maximumNumberOfLines = 0
 
         let indicator = NSProgressIndicator(frame: NSRect(x: 20, y: 58, width: w - 40, height: 20))
         indicator.style = .bar
@@ -450,5 +458,31 @@ enum VersionComparison {
             if rv != cv { return rv > cv }
         }
         return false
+    }
+}
+
+enum UpdateCheckMessage {
+    static func upToDateDetail(versionWithCommit: String, releaseDate: String?) -> String {
+        joined([
+            "MonitorAgent \(versionWithCommit) is the latest version.",
+            releaseDate.map { "Released \($0)" }
+        ])
+    }
+
+    static func newVersionDetail(
+        releaseBody: String,
+        currentVersionWithCommit: String,
+        currentReleaseDate: String?
+    ) -> String {
+        let currentBuildDetail = joined([
+            "Current version: \(currentVersionWithCommit)",
+            currentReleaseDate.map { "Released \($0)" }
+        ])
+        let body = releaseBody.isEmpty ? "A new version is ready to download." : releaseBody
+        return "\(currentBuildDetail)\n\n\(body)"
+    }
+
+    private static func joined(_ lines: [String?]) -> String {
+        lines.compactMap { $0 }.joined(separator: "\n")
     }
 }

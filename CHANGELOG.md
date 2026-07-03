@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ### Added
 - Show the release commit SHA and release date in the About window
+- Show the current release commit SHA and release date in update-check results
 
 ### Fixed
 - Show Activity chart hover hours as explicit one-hour ranges

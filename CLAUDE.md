@@ -81,7 +81,7 @@ Sources/MonitorAgent/
 
 ## UI Layout
 
-**Menu Bar**: Robot icon (template image from bundled SVG). Left-click opens the panel and triggers an on-demand sync. Right-click opens About / General / Config / Prompt / Check for Updates / Quit. Activation policy is `.accessory` (no Dock icon). Re-clicking the app icon shows the panel via `applicationShouldHandleReopen`.
+**Menu Bar**: Robot icon (template image from bundled SVG). Left-click opens the panel and triggers an on-demand sync. Right-click opens About / General / Config / Prompt / Check for Updates / Quit. Update-check result dialogs include the current bundle version, release commit SHA when available, and release date when available. Activation policy is `.accessory` (no Dock icon). Re-clicking the app icon shows the panel via `applicationShouldHandleReopen`.
 
 **Panel** (top → bottom):
 
