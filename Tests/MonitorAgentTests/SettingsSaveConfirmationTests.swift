@@ -30,4 +30,12 @@ final class SettingsSaveConfirmationTests: XCTestCase {
     func testSyncIntervalOptionsMatchGeneralSettingsMenu() {
         XCTAssertEqual(SyncInterval.allCases.map(\.displayName), ["10s", "30s", "60s", "Never"])
     }
+
+    func testUsageDataRebuildCopyMatchesSettingsDataSection() {
+        XCTAssertEqual(UsageDataRebuildCopy.buttonTitle, "Rebuild Local Usage Data")
+        XCTAssertEqual(UsageDataRebuildCopy.confirmationTitle, "Rebuild Local Usage Data?")
+        XCTAssertEqual(UsageDataRebuildCopy.runningMessage, "Rebuilding local usage data...")
+        XCTAssertEqual(UsageDataRebuildCopy.successTitle, "Local usage data rebuilt successfully.")
+        XCTAssertEqual(UsageDataRebuildCopy.failureTitle, "Rebuild failed. Your existing usage data was not changed.")
+    }
 }

@@ -237,6 +237,41 @@ struct SyncState {
     var lastTotalOutputTokens: Int = 0
 }
 
+struct SessionSyncResult: Equatable {
+    var filesSynced: Int = 0
+    var recordsSynced: Int = 0
+
+    mutating func add(_ result: SessionSyncResult) {
+        filesSynced += result.filesSynced
+        recordsSynced += result.recordsSynced
+    }
+}
+
+struct SessionSyncProgress: Equatable {
+    let completedFiles: Int
+    let totalFiles: Int
+    let recordsSynced: Int
+
+    var fractionCompleted: Double {
+        guard totalFiles > 0 else { return 0 }
+        return Double(completedFiles) / Double(totalFiles)
+    }
+}
+
+struct UsageDataRebuildSummary: Equatable {
+    let filesSynced: Int
+    let recordsSynced: Int
+    let totalRequests: Int
+    let totalSessions: Int
+
+    var displayText: String {
+        let requestLabel = totalRequests == 1 ? "request" : "requests"
+        let sessionLabel = totalSessions == 1 ? "session" : "sessions"
+        let fileLabel = filesSynced == 1 ? "file" : "files"
+        return "Rebuilt \(totalRequests) \(requestLabel) across \(totalSessions) \(sessionLabel) from \(filesSynced) \(fileLabel)."
+    }
+}
+
 // MARK: - Utilities
 
 /// Shared ISO-8601 formatter supporting fractional seconds

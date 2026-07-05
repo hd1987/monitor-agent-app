@@ -31,6 +31,7 @@
 - **Hourly token drill-down** — click an active Activity day to inspect Input Tokens, Output Tokens, and Cache Read by hour
 - **Model distribution** — stacked bar showing usage across the top models
 - **Settings editor** — update app preferences, Claude Code / Codex config files, and prompt files from one window
+- **Local data rebuild** — rebuild Monitor Agent's derived usage database from source logs without changing original logs or settings
 - **Auto-update** — built-in update checker with one-click download and install
 
 ## Screenshot
@@ -66,7 +67,7 @@ Open settings from the right-click menu or `Cmd+,`.
 
 | Page | What it controls |
 |------|------------------|
-| General | Theme, sync interval (`10s`, `30s`, `60s`, `Never`), Keep in Background, Launch at Login |
+| General | Theme, sync interval (`10s`, `30s`, `60s`, `Never`), Keep in Background, Launch at Login, local usage data rebuild |
 | Config | `~/.claude/settings.json` and `~/.codex/config.toml` |
 | Prompt | `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` |
 
@@ -82,6 +83,8 @@ Monitor Agent reads the JSONL session logs that Claude Code and Codex write loca
 | Codex | `~/.codex/sessions/**/rollout-*.jsonl` and `~/.codex/archived_sessions/rollout-*.jsonl` |
 
 All data stays on your machine. Nothing is sent anywhere. The app stores parsed results in `~/.monitor-agent/monitor.db` and syncs incrementally based on the selected sync interval. Opening the panel always triggers an on-demand sync.
+
+`monitor.db` is a derived local cache. The General settings page can rebuild it by syncing all source logs into `~/.monitor-agent/monitor-rebuild.tmp.db`, validating the temporary database, and replacing `monitor.db` only after the rebuild succeeds. The rebuild dialog shows file-level progress and the final requests/sessions/files summary. Original Claude Code and Codex logs, settings, and prompt files are not changed.
 
 ## Requirements
 
@@ -112,6 +115,7 @@ MIT
 - **小时级 Token 图表** — 点击 Activity 中有数据的日期，查看输入、输出、缓存读取的小时分布
 - **模型分布** — 堆叠比例条展示各模型使用占比
 - **设置编辑器** — 在同一个窗口管理应用设置、Claude Code / Codex 配置和提示词文件
+- **本地数据重建** — 从源日志重建 Monitor Agent 的派生使用数据库，不修改原始日志或设置
 - **自动更新** — 内置更新检查，一键下载安装
 
 ### 安装
@@ -126,7 +130,7 @@ MIT
 
 | 页面 | 内容 |
 |------|------|
-| General | 主题、同步间隔（`10s`、`30s`、`60s`、`Never`）、后台保留、登录启动 |
+| General | 主题、同步间隔（`10s`、`30s`、`60s`、`Never`）、后台保留、登录启动、本地使用数据重建 |
 | Config | `~/.claude/settings.json` 和 `~/.codex/config.toml` |
 | Prompt | `~/.claude/CLAUDE.md` 和 `~/.codex/AGENTS.md` |
 
@@ -142,6 +146,8 @@ Monitor Agent 读取 Claude Code 和 Codex 在本地生成的 JSONL 会话日志
 | Codex | `~/.codex/sessions/**/rollout-*.jsonl` 和 `~/.codex/archived_sessions/rollout-*.jsonl` |
 
 所有数据保留在本地，不会上传。解析结果存储在 `~/.monitor-agent/monitor.db`，按照设置的同步间隔增量同步；打开面板时始终会触发一次同步。
+
+`monitor.db` 是派生本地缓存。General 设置页可以把所有源日志同步到 `~/.monitor-agent/monitor-rebuild.tmp.db`，校验临时数据库后再替换 `monitor.db`。重建弹窗会显示文件级进度，以及最终请求数、会话数和文件数汇总。Claude Code 和 Codex 的原始日志、设置和提示词文件不会被修改。
 
 ### 系统要求
 

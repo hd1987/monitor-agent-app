@@ -13,6 +13,10 @@ final class AppStore: ObservableObject {
     @Published var hourlyTokenUsage: [HourlyTokenUsage] = []
     @Published var modelDistribution: [ModelShare] = []
     @Published var availableYears: [Int] = []
+    @Published var isRebuildingUsageData = false
+    @Published var usageDataRebuildProgress: SessionSyncProgress?
+    @Published var usageDataRebuildSummary: UsageDataRebuildSummary?
+    @Published var usageDataRebuildErrorMessage: String?
 
     private let db = DatabaseManager.shared
     private let syncManager = SessionSyncManager()
@@ -20,6 +24,8 @@ final class AppStore: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     init() {
+        DatabaseManager.cleanUpTemporaryRebuildDatabase()
+
         // React to filter changes
         Publishers.CombineLatest3($appFilter, $timeRange, $heatmapMode)
             .debounce(for: .milliseconds(100), scheduler: DispatchQueue.main)
@@ -49,9 +55,51 @@ final class AppStore: ObservableObject {
 
     /// Trigger a one-shot sync + reload (called when panel opens).
     func sync() {
+        guard !isRebuildingUsageData else { return }
         syncManager.syncOnce { [weak self] in
             self?.reload()
         }
+    }
+
+    func rebuildLocalUsageData() {
+        guard !isRebuildingUsageData else { return }
+
+        isRebuildingUsageData = true
+        usageDataRebuildProgress = nil
+        usageDataRebuildSummary = nil
+        usageDataRebuildErrorMessage = nil
+        syncManager.stop()
+
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+
+            do {
+                let summary = try UsageDataRebuilder(activeDatabase: db).rebuild { [weak self] progress in
+                    DispatchQueue.main.async {
+                        self?.usageDataRebuildProgress = progress
+                    }
+                }
+                DispatchQueue.main.async {
+                    self.usageDataRebuildSummary = summary
+                    self.isRebuildingUsageData = false
+                    self.applySyncInterval(self.syncSettings.interval)
+                    self.reload()
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.usageDataRebuildErrorMessage = error.localizedDescription
+                    self.isRebuildingUsageData = false
+                    self.applySyncInterval(self.syncSettings.interval)
+                }
+            }
+        }
+    }
+
+    func prepareUsageDataRebuild() {
+        guard !isRebuildingUsageData else { return }
+        usageDataRebuildProgress = nil
+        usageDataRebuildSummary = nil
+        usageDataRebuildErrorMessage = nil
     }
 
     func reload() {
