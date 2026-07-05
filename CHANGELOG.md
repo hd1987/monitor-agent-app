@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.16] - 2026-07-05
+
 ### Added
 - Rebuild local usage data from Claude Code and Codex source logs via Settings > General > Data, with progress and final results shown in the rebuild dialog
 
