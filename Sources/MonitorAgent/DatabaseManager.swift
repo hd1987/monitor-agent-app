@@ -2,28 +2,35 @@ import Foundation
 import GRDB
 
 final class DatabaseManager {
-    static let shared = DatabaseManager()
+    static let shared = try! DatabaseManager(path: defaultDatabasePath)
+    static let defaultDirectory = NSHomeDirectory() + "/.monitor-agent"
+    static let defaultDatabasePath = defaultDirectory + "/monitor.db"
+    static let rebuildDatabasePath = defaultDirectory + "/monitor-rebuild.tmp.db"
 
     private var dbQueue: DatabaseQueue?
-
-    private convenience init() {
-        self.init(inMemory: false)
-    }
+    private let databasePath: String?
 
     init(inMemory: Bool) {
-        let dir = NSHomeDirectory() + "/.monitor-agent"
-        let path = dir + "/monitor.db"
+        databasePath = nil
         do {
             if inMemory {
                 dbQueue = try DatabaseQueue()
             } else {
-                try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-                dbQueue = try DatabaseQueue(path: path)
+                try FileManager.default.createDirectory(atPath: Self.defaultDirectory, withIntermediateDirectories: true)
+                dbQueue = try DatabaseQueue(path: Self.defaultDatabasePath)
             }
             try setupSchema()
         } catch {
             print("Failed to open db: \(error)")
         }
+    }
+
+    init(path: String) throws {
+        databasePath = path
+        let directory = (path as NSString).deletingLastPathComponent
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        dbQueue = try DatabaseQueue(path: path)
+        try setupSchema()
     }
 
     // MARK: - Schema
@@ -77,6 +84,84 @@ final class DatabaseManager {
         let columns = try Row.fetchAll(db, sql: "PRAGMA table_info(\(table))").map { $0["name"] as String }
         guard !columns.contains(column) else { return }
         try db.execute(sql: "ALTER TABLE \(table) ADD COLUMN \(column) \(definition)")
+    }
+
+    func integrityCheck() -> Bool {
+        guard let db = dbQueue else { return false }
+        return (try? db.read { db in
+            let row = try Row.fetchOne(db, sql: "PRAGMA integrity_check")
+            return (row?[0] as String?) == "ok"
+        }) ?? false
+    }
+
+    func close() {
+        dbQueue = nil
+    }
+
+    func reopen() throws {
+        guard let path = databasePath else {
+            dbQueue = try DatabaseQueue()
+            try setupSchema()
+            return
+        }
+
+        dbQueue = try DatabaseQueue(path: path)
+        try setupSchema()
+    }
+
+    func replaceDatabase(with temporaryPath: String) throws {
+        guard let destinationPath = databasePath else { return }
+        let fm = FileManager.default
+
+        guard fm.fileExists(atPath: temporaryPath) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+
+        close()
+        do {
+            try removeDatabaseSidecars(at: destinationPath)
+            if fm.fileExists(atPath: destinationPath) {
+                _ = try fm.replaceItemAt(
+                    URL(fileURLWithPath: destinationPath),
+                    withItemAt: URL(fileURLWithPath: temporaryPath),
+                    backupItemName: nil,
+                    options: []
+                )
+            } else {
+                try fm.moveItem(atPath: temporaryPath, toPath: destinationPath)
+            }
+            try removeDatabaseSidecars(at: temporaryPath)
+            try reopen()
+        } catch {
+            try? reopen()
+            throw error
+        }
+    }
+
+    static func cleanUpTemporaryRebuildDatabase() {
+        try? removeDatabaseFiles(at: rebuildDatabasePath)
+    }
+
+    private static func removeDatabaseFiles(at path: String) throws {
+        let fm = FileManager.default
+        for candidate in [path, "\(path)-shm", "\(path)-wal"] where fm.fileExists(atPath: candidate) {
+            try fm.removeItem(atPath: candidate)
+        }
+    }
+
+    private static func removeDatabaseSidecars(at path: String) throws {
+        let fm = FileManager.default
+        for candidate in ["\(path)-shm", "\(path)-wal"] where fm.fileExists(atPath: candidate) {
+            try fm.removeItem(atPath: candidate)
+        }
+    }
+
+    private func removeDatabaseFiles(at path: String) throws {
+        try Self.removeDatabaseFiles(at: path)
+    }
+
+    private func removeDatabaseSidecars(at path: String) throws {
+        try Self.removeDatabaseSidecars(at: path)
     }
 
     // MARK: - Write Methods

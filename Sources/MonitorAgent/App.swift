@@ -207,6 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hosting = NSHostingView(
             rootView: SettingsView(initialCategory: category)
+                .environmentObject(store)
                 .environmentObject(themeManager)
         )
 

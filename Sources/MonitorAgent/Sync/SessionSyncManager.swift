@@ -5,15 +5,30 @@ import Foundation
 final class SessionSyncManager {
     private let queue = DispatchQueue(label: "com.monitoragent.sync", qos: .utility)
     private var timer: DispatchSourceTimer?
-    private let db = DatabaseManager.shared
+    private let db: DatabaseManager
     private let fm = FileManager.default
+    private let claudeProjectsPath: String
+    private let codexSessionsPath: String
+    private let codexArchivedSessionsPath: String
+
+    init(
+        database: DatabaseManager = .shared,
+        claudeProjectsPath: String = NSHomeDirectory() + "/.claude/projects",
+        codexSessionsPath: String = NSHomeDirectory() + "/.codex/sessions",
+        codexArchivedSessionsPath: String = NSHomeDirectory() + "/.codex/archived_sessions"
+    ) {
+        self.db = database
+        self.claudeProjectsPath = claudeProjectsPath
+        self.codexSessionsPath = codexSessionsPath
+        self.codexArchivedSessionsPath = codexArchivedSessionsPath
+    }
 
     /// Start periodic sync. `onComplete` fires on the sync queue after each cycle.
     func start(interval: TimeInterval = 30, onComplete: @escaping () -> Void) {
         let t = DispatchSource.makeTimerSource(queue: queue)
         t.schedule(deadline: .now(), repeating: interval)
         t.setEventHandler { [weak self] in
-            self?.syncAll()
+            _ = self?.syncAll()
             onComplete()
         }
         t.resume()
@@ -28,9 +43,13 @@ final class SessionSyncManager {
     /// Run a single sync cycle on the background queue, then call `onComplete`.
     func syncOnce(onComplete: @escaping () -> Void) {
         queue.async { [weak self] in
-            self?.syncAll()
+            _ = self?.syncAll()
             onComplete()
         }
+    }
+
+    func syncAllOnce(onProgress: ((SessionSyncProgress) -> Void)? = nil) -> SessionSyncResult {
+        syncAll(onProgress: onProgress)
     }
 
     /// Restart the periodic timer with a new interval.
@@ -41,30 +60,41 @@ final class SessionSyncManager {
 
     // MARK: - Sync Cycle
 
-    private func syncAll() {
+    private func syncAll(onProgress: ((SessionSyncProgress) -> Void)? = nil) -> SessionSyncResult {
         let claudeFiles = discoverClaudeFiles()
         let codexFiles = discoverCodexFiles()
+        let allFiles = claudeFiles.map { ($0, false) } + codexFiles.map { ($0, true) }
+        let totalFiles = allFiles.count
+        var result = SessionSyncResult()
+        var completedFiles = 0
 
-        for path in claudeFiles {
-            syncFile(path: path, isCodex: false)
+        onProgress?(SessionSyncProgress(
+            completedFiles: completedFiles,
+            totalFiles: totalFiles,
+            recordsSynced: result.recordsSynced
+        ))
+
+        for (path, isCodex) in allFiles {
+            result.add(syncFile(path: path, isCodex: isCodex))
+            completedFiles += 1
+            onProgress?(SessionSyncProgress(
+                completedFiles: completedFiles,
+                totalFiles: totalFiles,
+                recordsSynced: result.recordsSynced
+            ))
         }
-        for path in codexFiles {
-            syncFile(path: path, isCodex: true)
-        }
+        return result
     }
 
     // MARK: - File Discovery
 
     private func discoverClaudeFiles() -> [String] {
-        let base = NSHomeDirectory() + "/.claude/projects"
-        return findFiles(under: base, matching: { $0.hasSuffix(".jsonl") })
+        findFiles(under: claudeProjectsPath, matching: { $0.hasSuffix(".jsonl") })
     }
 
     private func discoverCodexFiles() -> [String] {
-        let sessions = NSHomeDirectory() + "/.codex/sessions"
-        let archived = NSHomeDirectory() + "/.codex/archived_sessions"
-        let a = findFiles(under: sessions, matching: { $0.hasPrefix("rollout-") && $0.hasSuffix(".jsonl") })
-        let b = findFiles(under: archived, matching: { $0.hasPrefix("rollout-") && $0.hasSuffix(".jsonl") })
+        let a = findFiles(under: codexSessionsPath, matching: { $0.hasPrefix("rollout-") && $0.hasSuffix(".jsonl") })
+        let b = findFiles(under: codexArchivedSessionsPath, matching: { $0.hasPrefix("rollout-") && $0.hasSuffix(".jsonl") })
         return a + b
     }
 
@@ -84,27 +114,27 @@ final class SessionSyncManager {
 
     // MARK: - Per-File Sync
 
-    private func syncFile(path: String, isCodex: Bool) {
+    private func syncFile(path: String, isCodex: Bool) -> SessionSyncResult {
         guard let attrs = try? fm.attributesOfItem(atPath: path),
               let modDate = attrs[.modificationDate] as? Date,
-              let fileSize = attrs[.size] as? Int64 else { return }
+              let fileSize = attrs[.size] as? Int64 else { return SessionSyncResult() }
 
         let fileMtime = Int(modDate.timeIntervalSince1970)
         let existing = db.getSyncState(for: path)
 
         // Skip if file unchanged and fully read
         if let s = existing, s.lastModified == fileMtime, s.byteOffset >= fileSize {
-            return
+            return SessionSyncResult()
         }
 
         let offset = existing?.byteOffset ?? 0
 
-        guard let handle = FileHandle(forReadingAtPath: path) else { return }
+        guard let handle = FileHandle(forReadingAtPath: path) else { return SessionSyncResult() }
         defer { handle.closeFile() }
 
         handle.seek(toFileOffset: UInt64(offset))
         let data = handle.readDataToEndOfFile()
-        guard !data.isEmpty else { return }
+        guard !data.isEmpty else { return SessionSyncResult() }
 
         // Split by newline, keep only complete lines
         let newlineCode = UInt8(0x0A)
@@ -126,7 +156,7 @@ final class SessionSyncManager {
             bytesConsumed = Int64(lastNewline + 1)
         } else {
             // No complete line found
-            return
+            return SessionSyncResult()
         }
 
         // Parse lines
@@ -173,5 +203,6 @@ final class SessionSyncManager {
             db.insertRecords(records)
             db.updateSyncState(state)
         }
+        return SessionSyncResult(filesSynced: 1, recordsSynced: records.count)
     }
 }

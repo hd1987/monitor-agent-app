@@ -25,6 +25,8 @@ Self-owned JSONL parsing, no third-party dependency.
 
 Database: `~/.monitor-agent/monitor.db`
 
+The database is a derived local cache, not the source of truth. `Settings > General > Data` can rebuild it by syncing all Claude Code and Codex JSONL logs into `~/.monitor-agent/monitor-rebuild.tmp.db`, validating that temporary database, then replacing `monitor.db` only after the rebuild succeeds. The rebuild runs in a sheet that shows file-level progress and the final requests/sessions/files summary. Original Claude/Codex logs and settings are never modified. Any leftover temporary rebuild database is cleaned up on app startup.
+
 ### Schema
 
 ```sql
@@ -58,13 +60,15 @@ sync_state (
 ```
 Sources/MonitorAgent/
 ├── App.swift                      # NSStatusItem + FloatingPanel (borderless NSPanel)
-├── AppStore.swift                 # ObservableObject, Combine filter → reload, selected activity detail, manages sync lifecycle
+├── AppStore.swift                 # ObservableObject, Combine filter → reload, selected activity detail, manages sync/rebuild lifecycle
 ├── ActivityTokenChartLayout.swift # Fixed layout constants for the Activity selected-day drawer
-├── DatabaseManager.swift          # GRDB r/w, schema setup, all queries + insert/sync methods
-├── Models.swift                   # AppFilter, TimeRange, UsageStats, DayActivity, HourlyTokenUsage, ParsedRecord, SyncState
+├── DatabaseManager.swift          # GRDB r/w, schema setup, path-based databases, all queries + insert/sync methods
+├── Models.swift                   # AppFilter, TimeRange, UsageStats, DayActivity, HourlyTokenUsage, ParsedRecord, SyncState, rebuild summaries
 ├── SyncSettings.swift             # SyncInterval enum + UserDefaults persistence (default 30s)
+├── UpdateCheckView.swift          # SwiftUI update-check dialog state and view
+├── UsageDataRebuilder.swift       # Temporary database rebuild, validation, and successful replacement
 ├── Sync/
-│   ├── SessionSyncManager.swift   # Configurable DispatchSourceTimer, file discovery, incremental read
+│   ├── SessionSyncManager.swift   # Configurable DispatchSourceTimer, injectable file roots/database, incremental/full read
 │   ├── ClaudeLogParser.swift      # Stateless: line Data → ParsedRecord?
 │   └── CodexLogParser.swift       # Stateful: line Data + CodexParseContext → ParsedRecord?
 └── Views/
@@ -81,7 +85,7 @@ Sources/MonitorAgent/
 
 ## UI Layout
 
-**Menu Bar**: Robot icon (template image from bundled SVG). Left-click opens the panel and triggers an on-demand sync. Right-click opens About / General / Config / Prompt / Check for Updates / Quit. Update-check result dialogs include the current bundle version, release commit SHA when available, and release date when available. Activation policy is `.accessory` (no Dock icon). Re-clicking the app icon shows the panel via `applicationShouldHandleReopen`.
+**Menu Bar**: Robot icon (template image from bundled SVG). Left-click opens the panel and triggers an on-demand sync. Right-click opens About / General / Config / Prompt / Check for Updates / Quit. Update-check dialogs use a SwiftUI-hosted panel with structured states for checking, up-to-date, new version, downloading, installing, completion, and failure. New-version dialogs show current build metadata and scrollable release notes; downloads show determinate MB progress. Activation policy is `.accessory` (no Dock icon). Re-clicking the app icon shows the panel via `applicationShouldHandleReopen`.
 
 **Panel** (top → bottom):
 
@@ -94,7 +98,7 @@ Sources/MonitorAgent/
 
 **Settings** — Left sidebar (General / Config / Prompt) plus right content area. Cancel closes the window. Save asks for confirmation before applying the current category, then keeps the window open and shows a top green success toast. Save only applies to the current category. Switching categories reloads from disk. Config/Prompt use a Claude Code / Codex tab bar.
 
-- **General** — Theme (System/Light/Dark), Sync Interval (10s/30s/60s/Never), Keep in Background toggle, Launch at Login toggle
+- **General** — Theme (System/Light/Dark), Sync Interval (10s/30s/60s/Never), Keep in Background toggle, Launch at Login toggle, Data rebuild action with progress/result sheet
 - **Config** — TextEditor for `~/.claude/settings.json` (JSON validated on save) and `~/.codex/config.toml`; shows "File not found" if missing
 - **Prompt** — TextEditor for `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`; shows "File not found" if missing
 

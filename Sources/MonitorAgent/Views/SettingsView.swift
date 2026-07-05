@@ -41,6 +41,16 @@ enum SaveSuccessToastStyle {
     static let backgroundColor = Color.green
 }
 
+enum UsageDataRebuildCopy {
+    static let buttonTitle = "Rebuild Local Usage Data"
+    static let description = "Rebuilds Monitor Agent's local usage database from Claude Code and Codex session logs. Original session logs and settings will not be changed."
+    static let confirmationTitle = "Rebuild Local Usage Data?"
+    static let confirmationMessage = "Monitor Agent will rebuild its local usage database from your Claude Code and Codex session logs. Your original logs and settings will not be changed.\n\nThe current database will remain in use unless the rebuild completes successfully."
+    static let runningMessage = "Rebuilding local usage data..."
+    static let successTitle = "Local usage data rebuilt successfully."
+    static let failureTitle = "Rebuild failed. Your existing usage data was not changed."
+}
+
 // MARK: - Settings View
 
 struct SettingsView: View {
@@ -362,10 +372,13 @@ struct SidebarItem: View {
 // MARK: - General
 
 struct GeneralSettingsView: View {
+    @EnvironmentObject var store: AppStore
+
     @Binding var draftTheme: Theme
     @Binding var draftSyncInterval: SyncInterval
     @Binding var draftKeepInBackground: Bool
     @Binding var draftLaunchAtLogin: Bool
+    @State private var showUsageDataRebuildSheet = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -436,9 +449,147 @@ struct GeneralSettingsView: View {
                     .toggleStyle(.switch)
                     .disabled(!SyncSettings.shared.canControlLaunchAtLogin)
             }
+
+            Divider().padding(.vertical, 4)
+
+            SettingsRow(
+                title: "Data",
+                description: UsageDataRebuildCopy.description
+            ) {
+                Button {
+                    store.prepareUsageDataRebuild()
+                    showUsageDataRebuildSheet = true
+                } label: {
+                    Text(UsageDataRebuildCopy.buttonTitle)
+                        .font(.system(size: 12))
+                    .frame(minWidth: 190)
+                }
+                .disabled(store.isRebuildingUsageData)
+            }
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .sheet(isPresented: $showUsageDataRebuildSheet) {
+            UsageDataRebuildSheetView(isPresented: $showUsageDataRebuildSheet)
+                .environmentObject(store)
+                .interactiveDismissDisabled(store.isRebuildingUsageData)
+        }
+    }
+}
+
+struct UsageDataRebuildSheetView: View {
+    @EnvironmentObject var store: AppStore
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            header
+            content
+            actions
+        }
+        .padding(22)
+        .frame(width: 430)
+    }
+
+    @ViewBuilder
+    private var header: some View {
+        if store.isRebuildingUsageData {
+            Label(UsageDataRebuildCopy.runningMessage, systemImage: "arrow.triangle.2.circlepath")
+                .font(.system(size: 15, weight: .semibold))
+        } else if store.usageDataRebuildSummary != nil {
+            Label(UsageDataRebuildCopy.successTitle, systemImage: "checkmark.circle.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.green)
+        } else if store.usageDataRebuildErrorMessage != nil {
+            Label(UsageDataRebuildCopy.failureTitle, systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.orange)
+        } else {
+            Label(UsageDataRebuildCopy.confirmationTitle, systemImage: "externaldrive.badge.timemachine")
+                .font(.system(size: 15, weight: .semibold))
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if store.isRebuildingUsageData {
+            UsageDataRebuildProgressView(progress: store.usageDataRebuildProgress)
+        } else if let summary = store.usageDataRebuildSummary {
+            Text(summary.displayText)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if let message = store.usageDataRebuildErrorMessage {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Your existing usage data was not changed.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                Text(message)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            Text(UsageDataRebuildCopy.confirmationMessage)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        HStack {
+            Spacer()
+            if store.isRebuildingUsageData {
+                Button("Close") {}
+                    .disabled(true)
+            } else if store.usageDataRebuildSummary != nil || store.usageDataRebuildErrorMessage != nil {
+                Button("Done") {
+                    isPresented = false
+                }
+                .keyboardShortcut(.defaultAction)
+            } else {
+                Button("Cancel", role: .cancel) {
+                    isPresented = false
+                }
+                Button("Rebuild") {
+                    store.rebuildLocalUsageData()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+}
+
+struct UsageDataRebuildProgressView: View {
+    let progress: SessionSyncProgress?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ProgressView(value: progress?.fractionCompleted ?? 0)
+                .progressViewStyle(.linear)
+
+            HStack {
+                Text(fileProgressText)
+                Spacer()
+                Text(recordProgressText)
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private var fileProgressText: String {
+        guard let progress else { return "Preparing files..." }
+        return "\(progress.completedFiles) / \(progress.totalFiles) files"
+    }
+
+    private var recordProgressText: String {
+        guard let progress else { return "0 requests rebuilt" }
+        let label = progress.recordsSynced == 1 ? "request" : "requests"
+        return "\(progress.recordsSynced) \(label) rebuilt"
     }
 }
 
