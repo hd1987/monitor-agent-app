@@ -32,7 +32,7 @@
 - **Model distribution** — stacked bar showing usage across the top models
 - **Settings editor** — update app preferences, Claude Code / Codex config files, and prompt files from one window
 - **Local data rebuild** — rebuild Monitor Agent's derived usage database from source logs without changing original logs or settings
-- **Auto-update** — built-in update checker with one-click download and install
+- **Auto-update** — built-in update checker with release notes, download progress, and one-click install
 
 ## Screenshot
 
@@ -116,7 +116,7 @@ MIT
 - **模型分布** — 堆叠比例条展示各模型使用占比
 - **设置编辑器** — 在同一个窗口管理应用设置、Claude Code / Codex 配置和提示词文件
 - **本地数据重建** — 从源日志重建 Monitor Agent 的派生使用数据库，不修改原始日志或设置
-- **自动更新** — 内置更新检查，一键下载安装
+- **自动更新** — 内置更新检查，显示发布说明、下载进度，并支持一键下载安装
 
 ### 安装
 

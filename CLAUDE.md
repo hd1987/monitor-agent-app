@@ -65,6 +65,7 @@ Sources/MonitorAgent/
 ├── DatabaseManager.swift          # GRDB r/w, schema setup, path-based databases, all queries + insert/sync methods
 ├── Models.swift                   # AppFilter, TimeRange, UsageStats, DayActivity, HourlyTokenUsage, ParsedRecord, SyncState, rebuild summaries
 ├── SyncSettings.swift             # SyncInterval enum + UserDefaults persistence (default 30s)
+├── UpdateCheckView.swift          # SwiftUI update-check dialog state and view
 ├── UsageDataRebuilder.swift       # Temporary database rebuild, validation, and successful replacement
 ├── Sync/
 │   ├── SessionSyncManager.swift   # Configurable DispatchSourceTimer, injectable file roots/database, incremental/full read
@@ -84,7 +85,7 @@ Sources/MonitorAgent/
 
 ## UI Layout
 
-**Menu Bar**: Robot icon (template image from bundled SVG). Left-click opens the panel and triggers an on-demand sync. Right-click opens About / General / Config / Prompt / Check for Updates / Quit. Update-check result dialogs include the current bundle version, release commit SHA when available, and release date when available. Activation policy is `.accessory` (no Dock icon). Re-clicking the app icon shows the panel via `applicationShouldHandleReopen`.
+**Menu Bar**: Robot icon (template image from bundled SVG). Left-click opens the panel and triggers an on-demand sync. Right-click opens About / General / Config / Prompt / Check for Updates / Quit. Update-check dialogs use a SwiftUI-hosted panel with structured states for checking, up-to-date, new version, downloading, installing, completion, and failure. New-version dialogs show current build metadata and scrollable release notes; downloads show determinate MB progress. Activation policy is `.accessory` (no Dock icon). Re-clicking the app icon shows the panel via `applicationShouldHandleReopen`.
 
 **Panel** (top → bottom):
 
