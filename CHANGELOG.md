@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Combine token stat cards into a composite Tokens card with token breakdown details and show Cache Hit with a progress bar
+- Include Cache Creation in the Activity hourly token chart
+
 ## [0.2.16] - 2026-07-05
 
 ### Added

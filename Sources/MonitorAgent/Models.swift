@@ -182,6 +182,10 @@ struct UsageStats {
         guard denominator > 0 else { return 0 }
         return Double(cacheReadTokens) / denominator
     }
+
+    var totalTokens: Int64 {
+        inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens
+    }
 }
 
 struct DayActivity: Identifiable {
@@ -196,10 +200,11 @@ struct HourlyTokenUsage: Identifiable, Equatable {
     let inputTokens: Int64
     let outputTokens: Int64
     let cacheReadTokens: Int64
+    let cacheCreationTokens: Int64
     var id: Int { hour }
 
     var hasTokenUsage: Bool {
-        inputTokens > 0 || outputTokens > 0 || cacheReadTokens > 0
+        inputTokens > 0 || outputTokens > 0 || cacheReadTokens > 0 || cacheCreationTokens > 0
     }
 }
 
