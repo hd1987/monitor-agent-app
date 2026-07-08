@@ -13,6 +13,7 @@ struct ActivityTokenChartView: View {
                 TokenSeriesPoint(metric: "Input Tokens", hour: item.hour, value: Double(item.inputTokens)),
                 TokenSeriesPoint(metric: "Output Tokens", hour: item.hour, value: Double(item.outputTokens)),
                 TokenSeriesPoint(metric: "Cache Read", hour: item.hour, value: Double(item.cacheReadTokens)),
+                TokenSeriesPoint(metric: "Cache Creation", hour: item.hour, value: Double(item.cacheCreationTokens)),
             ]
         }
     }
@@ -23,7 +24,7 @@ struct ActivityTokenChartView: View {
 
     private var totalTokens: Int64 {
         usage.reduce(Int64(0)) { total, item in
-            total + item.inputTokens + item.outputTokens + item.cacheReadTokens
+            total + item.inputTokens + item.outputTokens + item.cacheReadTokens + item.cacheCreationTokens
         }
     }
 
@@ -56,6 +57,7 @@ struct ActivityTokenChartView: View {
                 "Input Tokens": Color.blue,
                 "Output Tokens": Color.green,
                 "Cache Read": Color.orange,
+                "Cache Creation": Color.purple,
             ])
             .chartXScale(domain: 0...23)
             .chartYScale(domain: 0...maxValue)
@@ -160,12 +162,17 @@ struct ActivityTokenChartView: View {
             tokenRow(label: "Input", color: .blue, value: item.inputTokens)
             tokenRow(label: "Output", color: .green, value: item.outputTokens)
             tokenRow(label: "Cache", color: .orange, value: item.cacheReadTokens)
+            tokenRow(label: "Created", color: .purple, value: item.cacheCreationTokens)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(theme.tooltipBackground)
         .clipShape(RoundedRectangle(cornerRadius: 6))
-        .shadow(color: .black.opacity(0.12), radius: 4, x: 0, y: 2)
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.10), radius: 5, x: 0, y: 2)
     }
 
     private func requestRow(value: Int) -> some View {

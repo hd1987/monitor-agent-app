@@ -344,7 +344,7 @@ final class DatabaseManager {
 
         let whereSQL = "WHERE " + conditions.joined(separator: " AND ")
         var values = (0..<24).map {
-            HourlyTokenUsage(hour: $0, requestCount: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0)
+            HourlyTokenUsage(hour: $0, requestCount: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0)
         }
 
         guard let rows = try? db.read({ db in
@@ -354,7 +354,8 @@ final class DatabaseManager {
                     COUNT(*) AS request_count,
                     COALESCE(SUM(input_tokens), 0) AS input_tk,
                     COALESCE(SUM(output_tokens), 0) AS output_tk,
-                    COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tk
+                    COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tk,
+                    COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tk
                 FROM request_logs \(whereSQL)
                 GROUP BY hour ORDER BY hour
                 """, arguments: StatementArguments(args))
@@ -370,7 +371,8 @@ final class DatabaseManager {
                 requestCount: row["request_count"],
                 inputTokens: row["input_tk"],
                 outputTokens: row["output_tk"],
-                cacheReadTokens: row["cache_read_tk"]
+                cacheReadTokens: row["cache_read_tk"],
+                cacheCreationTokens: row["cache_creation_tk"]
             )
         }
 

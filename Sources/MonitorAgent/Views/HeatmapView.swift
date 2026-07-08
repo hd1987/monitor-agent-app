@@ -113,7 +113,12 @@ struct HeatmapView: View {
                         .background(GeometryReader { geo in
                             Color.clear.preference(key: TooltipSizeKey.self, value: geo.size)
                         })
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                        )
+                        .shadow(color: .black.opacity(0.10), radius: 5, x: 0, y: 2)
                         .fixedSize()
                         .offset(
                             x: ActivityTokenChartLayout.tooltipXOffset(

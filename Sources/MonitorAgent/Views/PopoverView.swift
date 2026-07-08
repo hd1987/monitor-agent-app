@@ -4,6 +4,7 @@ struct PopoverView: View {
     @EnvironmentObject var store: AppStore
     @EnvironmentObject var theme: ThemeManager
     @State private var appFilterFrameInWindow: CGRect = .null
+    @State private var isTokenBreakdownPresented = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -11,9 +12,10 @@ struct PopoverView: View {
                 appFilterFrameInWindow = frame
             }
             Divider().opacity(theme.dividerOpacity)
-            StatCardsView()
+            StatCardsView(isTokenBreakdownPresented: $isTokenBreakdownPresented)
             Divider().opacity(theme.dividerOpacity).padding(.horizontal, 16)
             HeatmapView(appFilterFrameInWindow: appFilterFrameInWindow)
+                .allowsHitTesting(!isTokenBreakdownPresented)
             Divider().opacity(theme.dividerOpacity).padding(.horizontal, 16)
             ModelDistributionView()
         }
