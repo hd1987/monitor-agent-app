@@ -186,6 +186,8 @@ struct ActivityTokenChartView: View {
             Spacer(minLength: 6)
             Text(formatCount(value))
                 .fontWeight(.medium)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
                 .foregroundStyle(theme.tooltipForeground)
         }
         .font(.system(size: 9))
@@ -201,6 +203,8 @@ struct ActivityTokenChartView: View {
             Spacer(minLength: 6)
             Text(formatTokens(value))
                 .fontWeight(.medium)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
                 .foregroundStyle(theme.tooltipForeground)
         }
         .font(.system(size: 9))

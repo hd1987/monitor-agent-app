@@ -80,6 +80,8 @@ struct ModelDistributionView: View {
                             .foregroundStyle(.secondary)
                         Text(formatCount(model.requests))
                             .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                             .foregroundStyle(.primary)
                     }
                 }
