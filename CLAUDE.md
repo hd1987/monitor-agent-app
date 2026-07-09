@@ -76,7 +76,7 @@ Sources/MonitorAgent/
     ├── PopoverView.swift          # Panel container (620px, white 98%, rounded 12pt, light mode)
     ├── FilterBar.swift            # App toggle (All/Claude Code/Codex) + date range dropdown
     ├── SettingsView.swift         # Sidebar settings: General / Config / Prompt categories
-    ├── StatCardsView.swift        # 6 stat cards in HStack
+    ├── StatCardsView.swift        # 4 stat cards in HStack
     ├── ActivityTokenChartView.swift # Fixed-height selected-day hourly token chart
     ├── HeatmapView.swift          # Year heatmap grid + hover tooltip + selected-day token chart
     ├── WindowFrameReader.swift    # Shared AppKit frame reporter for outside-click exclusions
@@ -90,7 +90,7 @@ Sources/MonitorAgent/
 **Panel** (top → bottom):
 
 1. **FilterBar** — `[All | Claude Code | Codex]` segmented control plus right-aligned date range dropdown. Presets are `Today | 7 Days | 30 Days | All Time`; the calendar supports single-day and start/end range selection. Selecting the current day from the calendar uses the dynamic `Today` range instead of a fixed custom date, and any active date selection resets to `Today` after day rollover.
-2. **StatCards** — `Requests | Sessions | Tokens | Cache Hit`. Tokens is a composite card whose total is Input Tokens + Output Tokens + Cache Read + Cache Creation; hover/click detail shows each token category. Cache Hit shows the percentage plus a compact progress bar.
+2. **StatCards** — `Requests | Sessions | Tokens | Cache Hit`. Requests, Sessions, and Cache Hit share a metric-card width; Tokens is wider. Tokens is a composite card whose total is Input Tokens + Output Tokens + Cache Read + Cache Creation; hover/click detail shows each token category. Cache Hit shows the percentage.
 3. **Activity** — GitHub-style heatmap with `Default` trailing-365-day mode and per-year mode. Hover shows the daily request count with the tooltip kept inside the heatmap width. Days with no activity are not selectable. Clicking an active day filters the whole panel to that date and opens a fixed-height hourly token chart for Input Tokens, Output Tokens, Cache Read, Cache Creation, and request count when token data exists; clicking the current day uses the dynamic `Today` range. The chart x-axis shows 3-hour labels from `0h` through `21h`; today's chart stops drawing at the current hour so future zero-value buckets do not pull lines down. Hovering inside the chart shows the nearest start-inclusive one-hour range plus its exact request count and token values. Clicking outside Activity hides the chart without restoring the previous date range; switching All / Claude Code / Codex keeps the chart open when data remains available.
 4. **ModelDistribution** — stacked proportion bar plus three-column legend for top models.
 

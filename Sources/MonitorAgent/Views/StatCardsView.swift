@@ -7,22 +7,25 @@ struct StatCardsView: View {
     var body: some View {
         HStack(spacing: 8) {
             StatCard(title: "Requests", value: formatCount(store.stats.totalRequests))
-                .frame(width: StatCardLayout.compactWidth)
+                .frame(width: StatCardLayout.requestsWidth)
             StatCard(title: "Sessions", value: formatCount(store.stats.totalSessions))
-                .frame(width: StatCardLayout.compactWidth)
+                .frame(width: StatCardLayout.sessionsWidth)
             TokenSummaryCard(stats: store.stats, isDetailPresented: $isTokenBreakdownPresented)
-                .frame(width: StatCardLayout.expandedWidth)
+                .frame(width: StatCardLayout.tokensWidth)
             CacheHitCard(stats: store.stats)
-                .frame(width: StatCardLayout.expandedWidth)
+                .frame(width: StatCardLayout.cacheHitWidth)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
     }
 }
 
-private enum StatCardLayout {
-    static let compactWidth: CGFloat = 110
-    static let expandedWidth: CGFloat = 172
+enum StatCardLayout {
+    static let metricWidth: CGFloat = 128
+    static let requestsWidth: CGFloat = metricWidth
+    static let sessionsWidth: CGFloat = metricWidth
+    static let cacheHitWidth: CGFloat = metricWidth
+    static let tokensWidth: CGFloat = 180
     static let titleRowHeight: CGFloat = 12
 }
 
@@ -85,48 +88,11 @@ private struct TokenSummaryCard: View {
 }
 
 private struct CacheHitCard: View {
-    @EnvironmentObject var theme: ThemeManager
     let stats: UsageStats
 
     var body: some View {
-        StatCardContainer {
-            VStack(spacing: 6) {
-                HStack(alignment: .firstTextBaseline) {
-                    statCardTitle("Cache Hit")
-                    Spacer(minLength: 8)
-                    Text(formatPercent(stats.cacheHitRate))
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.primary)
-                }
-                .frame(maxWidth: .infinity)
-
-                CacheHitProgressBar(rate: stats.cacheHitRate)
-                    .frame(height: 4)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        }
-        .help(cacheHitHelp())
-    }
-}
-
-private struct CacheHitProgressBar: View {
-    @EnvironmentObject var theme: ThemeManager
-    let rate: Double
-
-    private var clampedRate: Double {
-        min(max(rate, 0), 1)
-    }
-
-    var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(theme.cellEmpty)
-                Capsule()
-                    .fill(theme.cellActive)
-                    .frame(width: max(geometry.size.width * clampedRate, clampedRate > 0 ? 2 : 0))
-            }
-        }
+        StatCard(title: "Cache Hit", value: formatPercent(stats.cacheHitRate))
+            .help(cacheHitHelp())
     }
 }
 
