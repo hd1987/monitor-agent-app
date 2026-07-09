@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.20] - 2026-07-09
+
 ### Changed
 - Show request and session counts as exact grouped numbers and use two decimal places for abbreviated token counts
 
