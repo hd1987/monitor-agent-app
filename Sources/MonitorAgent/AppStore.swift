@@ -18,12 +18,26 @@ final class AppStore: ObservableObject {
     @Published var usageDataRebuildSummary: UsageDataRebuildSummary?
     @Published var usageDataRebuildErrorMessage: String?
 
-    private let db = DatabaseManager.shared
-    private let syncManager = SessionSyncManager()
-    private let syncSettings = SyncSettings.shared
+    private let db: DatabaseManager
+    private let syncManager: SessionSyncManager
+    private let syncSettings: SyncSettings
+    private let currentDateProvider: () -> Date
+    private var activeDay: Date
     private var cancellables = Set<AnyCancellable>()
 
-    init() {
+    init(
+        database: DatabaseManager = .shared,
+        syncManager: SessionSyncManager? = nil,
+        syncSettings: SyncSettings = .shared,
+        autoStartSync: Bool = true,
+        currentDateProvider: @escaping () -> Date = Date.init
+    ) {
+        self.db = database
+        self.syncManager = syncManager ?? SessionSyncManager(database: database)
+        self.syncSettings = syncSettings
+        self.currentDateProvider = currentDateProvider
+        self.activeDay = Calendar.current.startOfDay(for: currentDateProvider())
+
         DatabaseManager.cleanUpTemporaryRebuildDatabase()
 
         // React to filter changes
@@ -34,12 +48,14 @@ final class AppStore: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // React to sync interval changes
-        syncSettings.$interval
-            .sink { [weak self] interval in
-                self?.applySyncInterval(interval)
-            }
-            .store(in: &cancellables)
+        if autoStartSync {
+            // React to sync interval changes
+            syncSettings.$interval
+                .sink { [weak self] interval in
+                    self?.applySyncInterval(interval)
+                }
+                .store(in: &cancellables)
+        }
     }
 
     /// Apply sync interval: start/restart timer or stop if "never".
@@ -103,7 +119,22 @@ final class AppStore: ObservableObject {
     }
 
     func reload() {
-        DispatchQueue.global(qos: .userInitiated).async { [self] in
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.reload()
+            }
+            return
+        }
+
+        resetToTodayAfterDayRolloverIfNeeded()
+
+        let appFilter = appFilter
+        let timeRange = timeRange
+        let heatmapMode = heatmapMode
+        let selectedActivityDate = selectedActivityDate
+        let db = db
+
+        DispatchQueue.global(qos: .userInitiated).async {
             let s = db.fetchStats(app: appFilter, range: timeRange)
             let cal = Calendar.current
             let h: [DayActivity]
@@ -125,6 +156,15 @@ final class AppStore: ObservableObject {
             let years = db.availableYears()
 
             DispatchQueue.main.async {
+                guard
+                    self.appFilter == appFilter,
+                    self.timeRange == timeRange,
+                    self.heatmapMode == heatmapMode,
+                    self.selectedActivityDate == selectedActivityDate
+                else {
+                    return
+                }
+
                 self.stats = s
                 self.heatmap = h
                 self.hourlyTokenUsage = hourly
@@ -137,7 +177,7 @@ final class AppStore: ObservableObject {
     }
 
     func selectActivityDate(_ date: String) {
-        guard let range = TimeRange.activityDay(date) else { return }
+        guard let range = TimeRange.activityDay(date, now: currentDateProvider()) else { return }
 
         selectedActivityDate = date
         timeRange = range
@@ -167,5 +207,15 @@ final class AppStore: ObservableObject {
                 }
             }
         }
+    }
+
+    private func resetToTodayAfterDayRolloverIfNeeded() {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: currentDateProvider())
+        guard !calendar.isDate(activeDay, inSameDayAs: today) else { return }
+
+        activeDay = today
+        timeRange = .today
+        clearSelectedActivityDate()
     }
 }

@@ -62,6 +62,41 @@ final class TimeRangeTests: XCTestCase {
         ))
     }
 
+    func testSingleDaySelectionForTodayUsesDynamicTodayPreset() {
+        let now = date(year: 2026, month: 7, day: 9, hour: 10)
+
+        let range = TimeRange.singleDaySelection(
+            for: date(year: 2026, month: 7, day: 9),
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(range, .today)
+    }
+
+    func testSingleDaySelectionForPastDateUsesFixedCustomRange() {
+        let now = date(year: 2026, month: 7, day: 9, hour: 10)
+
+        let range = TimeRange.singleDaySelection(
+            for: date(year: 2026, month: 7, day: 8),
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(range, .custom(
+            start: date(year: 2026, month: 7, day: 8),
+            end: date(year: 2026, month: 7, day: 8)
+        ))
+    }
+
+    func testActivityDayForTodayUsesDynamicTodayPreset() {
+        let now = date(year: 2026, month: 7, day: 9, hour: 10)
+
+        let range = TimeRange.activityDay("2026-07-09", now: now, calendar: calendar)
+
+        XCTAssertEqual(range, .today)
+    }
+
     func testCustomRangeDisplayTitleShowsStartAndEndDates() {
         let start = date(year: 2026, month: 6, day: 18)
         let end = date(year: 2026, month: 6, day: 20)

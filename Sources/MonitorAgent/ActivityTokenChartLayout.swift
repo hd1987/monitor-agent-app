@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 enum ActivityTokenChartLayout {
     static let drawerHeight: CGFloat = 190
@@ -28,5 +29,28 @@ enum ActivityTokenChartLayout {
 
     static func hoveredHour(forChartXValue value: Double) -> Int {
         min(max(0, Int(value.rounded())), lastChartHour)
+    }
+
+    static func visibleUsage(
+        _ usage: [HourlyTokenUsage],
+        for dateString: String,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [HourlyTokenUsage] {
+        let parts = dateString.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return usage }
+
+        guard let date = calendar.date(from: DateComponents(
+            year: parts[0],
+            month: parts[1],
+            day: parts[2]
+        )) else {
+            return usage
+        }
+
+        guard calendar.isDate(date, inSameDayAs: now) else { return usage }
+
+        let currentHour = min(max(0, calendar.component(.hour, from: now)), lastChartHour)
+        return usage.filter { $0.hour <= currentHour }
     }
 }

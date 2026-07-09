@@ -49,4 +49,47 @@ final class ActivityTokenChartLayoutTests: XCTestCase {
         XCTAssertEqual(ActivityTokenChartLayout.hoveredHour(forChartXValue: -1.4), 0)
         XCTAssertEqual(ActivityTokenChartLayout.hoveredHour(forChartXValue: 24.2), 23)
     }
+
+    func testVisibleUsageForTodayStopsAtCurrentHour() {
+        let calendar = Calendar(identifier: .gregorian)
+        let usage = hourlyUsage()
+        let now = calendar.date(from: DateComponents(year: 2026, month: 7, day: 9, hour: 10, minute: 30))!
+
+        let visible = ActivityTokenChartLayout.visibleUsage(
+            usage,
+            for: "2026-07-09",
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(visible.map(\.hour), Array(0...10))
+    }
+
+    func testVisibleUsageForPastDateKeepsFullDay() {
+        let calendar = Calendar(identifier: .gregorian)
+        let usage = hourlyUsage()
+        let now = calendar.date(from: DateComponents(year: 2026, month: 7, day: 9, hour: 10, minute: 30))!
+
+        let visible = ActivityTokenChartLayout.visibleUsage(
+            usage,
+            for: "2026-07-08",
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(visible.map(\.hour), Array(0...23))
+    }
+
+    private func hourlyUsage() -> [HourlyTokenUsage] {
+        (0...23).map {
+            HourlyTokenUsage(
+                hour: $0,
+                requestCount: $0 == 10 ? 1 : 0,
+                inputTokens: $0 == 10 ? 100 : 0,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                cacheCreationTokens: 0
+            )
+        }
+    }
 }

@@ -202,7 +202,12 @@ struct FilterBar: View {
     private func selectCalendarDate(_ date: Date) {
         calendarSelection.select(date)
         guard let start = calendarSelection.start, let end = calendarSelection.end else { return }
-        store.setTimeRangeFromFilter(.custom(start: start, end: end))
+        let calendar = Calendar.current
+        if calendar.isDate(start, inSameDayAs: end) {
+            store.setTimeRangeFromFilter(TimeRange.singleDaySelection(for: start, calendar: calendar))
+        } else {
+            store.setTimeRangeFromFilter(.custom(start: start, end: end))
+        }
     }
 
     private func moveDisplayedMonth(by value: Int) {
