@@ -6,6 +6,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Treat calendar and Activity selections for the current day as the dynamic Today range and reset any selected date to Today after day rollover
+
+### Fixed
+- Stop the Activity hourly chart for today at the current hour so future zero-value buckets do not pull lines down
+
 ## [0.2.17] - 2026-07-08
 
 ### Changed

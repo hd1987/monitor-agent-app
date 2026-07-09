@@ -61,7 +61,19 @@ enum TimeRange: Equatable, Identifiable {
 
     static let presets: [TimeRange] = [.today, .last7, .last30, .allTime]
 
-    static func activityDay(_ dateString: String, calendar: Calendar = .current) -> TimeRange? {
+    static func singleDaySelection(
+        for date: Date,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> TimeRange {
+        let day = calendar.startOfDay(for: date)
+        if calendar.isDate(day, inSameDayAs: now) {
+            return .today
+        }
+        return .custom(start: day, end: day)
+    }
+
+    static func activityDay(_ dateString: String, now: Date = Date(), calendar: Calendar = .current) -> TimeRange? {
         let parts = dateString.split(separator: "-").compactMap { Int($0) }
         guard parts.count == 3 else { return nil }
 
@@ -73,8 +85,7 @@ enum TimeRange: Equatable, Identifiable {
             return nil
         }
 
-        let day = calendar.startOfDay(for: date)
-        return .custom(start: day, end: day)
+        return singleDaySelection(for: date, now: now, calendar: calendar)
     }
 
     var id: String {

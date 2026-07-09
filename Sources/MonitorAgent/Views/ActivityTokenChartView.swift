@@ -7,8 +7,12 @@ struct ActivityTokenChartView: View {
     let usage: [HourlyTokenUsage]
     @State private var hoveredHour: Int?
 
+    private var visibleUsage: [HourlyTokenUsage] {
+        ActivityTokenChartLayout.visibleUsage(usage, for: date)
+    }
+
     private var points: [TokenSeriesPoint] {
-        usage.flatMap { item in
+        visibleUsage.flatMap { item in
             [
                 TokenSeriesPoint(metric: "Input Tokens", hour: item.hour, value: Double(item.inputTokens)),
                 TokenSeriesPoint(metric: "Output Tokens", hour: item.hour, value: Double(item.outputTokens)),
@@ -30,7 +34,7 @@ struct ActivityTokenChartView: View {
 
     private var hoveredUsage: HourlyTokenUsage? {
         guard let hoveredHour else { return nil }
-        return usage.first { $0.hour == hoveredHour }
+        return visibleUsage.first { $0.hour == hoveredHour }
     }
 
     var body: some View {
