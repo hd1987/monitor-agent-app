@@ -39,6 +39,8 @@ struct StatCard: View {
                 statCardTitle(title)
                 Text(value)
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                     .foregroundStyle(.primary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -109,6 +111,8 @@ private struct TokenBreakdownTip: View {
                 Spacer()
                 Text(formatTokens(stats.totalTokens))
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                     .foregroundStyle(theme.tooltipForeground)
             }
 
@@ -142,6 +146,8 @@ private struct TokenBreakdownTip: View {
             Spacer(minLength: 12)
             Text(formatTokens(value))
                 .fontWeight(.medium)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
                 .foregroundStyle(theme.tooltipForeground)
         }
         .font(.system(size: 10))
@@ -181,23 +187,23 @@ private func cacheHitHelp() -> String {
 // MARK: - Formatting
 
 func formatCount(_ n: Int) -> String {
-    if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
-    if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
-    return "\(n)"
+    let formatter = NumberFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.numberStyle = .decimal
+    formatter.usesGroupingSeparator = true
+    formatter.groupingSeparator = ","
+    return formatter.string(from: NSNumber(value: n)) ?? "\(n)"
 }
 
 func formatTokens(_ n: Int64) -> String {
-    if n >= 1_000_000_000 { return String(format: "%.1fB", Double(n) / 1_000_000_000) }
-    if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
-    if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
-    return "\(n)"
-}
-
-func formatTokenDetail(_ n: Int64) -> String {
     if n >= 1_000_000_000 { return String(format: "%.2fB", Double(n) / 1_000_000_000) }
     if n >= 1_000_000 { return String(format: "%.2fM", Double(n) / 1_000_000) }
     if n >= 1_000 { return String(format: "%.2fK", Double(n) / 1_000) }
     return "\(n)"
+}
+
+func formatTokenDetail(_ n: Int64) -> String {
+    formatTokens(n)
 }
 
 func formatPercent(_ rate: Double) -> String {
