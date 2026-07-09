@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Removed the Cache Hit progress bar and aligned Requests, Sessions, and Cache Hit stat card widths
+
 ## [0.2.18] - 2026-07-09
 
 ### Changed
