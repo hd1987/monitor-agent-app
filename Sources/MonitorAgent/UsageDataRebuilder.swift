@@ -1,12 +1,15 @@
 import Foundation
 
-enum UsageDataRebuildError: LocalizedError {
+enum UsageDataRebuildError: LocalizedError, Equatable {
     case validationFailed
+    case noSourceFiles
 
     var errorDescription: String? {
         switch self {
         case .validationFailed:
             return "The rebuilt database failed validation."
+        case .noSourceFiles:
+            return "No source session files could be read. The existing database was not changed."
         }
     }
 }
@@ -51,6 +54,13 @@ final class UsageDataRebuilder {
             )
             let syncResult = syncManager.syncAllOnce(onProgress: onProgress)
 
+            let activeStats = activeDatabase.fetchStats(app: .all, range: .allTime)
+            let activeDataMustBePreserved = activeStats.totalRequests > 0
+                || (!activeDatabase.isAvailable && activeDatabase.hasExistingDatabaseFile)
+            if syncResult.filesSynced == 0 && activeDataMustBePreserved {
+                throw UsageDataRebuildError.noSourceFiles
+            }
+
             guard validateTemporaryDatabase(rebuildDatabase) else {
                 throw UsageDataRebuildError.validationFailed
             }
@@ -70,7 +80,6 @@ final class UsageDataRebuilder {
         } catch {
             temporaryDatabase?.close()
             cleanUpTemporaryDatabase()
-            try? activeDatabase.reopen()
             throw error
         }
     }

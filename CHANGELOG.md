@@ -6,6 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.21] - 2026-07-10
+
+### Fixed
+- Stage and validate updates before replacement, restoring the installed app if replacement fails
+- Keep the app recoverable when the local usage database cannot be opened
+- Commit synced records and file offsets atomically, restart truncated files from the beginning, and serialize rebuild with active sync work
+- Keep existing usage data when a rebuild cannot read any source session files
+- Clear unavailable Activity years after data changes
+- Promote rounded token abbreviations to the next unit at display boundaries
+
 ## [0.2.20] - 2026-07-09
 
 ### Changed

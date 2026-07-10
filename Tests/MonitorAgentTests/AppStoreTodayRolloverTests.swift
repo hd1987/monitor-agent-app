@@ -52,6 +52,44 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         wait(for: [reset], timeout: 1)
     }
 
+    func testReloadClearsUnavailableYearsAndResetsYearMode() {
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            autoStartSync: false
+        )
+        store.availableYears = [2025]
+        store.heatmapMode = .year(2025)
+
+        let cleared = expectation(description: "empty database clears stale years")
+        store.reload()
+        waitUntil(attemptsRemaining: 50) {
+            store.availableYears.isEmpty && store.heatmapMode == .trailing
+        } completion: {
+            cleared.fulfill()
+        }
+
+        wait(for: [cleared], timeout: 1)
+    }
+
+    private func waitUntil(
+        attemptsRemaining: Int,
+        condition: @escaping () -> Bool,
+        completion: @escaping () -> Void
+    ) {
+        if condition() {
+            completion()
+            return
+        }
+        guard attemptsRemaining > 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+            self.waitUntil(
+                attemptsRemaining: attemptsRemaining - 1,
+                condition: condition,
+                completion: completion
+            )
+        }
+    }
+
     private func date(year: Int, month: Int, day: Int, hour: Int = 0) -> Date {
         let calendar = Calendar.current
         return calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour))!

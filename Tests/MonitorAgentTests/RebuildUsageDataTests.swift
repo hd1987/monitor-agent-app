@@ -72,6 +72,67 @@ final class RebuildUsageDataTests: XCTestCase {
         ])
     }
 
+    func testExclusiveSyncOperationsRunSerially() {
+        let database = DatabaseManager(inMemory: true)
+        let syncManager = SessionSyncManager(database: database)
+        let firstEntered = expectation(description: "first operation entered")
+        let secondEntered = DispatchSemaphore(value: 0)
+        let releaseFirst = DispatchSemaphore(value: 0)
+
+        DispatchQueue.global().async {
+            syncManager.performExclusive {
+                firstEntered.fulfill()
+                releaseFirst.wait()
+            }
+        }
+        wait(for: [firstEntered], timeout: 1)
+
+        DispatchQueue.global().async {
+            syncManager.performExclusive {
+                _ = secondEntered.signal()
+            }
+        }
+        XCTAssertEqual(secondEntered.wait(timeout: .now() + 0.05), .timedOut)
+
+        releaseFirst.signal()
+        XCTAssertEqual(secondEntered.wait(timeout: .now() + 1), .success)
+    }
+
+    func testIncrementalSyncRestartsFromBeginningAfterFileTruncation() throws {
+        let directory = try makeTemporaryDirectory()
+        let claudeRoot = directory.appendingPathComponent("claude-projects")
+        let codexRoot = directory.appendingPathComponent("codex-sessions")
+        let codexArchiveRoot = directory.appendingPathComponent("codex-archive")
+        try FileManager.default.createDirectory(at: claudeRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexArchiveRoot, withIntermediateDirectories: true)
+
+        let claudeFile = claudeRoot.appendingPathComponent("session.jsonl")
+        let initialContent = claudeAssistantLine(messageId: "long-message-1")
+            + claudeAssistantLine(messageId: "long-message-2")
+        try initialContent.write(to: claudeFile, atomically: true, encoding: .utf8)
+
+        let database = try DatabaseManager(path: directory.appendingPathComponent("monitor.db").path)
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: claudeRoot.path,
+            codexSessionsPath: codexRoot.path,
+            codexArchivedSessionsPath: codexArchiveRoot.path
+        )
+        _ = syncManager.syncAllOnce()
+
+        let replacementContent = claudeAssistantLine(messageId: "new")
+        XCTAssertLessThan(replacementContent.utf8.count, initialContent.utf8.count)
+        try replacementContent.write(to: claudeFile, atomically: true, encoding: .utf8)
+        _ = syncManager.syncAllOnce()
+
+        XCTAssertEqual(database.fetchStats(app: .all, range: .allTime).totalRequests, 3)
+        XCTAssertEqual(
+            database.getSyncState(for: claudeFile.path)?.byteOffset,
+            Int64(replacementContent.utf8.count)
+        )
+    }
+
     func testReplaceDatabaseWithTemporaryDatabaseSwapsQueryableData() throws {
         let directory = try makeTemporaryDirectory()
         let activePath = directory.appendingPathComponent("monitor.db").path
@@ -197,6 +258,55 @@ final class RebuildUsageDataTests: XCTestCase {
         XCTAssertThrowsError(try rebuilder.rebuild())
         XCTAssertEqual(activeDatabase.fetchStats(app: .all, range: .allTime).inputTokens, 10)
         XCTAssertFalse(FileManager.default.fileExists(atPath: temporaryPath))
+    }
+
+    func testUsageDataRebuilderKeepsActiveDatabaseWhenNoSourceFilesAreReadable() throws {
+        let directory = try makeTemporaryDirectory()
+        let activePath = directory.appendingPathComponent("monitor.db").path
+        let temporaryPath = directory.appendingPathComponent("monitor-rebuild.tmp.db").path
+        let activeDatabase = try DatabaseManager(path: activePath)
+        activeDatabase.insertRecords([record(id: "old", input: 10)])
+
+        let rebuilder = UsageDataRebuilder(
+            activeDatabase: activeDatabase,
+            temporaryDatabasePath: temporaryPath,
+            claudeProjectsPath: directory.appendingPathComponent("missing-claude").path,
+            codexSessionsPath: directory.appendingPathComponent("missing-codex").path,
+            codexArchivedSessionsPath: directory.appendingPathComponent("missing-archive").path
+        )
+
+        XCTAssertThrowsError(try rebuilder.rebuild()) { error in
+            XCTAssertEqual(error as? UsageDataRebuildError, .noSourceFiles)
+        }
+        XCTAssertEqual(activeDatabase.fetchStats(app: .all, range: .allTime).inputTokens, 10)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temporaryPath))
+    }
+
+    func testUsageDataRebuilderKeepsUnavailableExistingDatabaseWhenNoSourcesAreReadable() throws {
+        let directory = try makeTemporaryDirectory()
+        let activeURL = directory.appendingPathComponent("monitor.db")
+        let temporaryPath = directory.appendingPathComponent("monitor-rebuild.tmp.db").path
+        let originalData = Data("not-a-sqlite-database".utf8)
+        try originalData.write(to: activeURL)
+        let activeDatabase = DatabaseManager.openOrUnavailable(
+            path: activeURL.path,
+            logError: { _ in }
+        )
+        XCTAssertFalse(activeDatabase.isAvailable)
+
+        let rebuilder = UsageDataRebuilder(
+            activeDatabase: activeDatabase,
+            temporaryDatabasePath: temporaryPath,
+            claudeProjectsPath: directory.appendingPathComponent("missing-claude").path,
+            codexSessionsPath: directory.appendingPathComponent("missing-codex").path,
+            codexArchivedSessionsPath: directory.appendingPathComponent("missing-archive").path
+        )
+
+        XCTAssertThrowsError(try rebuilder.rebuild()) { error in
+            XCTAssertEqual(error as? UsageDataRebuildError, .noSourceFiles)
+        }
+        XCTAssertEqual(try Data(contentsOf: activeURL), originalData)
+        XCTAssertFalse(activeDatabase.isAvailable)
     }
 
     private func makeTemporaryDirectory() throws -> URL {

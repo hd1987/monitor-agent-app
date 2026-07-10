@@ -90,9 +90,11 @@ final class AppStore: ObservableObject {
             guard let self else { return }
 
             do {
-                let summary = try UsageDataRebuilder(activeDatabase: db).rebuild { [weak self] progress in
-                    DispatchQueue.main.async {
-                        self?.usageDataRebuildProgress = progress
+                let summary = try syncManager.performExclusive {
+                    try UsageDataRebuilder(activeDatabase: self.db).rebuild { [weak self] progress in
+                        DispatchQueue.main.async {
+                            self?.usageDataRebuildProgress = progress
+                        }
                     }
                 }
                 DispatchQueue.main.async {
@@ -169,8 +171,10 @@ final class AppStore: ObservableObject {
                 self.heatmap = h
                 self.hourlyTokenUsage = hourly
                 self.modelDistribution = m
-                if !years.isEmpty {
-                    self.availableYears = years
+                self.availableYears = years
+                if case .year(let selectedYear) = self.heatmapMode,
+                   !years.contains(selectedYear) {
+                    self.heatmapMode = .trailing
                 }
             }
         }
