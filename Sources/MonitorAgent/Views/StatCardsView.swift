@@ -196,8 +196,8 @@ func formatCount(_ n: Int) -> String {
 }
 
 func formatTokens(_ n: Int64) -> String {
-    if n >= 1_000_000_000 { return String(format: "%.2fB", Double(n) / 1_000_000_000) }
-    if n >= 1_000_000 { return String(format: "%.2fM", Double(n) / 1_000_000) }
+    if n >= 999_995_000 { return String(format: "%.2fB", Double(n) / 1_000_000_000) }
+    if n >= 999_995 { return String(format: "%.2fM", Double(n) / 1_000_000) }
     if n >= 1_000 { return String(format: "%.2fK", Double(n) / 1_000) }
     return "\(n)"
 }

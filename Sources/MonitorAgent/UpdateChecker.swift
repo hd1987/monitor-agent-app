@@ -260,14 +260,10 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
     }
 
     private static func extractApp(from zipURL: URL) -> Bool {
-        let appPath = "/Applications/MonitorAgent.app"
-        try? FileManager.default.removeItem(atPath: appPath)
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        p.arguments = ["-xk", zipURL.path, "/Applications/"]
-        guard (try? p.run()) != nil else { return false }
-        p.waitUntilExit()
-        return p.terminationStatus == 0
+        AppInstaller.install(
+            zipURL: zipURL,
+            destinationURL: URL(fileURLWithPath: "/Applications/MonitorAgent.app")
+        )
     }
 
     @objc private func restartApp() {

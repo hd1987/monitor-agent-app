@@ -25,7 +25,9 @@ Self-owned JSONL parsing, no third-party dependency.
 
 Database: `~/.monitor-agent/monitor.db`
 
-The database is a derived local cache, not the source of truth. `Settings > General > Data` can rebuild it by syncing all Claude Code and Codex JSONL logs into `~/.monitor-agent/monitor-rebuild.tmp.db`, validating that temporary database, then replacing `monitor.db` only after the rebuild succeeds. The rebuild runs in a sheet that shows file-level progress and the final requests/sessions/files summary. Original Claude/Codex logs and settings are never modified. Any leftover temporary rebuild database is cleaned up on app startup.
+The database is a derived local cache, not the source of truth. Database open failures keep the app available so the rebuild action remains accessible. `Settings > General > Data` can rebuild the cache by syncing all Claude Code and Codex JSONL logs into `~/.monitor-agent/monitor-rebuild.tmp.db`, validating that temporary database, then replacing `monitor.db` only after the rebuild succeeds. If the active database contains data but no source files can be read, the rebuild aborts without replacing it. The rebuild runs in a sheet that shows file-level progress and the final requests/sessions/files summary. Original Claude/Codex logs and settings are never modified. Any leftover temporary rebuild database is cleaned up on app startup.
+
+Incremental sync resets a file's parser state when the source file is truncated or replaced with a smaller file. Parsed records and the matching `sync_state` offset are committed in one database transaction so an offset never advances past records that failed to persist. Rebuild waits for the sync queue to become idle, and database reads, writes, close, reopen, and replacement share one lifecycle lock so the active database cannot be replaced during an in-flight operation.
 
 ### Schema
 
@@ -60,12 +62,14 @@ sync_state (
 ```
 Sources/MonitorAgent/
 ├── App.swift                      # NSStatusItem + FloatingPanel (borderless NSPanel)
+├── AppInstaller.swift             # Staged update extraction, bundle validation, and installed-app replacement
 ├── AppStore.swift                 # ObservableObject, Combine filter → reload, selected activity detail, manages sync/rebuild lifecycle
 ├── ActivityTokenChartLayout.swift # Fixed layout constants for the Activity selected-day drawer
 ├── DatabaseManager.swift          # GRDB r/w, schema setup, path-based databases, all queries + insert/sync methods
 ├── Models.swift                   # AppFilter, TimeRange, UsageStats, DayActivity, HourlyTokenUsage, ParsedRecord, SyncState, rebuild summaries
 ├── SyncSettings.swift             # SyncInterval enum + UserDefaults persistence (default 30s)
 ├── UpdateCheckView.swift          # SwiftUI update-check dialog state and view
+├── UpdateChecker.swift            # GitHub release check, staged app validation, atomic install, and restart
 ├── UsageDataRebuilder.swift       # Temporary database rebuild, validation, and successful replacement
 ├── Sync/
 │   ├── SessionSyncManager.swift   # Configurable DispatchSourceTimer, injectable file roots/database, incremental/full read
@@ -85,7 +89,7 @@ Sources/MonitorAgent/
 
 ## UI Layout
 
-**Menu Bar**: Robot icon (template image from bundled SVG). Left-click opens the panel and triggers an on-demand sync. Right-click opens About / General / Config / Prompt / Check for Updates / Quit. Update-check dialogs use a SwiftUI-hosted panel with structured states for checking, up-to-date, new version, downloading, installing, completion, and failure. New-version dialogs show current build metadata and scrollable release notes; downloads show determinate MB progress. Activation policy is `.accessory` (no Dock icon). Re-clicking the app icon shows the panel via `applicationShouldHandleReopen`.
+**Menu Bar**: Robot icon (template image from bundled SVG). Left-click opens the panel and triggers an on-demand sync. Right-click opens About / General / Config / Prompt / Check for Updates / Quit. Update-check dialogs use a SwiftUI-hosted panel with structured states for checking, up-to-date, new version, downloading, installing, completion, and failure. New-version dialogs show current build metadata and scrollable release notes; downloads show determinate MB progress. Updates are extracted into a staging directory, validated as a MonitorAgent app bundle, and only then replace the installed app. Activation policy is `.accessory` (no Dock icon). Re-clicking the app icon shows the panel via `applicationShouldHandleReopen`.
 
 **Panel** (top → bottom):
 

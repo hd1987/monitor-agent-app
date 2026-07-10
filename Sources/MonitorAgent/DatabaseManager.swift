@@ -1,14 +1,32 @@
 import Foundation
 import GRDB
 
+enum DatabaseManagerError: LocalizedError {
+    case unavailable
+
+    var errorDescription: String? {
+        "The local usage database is unavailable."
+    }
+}
+
 final class DatabaseManager {
-    static let shared = try! DatabaseManager(path: defaultDatabasePath)
+    static let shared = openOrUnavailable(path: defaultDatabasePath)
     static let defaultDirectory = NSHomeDirectory() + "/.monitor-agent"
     static let defaultDatabasePath = defaultDirectory + "/monitor.db"
     static let rebuildDatabasePath = defaultDirectory + "/monitor-rebuild.tmp.db"
 
     private var dbQueue: DatabaseQueue?
     private let databasePath: String?
+    private let lifecycleLock = NSRecursiveLock()
+
+    var isAvailable: Bool {
+        withLifecycleLock { dbQueue != nil }
+    }
+    var hasExistingDatabaseFile: Bool {
+        withLifecycleLock {
+            databasePath.map { FileManager.default.fileExists(atPath: $0) } ?? false
+        }
+    }
 
     init(inMemory: Bool) {
         databasePath = nil
@@ -33,9 +51,34 @@ final class DatabaseManager {
         try setupSchema()
     }
 
+    private init(unavailablePath: String) {
+        databasePath = unavailablePath
+        dbQueue = nil
+    }
+
+    static func openOrUnavailable(
+        path: String,
+        logError: (String) -> Void = { print($0) }
+    ) -> DatabaseManager {
+        do {
+            return try DatabaseManager(path: path)
+        } catch {
+            logError("Failed to open database at \(path): \(error)")
+            return DatabaseManager(unavailablePath: path)
+        }
+    }
+
     // MARK: - Schema
 
+    private func withLifecycleLock<T>(_ operation: () throws -> T) rethrows -> T {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        return try operation()
+    }
+
     private func setupSchema() throws {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
         try dbQueue?.write { db in
             try db.execute(sql: """
                 CREATE TABLE IF NOT EXISTS request_logs (
@@ -87,6 +130,8 @@ final class DatabaseManager {
     }
 
     func integrityCheck() -> Bool {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
         guard let db = dbQueue else { return false }
         return (try? db.read { db in
             let row = try Row.fetchOne(db, sql: "PRAGMA integrity_check")
@@ -95,10 +140,14 @@ final class DatabaseManager {
     }
 
     func close() {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
         dbQueue = nil
     }
 
     func reopen() throws {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
         guard let path = databasePath else {
             dbQueue = try DatabaseQueue()
             try setupSchema()
@@ -110,6 +159,8 @@ final class DatabaseManager {
     }
 
     func replaceDatabase(with temporaryPath: String) throws {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
         guard let destinationPath = databasePath else { return }
         let fm = FileManager.default
 
@@ -166,27 +217,45 @@ final class DatabaseManager {
 
     // MARK: - Write Methods
 
+    func commitSync(records: [ParsedRecord], state: SyncState) throws {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard let db = dbQueue else { throw DatabaseManagerError.unavailable }
+        try db.write { db in
+            try insertRecords(records, in: db)
+            try upsertSyncState(state, in: db)
+        }
+    }
+
     func insertRecords(_ records: [ParsedRecord]) {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
         guard let db = dbQueue, !records.isEmpty else { return }
         try? db.write { db in
-            for r in records {
-                try db.execute(
-                    sql: """
-                        INSERT OR IGNORE INTO request_logs
-                        (request_id, app_type, model, input_tokens, output_tokens,
-                         cache_read_tokens, cache_creation_tokens, session_id, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                    arguments: [r.requestId, r.appType, r.model,
-                                r.inputTokens, r.outputTokens,
-                                r.cacheReadTokens, r.cacheCreationTokens,
-                                r.sessionId, r.createdAt]
-                )
-            }
+            try insertRecords(records, in: db)
+        }
+    }
+
+    private func insertRecords(_ records: [ParsedRecord], in db: Database) throws {
+        for record in records {
+            try db.execute(
+                sql: """
+                    INSERT OR IGNORE INTO request_logs
+                    (request_id, app_type, model, input_tokens, output_tokens,
+                     cache_read_tokens, cache_creation_tokens, session_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                arguments: [record.requestId, record.appType, record.model,
+                            record.inputTokens, record.outputTokens,
+                            record.cacheReadTokens, record.cacheCreationTokens,
+                            record.sessionId, record.createdAt]
+            )
         }
     }
 
     func getSyncState(for filePath: String) -> SyncState? {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
         guard let db = dbQueue else { return nil }
         return try? db.read { db in
             guard let row = try Row.fetchOne(db,
@@ -208,28 +277,34 @@ final class DatabaseManager {
     }
 
     func updateSyncState(_ state: SyncState) {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
         guard let db = dbQueue else { return }
         try? db.write { db in
-            try db.execute(
-                sql: """
-                    INSERT OR REPLACE INTO sync_state
-                    (file_path, byte_offset, record_count, session_id, model,
-                     last_modified, last_synced_at, last_total_input_tokens, last_total_output_tokens)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                arguments: [
-                    state.filePath,
-                    state.byteOffset,
-                    state.recordCount,
-                    state.sessionId,
-                    state.model,
-                    state.lastModified,
-                    state.lastSyncedAt,
-                    state.lastTotalInputTokens,
-                    state.lastTotalOutputTokens,
-                ]
-            )
+            try upsertSyncState(state, in: db)
         }
+    }
+
+    private func upsertSyncState(_ state: SyncState, in db: Database) throws {
+        try db.execute(
+            sql: """
+                INSERT OR REPLACE INTO sync_state
+                (file_path, byte_offset, record_count, session_id, model,
+                 last_modified, last_synced_at, last_total_input_tokens, last_total_output_tokens)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            arguments: [
+                state.filePath,
+                state.byteOffset,
+                state.recordCount,
+                state.sessionId,
+                state.model,
+                state.lastModified,
+                state.lastSyncedAt,
+                state.lastTotalInputTokens,
+                state.lastTotalOutputTokens,
+            ]
+        )
     }
 
     // MARK: - Query Helpers
@@ -261,6 +336,8 @@ final class DatabaseManager {
     // MARK: - Queries
 
     func fetchStats(app: AppFilter, range: TimeRange) -> UsageStats {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
         guard let db = dbQueue else { return UsageStats() }
         let w = whereClause(app: app, range: range)
 
@@ -290,6 +367,8 @@ final class DatabaseManager {
 
     /// Fetch heatmap data for a given date range
     func fetchHeatmap(app: AppFilter, from startDate: Date, to endDate: Date) -> [DayActivity] {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
         guard let db = dbQueue else { return [] }
 
         let startTs = Int(startDate.timeIntervalSince1970)
@@ -317,6 +396,8 @@ final class DatabaseManager {
     }
 
     func fetchHourlyTokenUsage(app: AppFilter, date: String) -> [HourlyTokenUsage] {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
         guard let db = dbQueue else { return [] }
 
         let formatter = DateFormatter()
@@ -380,6 +461,8 @@ final class DatabaseManager {
     }
 
     func fetchModelDistribution(app: AppFilter, range: TimeRange) -> [ModelShare] {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
         guard let db = dbQueue else { return [] }
         let w = whereClause(app: app, range: range)
 
@@ -409,6 +492,8 @@ final class DatabaseManager {
     }
 
     func availableYears() -> [Int] {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
         guard let db = dbQueue else { return [] }
         return (try? db.read { db in
             let rows = try Row.fetchAll(db, sql: """

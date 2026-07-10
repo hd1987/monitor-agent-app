@@ -52,6 +52,10 @@ final class SessionSyncManager {
         syncAll(onProgress: onProgress)
     }
 
+    func performExclusive<T>(_ operation: () throws -> T) rethrows -> T {
+        try queue.sync(execute: operation)
+    }
+
     /// Restart the periodic timer with a new interval.
     func restart(interval: TimeInterval, onComplete: @escaping () -> Void) {
         stop()
@@ -120,7 +124,13 @@ final class SessionSyncManager {
               let fileSize = attrs[.size] as? Int64 else { return SessionSyncResult() }
 
         let fileMtime = Int(modDate.timeIntervalSince1970)
-        let existing = db.getSyncState(for: path)
+        let storedState = db.getSyncState(for: path)
+        let existing: SyncState?
+        if let storedState, storedState.byteOffset > fileSize {
+            existing = nil
+        } else {
+            existing = storedState
+        }
 
         // Skip if file unchanged and fully read
         if let s = existing, s.lastModified == fileMtime, s.byteOffset >= fileSize {
@@ -182,8 +192,12 @@ final class SessionSyncManager {
                 lastTotalInputTokens: context.lastTotalIn,
                 lastTotalOutputTokens: context.lastTotalOut
             )
-            db.insertRecords(records)
-            db.updateSyncState(state)
+            do {
+                try db.commitSync(records: records, state: state)
+            } catch {
+                print("Failed to commit sync for \(path): \(error)")
+                return SessionSyncResult()
+            }
         } else {
             for range in lineRanges {
                 let lineData = data.subdata(in: range)
@@ -200,8 +214,12 @@ final class SessionSyncManager {
                 lastModified: fileMtime,
                 lastSyncedAt: Int(Date().timeIntervalSince1970)
             )
-            db.insertRecords(records)
-            db.updateSyncState(state)
+            do {
+                try db.commitSync(records: records, state: state)
+            } catch {
+                print("Failed to commit sync for \(path): \(error)")
+                return SessionSyncResult()
+            }
         }
         return SessionSyncResult(filesSynced: 1, recordsSynced: records.count)
     }
