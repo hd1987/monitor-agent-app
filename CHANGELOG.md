@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.21] - 2026-07-10
+
 ### Fixed
 - Stage and validate updates before replacement, restoring the installed app if replacement fails
 - Keep the app recoverable when the local usage database cannot be opened
