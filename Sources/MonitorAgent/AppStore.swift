@@ -17,11 +17,14 @@ final class AppStore: ObservableObject {
     @Published var usageDataRebuildProgress: SessionSyncProgress?
     @Published var usageDataRebuildSummary: UsageDataRebuildSummary?
     @Published var usageDataRebuildErrorMessage: String?
+    @Published var quotaSnapshots: [QuotaProviderID: QuotaSnapshot] = [:]
 
     private let db: DatabaseManager
     private let syncManager: SessionSyncManager
     private let syncSettings: SyncSettings
     private let currentDateProvider: () -> Date
+    private let quotaService: QuotaService
+    private let quotaSettings: QuotaSettings
     private var activeDay: Date
     private var cancellables = Set<AnyCancellable>()
 
@@ -29,6 +32,8 @@ final class AppStore: ObservableObject {
         database: DatabaseManager = .shared,
         syncManager: SessionSyncManager? = nil,
         syncSettings: SyncSettings = .shared,
+        quotaService: QuotaService = .shared,
+        quotaSettings: QuotaSettings = .shared,
         autoStartSync: Bool = true,
         currentDateProvider: @escaping () -> Date = Date.init
     ) {
@@ -36,6 +41,8 @@ final class AppStore: ObservableObject {
         self.syncManager = syncManager ?? SessionSyncManager(database: database)
         self.syncSettings = syncSettings
         self.currentDateProvider = currentDateProvider
+        self.quotaService = quotaService
+        self.quotaSettings = quotaSettings
         self.activeDay = Calendar.current.startOfDay(for: currentDateProvider())
 
         DatabaseManager.cleanUpTemporaryRebuildDatabase()
@@ -45,6 +52,14 @@ final class AppStore: ObservableObject {
             .debounce(for: .milliseconds(100), scheduler: DispatchQueue.main)
             .sink { [weak self] _, _, _ in
                 self?.reload()
+            }
+            .store(in: &cancellables)
+
+        $appFilter
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                self?.refreshQuotaForVisibleProviders()
             }
             .store(in: &cancellables)
 
@@ -74,6 +89,27 @@ final class AppStore: ObservableObject {
         guard !isRebuildingUsageData else { return }
         syncManager.syncOnce { [weak self] in
             self?.reload()
+        }
+    }
+
+    func refreshQuotaForVisibleProviders(force: Bool = false) {
+        for provider in visibleQuotaProviders where quotaSettings.isEnabled(provider) {
+            quotaService.refresh(provider: provider, force: force) { [weak self] snapshot in
+                self?.quotaSnapshots[provider] = snapshot
+            }
+        }
+    }
+
+    func quotaSettingsDidChange() {
+        quotaSnapshots = quotaSnapshots.filter { quotaSettings.isEnabled($0.key) }
+        refreshQuotaForVisibleProviders()
+    }
+
+    var visibleQuotaProviders: [QuotaProviderID] {
+        switch appFilter {
+        case .all: return QuotaProviderID.allCases
+        case .claude: return [.claude]
+        case .codex: return [.codex]
         }
     }
 

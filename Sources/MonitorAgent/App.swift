@@ -167,6 +167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Always sync fresh data when opening the panel
         store.sync()
+        store.refreshQuotaForVisibleProviders()
 
         guard let button = statusItem.button,
               let buttonWindow = button.window else { return }

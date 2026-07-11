@@ -31,6 +31,13 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         XCTAssertEqual(SyncInterval.allCases.map(\.displayName), ["10s", "30s", "60s", "Never"])
     }
 
+    func testSubscriptionQuotaSettingsArePresentedAsOneGroup() {
+        XCTAssertEqual(QuotaSettingsCopy.title, "Subscription Quota")
+        XCTAssertEqual(QuotaSettingsCopy.description, "Choose which subscription quotas appear in the main panel.")
+        XCTAssertEqual(QuotaSettingsCopy.claudeTitle, "Claude Code")
+        XCTAssertEqual(QuotaSettingsCopy.codexTitle, "Codex")
+    }
+
     func testUsageDataRebuildCopyMatchesSettingsDataSection() {
         XCTAssertEqual(UsageDataRebuildCopy.buttonTitle, "Rebuild Local Usage Data")
         XCTAssertEqual(UsageDataRebuildCopy.confirmationTitle, "Rebuild Local Usage Data?")

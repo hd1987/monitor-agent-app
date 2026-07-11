@@ -6,6 +6,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-11
+
+### Added
+- Show filter-aware Claude Code and Codex subscription quota cards at the bottom of the main panel
+- Add independent Claude Code and Codex quota toggles in General settings
+
+### Changed
+- Move the subscription quota description above the grouped provider toggle rows
+- Group the Claude Code and Codex quota toggles in a full-width macOS-style Subscription Quota section
+- Redesign subscription quota cards with horizontal metrics, progress bars below each metric, and optional details placed last
+- Raise the quota low-remaining red threshold from 10% to 20%
+- Show Codex reset credits as an availability badge with a detailed hover tip instead of an action-style icon
+
+### Fixed
+- Use available wording for the reset-credit count inside the hover tip
+- Label reset-credit counts as resets and soften the badge background
+- Keep quota provider titles left-aligned while loading and place reset times after percentages
+- Detect Codex bundled inside the ChatGPT or Codex macOS app when the GUI environment PATH omits it
+- Give newly discovered models distinct, deterministic colors in the model distribution
+
 ## [0.2.22] - 2026-07-11
 
 ### Fixed
