@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-12
+
 ### Changed
 - Show the full `gpt-5.6-sol` model identifier in the model distribution
 
