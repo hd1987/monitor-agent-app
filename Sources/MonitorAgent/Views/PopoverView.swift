@@ -18,6 +18,7 @@ struct PopoverView: View {
                 .allowsHitTesting(!isTokenBreakdownPresented)
             Divider().opacity(theme.dividerOpacity).padding(.horizontal, 16)
             ModelDistributionView()
+            SubscriptionQuotaView()
         }
         .frame(width: 620)
         .clipShape(RoundedRectangle(cornerRadius: 12))

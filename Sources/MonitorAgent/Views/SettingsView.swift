@@ -55,6 +55,7 @@ enum UsageDataRebuildCopy {
 
 struct SettingsView: View {
     @EnvironmentObject var themeManager: ThemeManager
+    @EnvironmentObject var store: AppStore
 
     var initialCategory: SettingsCategory = .general
 
@@ -65,6 +66,8 @@ struct SettingsView: View {
     @State private var draftSyncInterval: SyncInterval = .thirty
     @State private var draftKeepInBackground: Bool = true
     @State private var draftLaunchAtLogin: Bool = false
+    @State private var draftClaudeQuotaEnabled: Bool = true
+    @State private var draftCodexQuotaEnabled: Bool = true
 
     // Config drafts
     @State private var claudeConfigText: String = ""
@@ -128,7 +131,9 @@ struct SettingsView: View {
                             draftTheme: $draftTheme,
                             draftSyncInterval: $draftSyncInterval,
                             draftKeepInBackground: $draftKeepInBackground,
-                            draftLaunchAtLogin: $draftLaunchAtLogin
+                            draftLaunchAtLogin: $draftLaunchAtLogin,
+                            draftClaudeQuotaEnabled: $draftClaudeQuotaEnabled,
+                            draftCodexQuotaEnabled: $draftCodexQuotaEnabled
                         )
                     }
                     .frame(maxWidth: .infinity)
@@ -225,6 +230,8 @@ struct SettingsView: View {
             draftSyncInterval = SyncSettings.shared.interval
             draftKeepInBackground = SyncSettings.shared.keepInBackground
             draftLaunchAtLogin = SyncSettings.shared.launchAtLogin
+            draftClaudeQuotaEnabled = QuotaSettings.shared.claudeEnabled
+            draftCodexQuotaEnabled = QuotaSettings.shared.codexEnabled
         case .config:
             configTab = .claude
             loadFileContent(
@@ -259,6 +266,9 @@ struct SettingsView: View {
             SyncSettings.shared.interval = draftSyncInterval
             SyncSettings.shared.keepInBackground = draftKeepInBackground
             SyncSettings.shared.launchAtLogin = draftLaunchAtLogin
+            QuotaSettings.shared.claudeEnabled = draftClaudeQuotaEnabled
+            QuotaSettings.shared.codexEnabled = draftCodexQuotaEnabled
+            store.quotaSettingsDidChange()
 
         case .config:
             // Validate JSON before saving Claude settings
@@ -378,6 +388,8 @@ struct GeneralSettingsView: View {
     @Binding var draftSyncInterval: SyncInterval
     @Binding var draftKeepInBackground: Bool
     @Binding var draftLaunchAtLogin: Bool
+    @Binding var draftClaudeQuotaEnabled: Bool
+    @Binding var draftCodexQuotaEnabled: Bool
     @State private var showUsageDataRebuildSheet = false
 
     var body: some View {
@@ -452,6 +464,13 @@ struct GeneralSettingsView: View {
 
             Divider().padding(.vertical, 4)
 
+            QuotaSettingsGroup(
+                claudeEnabled: $draftClaudeQuotaEnabled,
+                codexEnabled: $draftCodexQuotaEnabled
+            )
+
+            Divider().padding(.vertical, 4)
+
             SettingsRow(
                 title: "Data",
                 description: UsageDataRebuildCopy.description
@@ -474,6 +493,63 @@ struct GeneralSettingsView: View {
                 .environmentObject(store)
                 .interactiveDismissDisabled(store.isRebuildingUsageData)
         }
+    }
+
+}
+
+enum QuotaSettingsCopy {
+    static let title = "Subscription Quota"
+    static let description = "Choose which subscription quotas appear in the main panel."
+    static let claudeTitle = "Claude Code"
+    static let codexTitle = "Codex"
+}
+
+private struct QuotaSettingsGroup: View {
+    @Binding var claudeEnabled: Bool
+    @Binding var codexEnabled: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(QuotaSettingsCopy.title)
+                .font(.system(size: 13, weight: .semibold))
+            Text(QuotaSettingsCopy.description)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 0) {
+                quotaRow(
+                    title: QuotaSettingsCopy.claudeTitle,
+                    isOn: $claudeEnabled
+                )
+                Divider().padding(.leading, 12)
+                quotaRow(
+                    title: QuotaSettingsCopy.codexTitle,
+                    isOn: $codexEnabled
+                )
+            }
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 0.5)
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func quotaRow(
+        title: String,
+        isOn: Binding<Bool>
+    ) -> some View {
+        HStack(spacing: 16) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+            Spacer(minLength: 16)
+            Toggle("", isOn: isOn)
+                .toggleStyle(.switch)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
     }
 }
 

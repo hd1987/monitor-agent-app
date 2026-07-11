@@ -71,6 +71,7 @@ Sources/MonitorAgent/
 ├── UpdateCheckView.swift          # SwiftUI update-check dialog state and view
 ├── UpdateChecker.swift            # GitHub release check, staged app validation, atomic install, and restart
 ├── UsageDataRebuilder.swift       # Temporary database rebuild, validation, and successful replacement
+├── Quota/                         # Subscription quota models, settings, environment detection, and provider clients
 ├── Sync/
 │   ├── SessionSyncManager.swift   # Configurable DispatchSourceTimer, injectable file roots/database, incremental/full read
 │   ├── ClaudeLogParser.swift      # Stateless: line Data → ParsedRecord?
@@ -81,6 +82,7 @@ Sources/MonitorAgent/
     ├── FilterBar.swift            # App toggle (All/Claude Code/Codex) + date range dropdown
     ├── SettingsView.swift         # Sidebar settings: General / Config / Prompt categories
     ├── StatCardsView.swift        # 4 stat cards in HStack
+    ├── SubscriptionQuotaView.swift # Bottom single-line Claude/Codex subscription quota cards
     ├── ActivityTokenChartView.swift # Fixed-height selected-day hourly token chart
     ├── HeatmapView.swift          # Year heatmap grid + hover tooltip + selected-day token chart
     ├── WindowFrameReader.swift    # Shared AppKit frame reporter for outside-click exclusions
@@ -97,12 +99,13 @@ Sources/MonitorAgent/
 2. **StatCards** — `Requests | Sessions | Tokens | Cache Hit`. Requests, Sessions, and Cache Hit share a metric-card width; Tokens is wider. Requests and Sessions show exact grouped counts with single-line scaling. Tokens is a composite card whose total is Input Tokens + Output Tokens + Cache Read + Cache Creation; abbreviated token values use two decimal places, and hover/click detail shows each token category. Cache Hit shows the percentage.
 3. **Activity** — GitHub-style heatmap with `Default` trailing-365-day mode and per-year mode. Month labels use a fixed single-line overlay aligned to the heatmap grid, with the final label clamped inside the trailing edge so opening the hourly chart cannot shift or truncate the labels. Hover shows the daily request count with the tooltip kept inside the heatmap width. Days with no activity are not selectable. Clicking an active day filters the whole panel to that date and opens a fixed-height hourly token chart for Input Tokens, Output Tokens, Cache Read, Cache Creation, and request count when token data exists; clicking the current day uses the dynamic `Today` range. The chart x-axis shows 3-hour labels from `0h` through `21h`; today's chart stops drawing at the current hour so future zero-value buckets do not pull lines down. Hovering inside the chart shows the nearest start-inclusive one-hour range plus its exact request count and token values. Clicking outside Activity hides the chart without restoring the previous date range; switching All / Claude Code / Codex keeps the chart open when data remains available.
 4. **ModelDistribution** — stacked proportion bar plus three-column legend for top models. Known model aliases retain their established colors; new model names receive deterministic, collision-aware colors from an extensible palette instead of sharing a generic fallback color.
+5. **Subscription Quota** — bottom full-width provider cards filtered by the top All / Claude Code / Codex selector. Provider titles remain left-aligned in loading, error, and populated states so asynchronous updates never shift them. Provider, plan, and quota items are arranged horizontally. Each quota item shows its compact label followed by a right-aligned percentage and reset time, with a thin remaining-quota progress bar directly underneath. Core `5h` and `1w` items come first; optional Claude Opus and Codex reset credits follow them. Reset credits use a subtle `N resets` badge without a refresh/reset action; hovering opens a Tokens-style custom tip above the card with one `Full reset (1w + 5h)` row and expiration date per credit. Disabled providers are completely hidden. Quota data comes from the providers' account usage endpoints rather than local token estimates. It refreshes only when the panel opens or the app filter changes, with a 60-second minimum request interval and no background timer.
 
 **About** — App icon (`AppIcon.icns`), name, tagline, bundle version plus release commit SHA from `AppVersion.versionWithCommit`, optional release date from `AppVersion.releaseDate`, GitHub button.
 
 **Settings** — Left sidebar (General / Config / Prompt) plus right content area. Cancel closes the window. Save asks for confirmation before applying the current category, then keeps the window open and shows a top green success toast. Save only applies to the current category. Switching categories reloads from disk. Config/Prompt use a Claude Code / Codex tab bar.
 
-- **General** — Theme (System/Light/Dark), Sync Interval (10s/30s/60s/Never), Keep in Background toggle, Launch at Login toggle, Data rebuild action with progress/result sheet
+- **General** — Theme (System/Light/Dark), Sync Interval (10s/30s/60s/Never), Keep in Background toggle, Launch at Login toggle, a full-width rounded Subscription Quota group with one shared description above simple Claude Code and Codex toggle rows, Data rebuild action with progress/result sheet
 - **Config** — TextEditor for `~/.claude/settings.json` (JSON validated on save) and `~/.codex/config.toml`; shows "File not found" if missing
 - **Prompt** — TextEditor for `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`; shows "File not found" if missing
 
