@@ -28,6 +28,8 @@ struct SubscriptionQuotaView: View {
 private struct SubscriptionQuotaCard: View {
     @EnvironmentObject var theme: ThemeManager
     @State private var isResetTipPresented = false
+    @State private var cardWidth: CGFloat = 0
+    @State private var tipAnchorX: CGFloat = 0
     let provider: QuotaProviderID
     let snapshot: QuotaSnapshot?
 
@@ -46,12 +48,19 @@ private struct SubscriptionQuotaCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: QuotaCardLayout.cardHeight)
         .background(theme.cardBackground)
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { cardWidth = proxy.size.width }
+                    .onChange(of: proxy.size.width) { _, newValue in cardWidth = newValue }
+            }
+        )
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(theme.cardBorder, lineWidth: 0.5)
         )
-        .overlay(alignment: .bottomTrailing) {
+        .overlay(alignment: .bottomLeading) {
             if isResetTipPresented,
                let snapshot,
                let credits = snapshot.resetCredits,
@@ -60,11 +69,31 @@ private struct SubscriptionQuotaCard: View {
                     count: credits,
                     expirations: snapshot.resetCreditExpirations
                 )
-                .offset(y: -(QuotaCardLayout.cardHeight + 6))
-                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottomTrailing)))
+                .offset(x: clampedTipX, y: -(QuotaCardLayout.cardHeight + 6))
+                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
             }
         }
         .zIndex(isResetTipPresented ? 2 : 0)
+        .onContinuousHover { phase in
+            guard hasResetCredits else { return }
+            switch phase {
+            case .active(let location):
+                if !isResetTipPresented { tipAnchorX = location.x }
+                withAnimation(.easeOut(duration: 0.12)) { isResetTipPresented = true }
+            case .ended:
+                withAnimation(.easeOut(duration: 0.12)) { isResetTipPresented = false }
+            }
+        }
+    }
+
+    private var hasResetCredits: Bool {
+        (snapshot?.resetCredits ?? 0) > 0
+    }
+
+    /// Center the tip on the initial hover x while keeping it inside the card bounds.
+    private var clampedTipX: CGFloat {
+        let maxX = max(0, cardWidth - QuotaCardLayout.resetTipWidth)
+        return min(max(0, tipAnchorX - QuotaCardLayout.resetTipWidth / 2), maxX)
     }
 
     private var header: some View {
@@ -88,42 +117,22 @@ private struct SubscriptionQuotaCard: View {
         switch snapshot.status {
         case .available:
             HStack(spacing: QuotaCardLayout.metricSpacing) {
-                if let window = snapshot.fiveHour {
-                    quotaMetric(
-                        label: "5h",
-                        window: window,
-                        reset: QuotaDateFormat.resetTime(window.resetsAt)
-                    )
-                }
-                if let window = snapshot.weekly {
-                    quotaMetric(
-                        label: "1w",
-                        window: window,
-                        reset: QuotaDateFormat.resetDateTime(window.resetsAt)
-                    )
-                }
-                if provider == .claude, let window = snapshot.opusWeekly {
-                    quotaMetric(
-                        label: "Opus",
-                        window: window,
-                        reset: QuotaDateFormat.resetDateTime(window.resetsAt)
-                    )
+                ForEach(Array(metricItems(snapshot).enumerated()), id: \.offset) { _, item in
+                    quotaMetric(label: item.label, window: item.window, reset: item.reset)
                 }
                 if provider == .codex, let credits = snapshot.resetCredits, credits > 0 {
-                    Text(ResetCreditsCopy.resetCount(credits))
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Color.green)
-                        .lineLimit(1)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.green.opacity(0.06))
-                        .clipShape(Capsule())
-                        .contentShape(Capsule())
-                        .onHover { hovering in
-                            withAnimation(.easeOut(duration: 0.12)) {
-                                isResetTipPresented = hovering
-                            }
-                        }
+                    HStack(spacing: 5) {
+                        Text("resets")
+                            .fontWeight(.medium)
+                            .foregroundStyle(.secondary)
+                        Text("·")
+                            .foregroundStyle(.secondary)
+                        Text("\(credits)")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Color.green)
+                    }
+                    .lineLimit(1)
+                    .fixedSize()
                 }
             }
         case .notInstalled:
@@ -139,34 +148,36 @@ private struct SubscriptionQuotaCard: View {
         }
     }
 
+    private func metricItems(_ snapshot: QuotaSnapshot) -> [QuotaMetricItem] {
+        var items: [QuotaMetricItem] = []
+        if let window = snapshot.fiveHour {
+            items.append(.init(label: "5h", window: window, reset: QuotaDateFormat.resetTime(window.resetsAt)))
+        }
+        if let window = snapshot.weekly {
+            items.append(.init(label: "1w", window: window, reset: QuotaDateFormat.resetDateTime(window.resetsAt)))
+        }
+        if provider == .claude, let window = snapshot.opusWeekly {
+            items.append(.init(label: "Opus", window: window, reset: QuotaDateFormat.resetDateTime(window.resetsAt)))
+        }
+        return items
+    }
+
     private func quotaMetric(label: String, window: QuotaWindow, reset: String) -> some View {
-        VStack(spacing: QuotaCardLayout.progressSpacing) {
-            HStack(spacing: 5) {
-                Text(label)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 4)
-                Text("\(Int(window.remainingPercent.rounded()))%")
-                    .fontWeight(.semibold)
-                    .foregroundStyle(quotaColor(window.remainingPercent))
-                    .frame(minWidth: QuotaCardLayout.percentageWidth, alignment: .trailing)
-                Text(reset)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            }
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.secondary.opacity(0.14))
-                    Capsule()
-                        .fill(quotaColor(window.remainingPercent))
-                        .frame(width: proxy.size.width * normalizedProgress(window.remainingPercent))
-                }
-            }
-            .frame(height: QuotaCardLayout.progressHeight)
+        HStack(spacing: 5) {
+            Text(label)
+                .fontWeight(.medium)
+                .foregroundStyle(.secondary)
+            Text("·")
+                .foregroundStyle(.secondary)
+            Text("\(Int(window.remainingPercent.rounded()))%")
+                .fontWeight(.semibold)
+                .foregroundStyle(quotaColor(window.remainingPercent))
+            Text(reset)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
         }
         .lineLimit(1)
-        .minimumScaleFactor(0.78)
-        .frame(maxWidth: .infinity)
+        .fixedSize()
     }
 
     private func statusText(_ text: String) -> some View {
@@ -194,10 +205,12 @@ private struct SubscriptionQuotaCard: View {
         return .green
     }
 
-    private func normalizedProgress(_ percent: Double) -> CGFloat {
-        CGFloat(min(100, max(0, percent)) / 100)
-    }
+}
 
+private struct QuotaMetricItem {
+    let label: String
+    let window: QuotaWindow
+    let reset: String
 }
 
 private struct ResetCreditsTip: View {
@@ -266,22 +279,15 @@ enum ResetCreditsCopy {
         "\(count) available"
     }
 
-    static func resetCount(_ count: Int) -> String {
-        "\(count) reset\(count == 1 ? "" : "s")"
-    }
-
     static func expires(_ date: String) -> String {
         "Expires \(date)"
     }
 }
 
 enum QuotaCardLayout {
-    static let cardHeight: CGFloat = 50
-    static let metricHeight: CGFloat = 28
-    static let progressHeight: CGFloat = 4
-    static let progressSpacing: CGFloat = 5
-    static let percentageWidth: CGFloat = 28
-    static let contentSpacing: CGFloat = 12
-    static let metricSpacing: CGFloat = 12
+    static let cardHeight: CGFloat = 34
+    static let metricHeight: CGFloat = 20
+    static let contentSpacing: CGFloat = 16
+    static let metricSpacing: CGFloat = 28
     static let resetTipWidth: CGFloat = 280
 }

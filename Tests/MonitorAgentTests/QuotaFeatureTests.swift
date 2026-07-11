@@ -2,20 +2,17 @@ import XCTest
 @testable import MonitorAgent
 
 final class QuotaFeatureTests: XCTestCase {
-    func testQuotaCardUsesCompactProgressLayout() {
-        XCTAssertEqual(QuotaCardLayout.cardHeight, 50)
-        XCTAssertEqual(QuotaCardLayout.metricHeight, 28)
-        XCTAssertEqual(QuotaCardLayout.progressHeight, 4)
-        XCTAssertEqual(QuotaCardLayout.progressSpacing, 5)
-        XCTAssertEqual(QuotaCardLayout.percentageWidth, 28)
-        XCTAssertLessThan(QuotaCardLayout.progressHeight, QuotaCardLayout.metricHeight)
+    func testQuotaCardUsesCompactSingleLineLayout() {
+        XCTAssertEqual(QuotaCardLayout.cardHeight, 34)
+        XCTAssertEqual(QuotaCardLayout.metricHeight, 20)
+        XCTAssertEqual(QuotaCardLayout.contentSpacing, 16)
+        XCTAssertEqual(QuotaCardLayout.metricSpacing, 28)
+        XCTAssertLessThan(QuotaCardLayout.metricHeight, QuotaCardLayout.cardHeight)
         XCTAssertEqual(QuotaCardLayout.resetTipWidth, 280)
     }
 
     func testResetCreditsCopyDescribesAvailabilityWithoutAnAction() {
         XCTAssertEqual(ResetCreditsCopy.availableCount(3), "3 available")
-        XCTAssertEqual(ResetCreditsCopy.resetCount(3), "3 resets")
-        XCTAssertEqual(ResetCreditsCopy.resetCount(1), "1 reset")
         XCTAssertEqual(ResetCreditsCopy.fullReset, "Full reset (1w + 5h)")
         XCTAssertEqual(ResetCreditsCopy.expires("Jul 18, 08:00"), "Expires Jul 18, 08:00")
     }
