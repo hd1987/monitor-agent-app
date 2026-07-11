@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Fixed
+- Give newly discovered models distinct, deterministic colors in the model distribution
+
 ## [0.2.22] - 2026-07-11
 
 ### Fixed
