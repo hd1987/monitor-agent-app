@@ -2,7 +2,9 @@ import SwiftUI
 
 enum ModelColorResolver {
     static let palette: [Color] = [
-        .blue, .green, .orange, .purple, .cyan, .pink, .teal, .indigo,
+        .blue, .green, .orange,
+        Color(red: 0.58, green: 0.48, blue: 0.88), // softened violet, closer in tone to the rest
+        .cyan, .pink, .teal, .indigo,
         Color(red: 0.82, green: 0.20, blue: 0.26),
         Color(red: 0.55, green: 0.35, blue: 0.90),
         Color(red: 0.15, green: 0.55, blue: 0.32),
@@ -14,28 +16,37 @@ enum ModelColorResolver {
     ]
 
     private static let preferredIndices: [String: Int] = [
-        "claude-opus-4-6": 0,
-        "anthropic.claude-4-6-opus": 0,
-        "claude-sonnet-4-6": 4,
+        "claude-opus-4-8": 3,
+        "claude-opus-4-6": 3,
+        "anthropic.claude-4-6-opus": 3,
+        "claude-sonnet-5": 0,
+        "claude-sonnet-4-6": 0,
         "claude-haiku-4-5-20251001": 6,
         "anthropic.claude-4-5-haiku": 6,
+        "gpt-5.6-sol": 1,
+        "gpt-5.6": 1,
         "gpt-5.5": 1,
         "codex-auto-review": 2,
-        "mimo-v2.5-pro": 3,
-        "mimo-v2.5": 3,
+        "mimo-v2.5-pro": 4,
+        "mimo-v2.5": 12,
     ]
 
     static func paletteIndices(for models: [String]) -> [String: Int] {
         let uniqueModels = Array(Set(models)).sorted()
         var result: [String: Int] = [:]
-        var usedIndices = Set(uniqueModels.compactMap { preferredIndices[$0] })
+        var usedIndices = Set<Int>()
 
+        // First pass: honor a preferred color only if no earlier model already claimed it,
+        // so two co-present models never collapse onto the same swatch.
         for model in uniqueModels {
-            if let preferredIndex = preferredIndices[model] {
+            if let preferredIndex = preferredIndices[model], !usedIndices.contains(preferredIndex) {
                 result[model] = preferredIndex
-                continue
+                usedIndices.insert(preferredIndex)
             }
+        }
 
+        // Second pass: deterministically hash-assign the rest around used indices.
+        for model in uniqueModels where result[model] == nil {
             let startingIndex = stableHash(model) % palette.count
             let availableIndex = (0..<palette.count)
                 .map { (startingIndex + $0) % palette.count }
@@ -73,11 +84,15 @@ struct ModelDistributionView: View {
 
     private func shortName(_ model: String) -> String {
         let map: [String: String] = [
+            "claude-opus-4-8": "Opus 4.8",
             "claude-opus-4-6": "Opus 4.6",
             "anthropic.claude-4-6-opus": "Opus 4.6",
+            "claude-sonnet-5": "Sonnet 5",
             "claude-sonnet-4-6": "Sonnet 4.6",
             "claude-haiku-4-5-20251001": "Haiku 4.5",
             "anthropic.claude-4-5-haiku": "Haiku 4.5",
+            "gpt-5.6-sol": "GPT-5.6",
+            "gpt-5.6": "GPT-5.6",
             "gpt-5.5": "GPT-5.5",
             "codex-auto-review": "Codex Review",
             "mimo-v2.5-pro": "Mimo Pro",

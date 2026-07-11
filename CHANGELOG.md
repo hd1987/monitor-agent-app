@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Remove the progress bars from subscription quota metrics and lay each window out on a single line
+- Tighten each quota metric's label-to-value spacing and separate metrics with wider gaps instead of vertical dividers
+- Add a middle-dot separator between each quota label and its value, matching the provider plan style
+- Restyle the Codex reset-credits count to match the quota metrics instead of a green badge and place it right after the metrics
+- Show the Codex reset-credits tip when hovering anywhere on the card and anchor it to the initial pointer position
+- Soften the jarring purple in the model distribution palette to a violet closer in tone to the other colors
+- Map current-generation model names to stable colors and short names, and stop two co-present models from collapsing onto the same color
+
 ## [0.3.0] - 2026-07-11
 
 ### Added
