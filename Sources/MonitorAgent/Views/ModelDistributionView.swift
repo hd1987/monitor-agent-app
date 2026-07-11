@@ -88,7 +88,6 @@ struct ModelDistributionView: View {
             "claude-sonnet-4-6": "Sonnet 4.6",
             "claude-haiku-4-5-20251001": "Haiku 4.5",
             "anthropic.claude-4-5-haiku": "Haiku 4.5",
-            "gpt-5.6-sol": "GPT-5.6",
             "gpt-5.6": "GPT-5.6",
             "gpt-5.5": "GPT-5.5",
             "codex-auto-review": "Codex Review",
