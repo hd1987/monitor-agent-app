@@ -39,6 +39,29 @@ final class ActivityTokenChartLayoutTests: XCTestCase {
         XCTAssertLessThanOrEqual(offset + 160, 588)
     }
 
+    func testMonthLabelUsesGridColumnOffset() {
+        let offset = ActivityTokenChartLayout.monthLabelXOffset(
+            column: 4,
+            cellSize: 8,
+            cellSpacing: 3,
+            availableWidth: 588
+        )
+
+        XCTAssertEqual(offset, 44)
+    }
+
+    func testFinalMonthLabelStaysInsideRightEdge() {
+        let offset = ActivityTokenChartLayout.monthLabelXOffset(
+            column: 52,
+            cellSize: 8,
+            cellSpacing: 3,
+            availableWidth: 588
+        )
+
+        XCTAssertEqual(offset, 564)
+        XCTAssertLessThanOrEqual(offset + ActivityTokenChartLayout.monthLabelWidth, 588)
+    }
+
     func testHoveredHourRoundsToNearestHourInsideChartDomain() {
         XCTAssertEqual(ActivityTokenChartLayout.hoveredHour(forChartXValue: 0.2), 0)
         XCTAssertEqual(ActivityTokenChartLayout.hoveredHour(forChartXValue: 8.6), 9)

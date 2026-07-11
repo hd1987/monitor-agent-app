@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.2.22] - 2026-07-11
+
+### Fixed
+- Keep Activity month labels stationary and fully visible when opening or closing the hourly chart
+
 ## [0.2.21] - 2026-07-10
 
 ### Fixed

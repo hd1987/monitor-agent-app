@@ -6,6 +6,8 @@ enum ActivityTokenChartLayout {
     static let chartHeight: CGFloat = 128
     static let defaultTooltipWidth: CGFloat = 120
     static let chartTooltipWidth: CGFloat = 150
+    static let monthLabelWidth: CGFloat = 24
+    static let monthLabelHeight: CGFloat = 11
     static let hourAxisMarkInterval = 3
     static let lastHourAxisMark = 21
     static let lastChartHour = 23
@@ -24,6 +26,17 @@ enum ActivityTokenChartLayout {
     static func tooltipXOffset(anchorX: CGFloat, tooltipWidth: CGFloat, availableWidth: CGFloat) -> CGFloat {
         let proposedOffset = anchorX - tooltipWidth / 2
         let maxOffset = max(0, availableWidth - tooltipWidth)
+        return min(max(0, proposedOffset), maxOffset)
+    }
+
+    static func monthLabelXOffset(
+        column: Int,
+        cellSize: CGFloat,
+        cellSpacing: CGFloat,
+        availableWidth: CGFloat
+    ) -> CGFloat {
+        let proposedOffset = CGFloat(column) * (cellSize + cellSpacing)
+        let maxOffset = max(0, availableWidth - monthLabelWidth)
         return min(max(0, proposedOffset), maxOffset)
     }
 
