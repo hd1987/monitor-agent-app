@@ -34,19 +34,16 @@ enum ModelColorResolver {
     static func paletteIndices(for models: [String]) -> [String: Int] {
         let uniqueModels = Array(Set(models)).sorted()
         var result: [String: Int] = [:]
-        var usedIndices = Set<Int>()
+        // Reserve every preferred index up front so hash-assigned models steer clear of them.
+        // Aliases intentionally share a preferred index, so preferred assignment is direct.
+        var usedIndices = Set(uniqueModels.compactMap { preferredIndices[$0] })
 
-        // First pass: honor a preferred color only if no earlier model already claimed it,
-        // so two co-present models never collapse onto the same swatch.
         for model in uniqueModels {
-            if let preferredIndex = preferredIndices[model], !usedIndices.contains(preferredIndex) {
+            if let preferredIndex = preferredIndices[model] {
                 result[model] = preferredIndex
-                usedIndices.insert(preferredIndex)
+                continue
             }
-        }
 
-        // Second pass: deterministically hash-assign the rest around used indices.
-        for model in uniqueModels where result[model] == nil {
             let startingIndex = stableHash(model) % palette.count
             let availableIndex = (0..<palette.count)
                 .map { (startingIndex + $0) % palette.count }
