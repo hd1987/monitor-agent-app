@@ -145,14 +145,31 @@ struct HeatmapView: View {
 
             // Month labels
             let monthLabels = buildMonthLabels(columns: columns)
-            HStack(spacing: 0) {
+            ZStack(alignment: .leading) {
                 ForEach(monthLabels, id: \.offset) { label in
                     Text(label.name)
                         .font(.system(size: 9))
                         .foregroundStyle(.tertiary)
-                        .frame(width: CGFloat(label.span) * (cellSize + cellSpacing), alignment: .leading)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .frame(
+                            width: ActivityTokenChartLayout.monthLabelWidth,
+                            height: ActivityTokenChartLayout.monthLabelHeight,
+                            alignment: .leading
+                        )
+                        .offset(x: ActivityTokenChartLayout.monthLabelXOffset(
+                            column: label.offset,
+                            cellSize: cellSize,
+                            cellSpacing: cellSpacing,
+                            availableWidth: availableWidth
+                        ))
                 }
             }
+            .frame(
+                width: availableWidth,
+                height: ActivityTokenChartLayout.monthLabelHeight,
+                alignment: .leading
+            )
 
             if let selectedDate = store.selectedActivityDate, hasSelectedActivityTokenUsage {
                 ActivityTokenChartView(date: selectedDate, usage: store.hourlyTokenUsage)
@@ -338,7 +355,6 @@ struct HeatmapView: View {
     private struct MonthLabel: Identifiable {
         let name: String
         let offset: Int
-        let span: Int
         var id: Int { offset }
     }
 
@@ -381,8 +397,7 @@ struct HeatmapView: View {
                     ))!
                     labels.append(MonthLabel(
                         name: formatter.string(from: labelDate),
-                        offset: currentStart,
-                        span: week - currentStart
+                        offset: currentStart
                     ))
                 }
                 currentStart = week
@@ -398,8 +413,7 @@ struct HeatmapView: View {
             ))!
             labels.append(MonthLabel(
                 name: formatter.string(from: labelDate),
-                offset: currentStart,
-                span: columns - currentStart
+                offset: currentStart
             ))
         }
 
