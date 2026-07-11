@@ -65,7 +65,7 @@ final class ThemeManager: ObservableObject {
     var panelBorder: NSColor {
         isDark
             ? NSColor.white.withAlphaComponent(0.08)
-            : NSColor.black.withAlphaComponent(0.01)
+            : NSColor.black.withAlphaComponent(0.20)
     }
 
     // MARK: - View Colors (SwiftUI)

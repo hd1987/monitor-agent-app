@@ -312,7 +312,7 @@ final class FloatingPanel: NSPanel {
         level = .statusBar
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = true
+        hasShadow = false
         isMovableByWindowBackground = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 

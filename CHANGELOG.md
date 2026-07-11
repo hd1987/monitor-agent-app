@@ -15,6 +15,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 - Soften the jarring purple in the model distribution palette to a violet closer in tone to the other colors
 - Map current-generation model names to stable colors and short names, and stop two co-present models from collapsing onto the same color
 - Raise the model distribution legend limit from six to thirty models
+- Drop the main panel drop shadow and give the light-mode edge a subtle gray border for definition
 
 ## [0.3.0] - 2026-07-11
 
