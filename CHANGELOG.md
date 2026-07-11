@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-11
+
 ### Added
 - Show filter-aware Claude Code and Codex subscription quota cards at the bottom of the main panel
 - Add independent Claude Code and Codex quota toggles in General settings
