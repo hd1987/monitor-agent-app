@@ -14,6 +14,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 - Show the Codex reset-credits tip when hovering anywhere on the card and anchor it to the initial pointer position
 - Soften the jarring purple in the model distribution palette to a violet closer in tone to the other colors
 - Map current-generation model names to stable colors and short names, and stop two co-present models from collapsing onto the same color
+- Raise the model distribution legend limit from six to thirty models
 
 ## [0.3.0] - 2026-07-11
 

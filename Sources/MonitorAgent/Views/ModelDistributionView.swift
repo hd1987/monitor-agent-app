@@ -126,7 +126,7 @@ struct ModelDistributionView: View {
             }
 
             // Legend
-            let items = store.modelDistribution.prefix(6)
+            let items = store.modelDistribution.prefix(30)
             LazyVGrid(columns: [
                 GridItem(.flexible(), alignment: .leading),
                 GridItem(.flexible(), alignment: .leading),
