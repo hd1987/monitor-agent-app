@@ -10,6 +10,7 @@ final class SessionSyncManager {
     private let claudeProjectsPath: String
     private let codexSessionsPath: String
     private let codexArchivedSessionsPath: String
+    private(set) var isRunning = false
 
     init(
         database: DatabaseManager = .shared,
@@ -33,11 +34,13 @@ final class SessionSyncManager {
         }
         t.resume()
         timer = t
+        isRunning = true
     }
 
     func stop() {
         timer?.cancel()
         timer = nil
+        isRunning = false
     }
 
     /// Run a single sync cycle on the background queue, then call `onComplete`.

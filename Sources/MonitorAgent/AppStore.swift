@@ -27,6 +27,8 @@ final class AppStore: ObservableObject {
     private let quotaSettings: QuotaSettings
     private var activeDay: Date
     private var cancellables = Set<AnyCancellable>()
+    private(set) var isPanelVisible = false
+    var isPeriodicSyncActive: Bool { syncManager.isRunning }
 
     init(
         database: DatabaseManager = .shared,
@@ -34,7 +36,7 @@ final class AppStore: ObservableObject {
         syncSettings: SyncSettings = .shared,
         quotaService: QuotaService = .shared,
         quotaSettings: QuotaSettings = .shared,
-        autoStartSync: Bool = true,
+        observeSyncIntervalChanges: Bool = true,
         currentDateProvider: @escaping () -> Date = Date.init
     ) {
         self.db = database
@@ -63,7 +65,7 @@ final class AppStore: ObservableObject {
             }
             .store(in: &cancellables)
 
-        if autoStartSync {
+        if observeSyncIntervalChanges {
             // React to sync interval changes
             syncSettings.$interval
                 .sink { [weak self] interval in
@@ -73,18 +75,38 @@ final class AppStore: ObservableObject {
         }
     }
 
-    /// Apply sync interval: start/restart timer or stop if "never".
+    /// Apply the sync interval while the panel is visible.
     private func applySyncInterval(_ interval: SyncInterval) {
-        if interval == .never {
+        guard isPanelVisible, !isRebuildingUsageData, interval != .never else {
             syncManager.stop()
-        } else {
-            syncManager.restart(interval: TimeInterval(interval.rawValue)) { [weak self] in
-                self?.reload()
+            return
+        }
+
+        syncManager.restart(interval: TimeInterval(interval.rawValue)) { [weak self] in
+            DispatchQueue.main.async {
+                guard let self, self.isPanelVisible else { return }
+                self.reload()
             }
         }
     }
 
-    /// Trigger a one-shot sync + reload (called when panel opens).
+    /// Start visible-panel syncing. Timed intervals fire immediately on start.
+    func panelDidOpen() {
+        isPanelVisible = true
+        if syncSettings.interval == .never {
+            sync()
+        } else {
+            applySyncInterval(syncSettings.interval)
+        }
+    }
+
+    /// Stop periodic syncing when the panel is hidden.
+    func panelDidClose() {
+        isPanelVisible = false
+        syncManager.stop()
+    }
+
+    /// Trigger a one-shot sync + reload.
     func sync() {
         guard !isRebuildingUsageData else { return }
         syncManager.syncOnce { [weak self] in

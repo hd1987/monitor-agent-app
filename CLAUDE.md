@@ -91,7 +91,7 @@ Sources/MonitorAgent/
 
 ## UI Layout
 
-**Menu Bar**: Robot icon (template image from bundled SVG). Left-click opens the panel and triggers an on-demand sync. Right-click opens About / General / Config / Prompt / Check for Updates / Quit. Update-check dialogs use a SwiftUI-hosted panel with structured states for checking, up-to-date, new version, downloading, installing, completion, and failure. New-version dialogs show current build metadata and scrollable release notes; downloads show determinate MB progress. Updates are extracted into a staging directory, validated as a MonitorAgent app bundle, and only then replace the installed app. Activation policy is `.accessory` (no Dock icon). Re-clicking the app icon shows the panel via `applicationShouldHandleReopen`.
+**Menu Bar**: Robot icon (template image from bundled SVG). Left-click opens the panel and triggers an immediate sync. While the panel remains visible, Sync Interval controls periodic usage-data refreshes; hiding the panel stops the timer, and `Never` performs only the immediate open sync. Right-click opens About / General / Config / Prompt / Check for Updates / Quit. Update-check dialogs use a SwiftUI-hosted panel with structured states for checking, up-to-date, new version, downloading, installing, completion, and failure. New-version dialogs show current build metadata and scrollable release notes; downloads show determinate MB progress. Updates are extracted into a staging directory, validated as a MonitorAgent app bundle, and only then replace the installed app. Activation policy is `.accessory` (no Dock icon). Re-clicking the app icon shows the panel via `applicationShouldHandleReopen`.
 
 **Panel** (top → bottom):
 
