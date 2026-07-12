@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-07-12
+
+### Changed
+- Run periodic usage-data sync only while the main panel is open
+
 ## [0.3.2] - 2026-07-12
 
 ### Changed
