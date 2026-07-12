@@ -22,14 +22,15 @@ enum SyncInterval: Int, CaseIterable, Identifiable {
 /// Persists sync interval to UserDefaults and publishes changes.
 final class SyncSettings: ObservableObject {
     static let shared = SyncSettings()
+    private let defaults: UserDefaults
 
     @Published var interval: SyncInterval {
-        didSet { UserDefaults.standard.set(interval.rawValue, forKey: "syncInterval") }
+        didSet { defaults.set(interval.rawValue, forKey: "syncInterval") }
     }
 
     /// Keep running in background when Cmd+Q is pressed (default: true)
     @Published var keepInBackground: Bool {
-        didSet { UserDefaults.standard.set(keepInBackground, forKey: "keepInBackground") }
+        didSet { defaults.set(keepInBackground, forKey: "keepInBackground") }
     }
 
     /// Launch at login via SMAppService (only works for .app bundles)
@@ -57,19 +58,20 @@ final class SyncSettings: ObservableObject {
         bundleIdentifier != nil && bundlePath.hasSuffix(".app")
     }
 
-    private init() {
-        let raw = UserDefaults.standard.integer(forKey: "syncInterval")
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        let raw = defaults.integer(forKey: "syncInterval")
         // Default to 30s if no saved value (0 is valid for "never", but fresh install has no key)
-        if UserDefaults.standard.object(forKey: "syncInterval") == nil {
+        if defaults.object(forKey: "syncInterval") == nil {
             self.interval = .thirty
         } else {
             self.interval = SyncInterval(rawValue: raw) ?? .thirty
         }
 
-        if UserDefaults.standard.object(forKey: "keepInBackground") == nil {
+        if defaults.object(forKey: "keepInBackground") == nil {
             self.keepInBackground = true
         } else {
-            self.keepInBackground = UserDefaults.standard.bool(forKey: "keepInBackground")
+            self.keepInBackground = defaults.bool(forKey: "keepInBackground")
         }
     }
 }

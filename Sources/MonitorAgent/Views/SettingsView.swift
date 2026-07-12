@@ -429,7 +429,7 @@ struct GeneralSettingsView: View {
 
             SettingsRow(
                 title: "Sync Interval",
-                description: "How often to sync usage data. \"Never\" syncs only when the panel is opened."
+                description: "How often to sync while the panel is open. \"Never\" syncs once when opened."
             ) {
                 Picker("", selection: $draftSyncInterval) {
                     ForEach(SyncInterval.allCases) { interval in

@@ -96,6 +96,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hostingView.translatesAutoresizingMaskIntoConstraints = false
 
         panel = FloatingPanel()
+        panel.onHide = { [weak self] in
+            self?.store.panelDidClose()
+        }
         panel.contentView = hostingView
 
         // Apply theme to panel and react to changes
@@ -106,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Close panel when clicking outside
         NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            self?.panel.orderOut(nil)
+            self?.hidePanel()
         }
 
         // Right-click on status item → show context menu
@@ -115,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   let button = self.statusItem.button,
                   event.window == button.window else { return event }
             self.rightClickHandled = true
-            self.panel.orderOut(nil)
+            self.hidePanel()
             self.statusItem.menu = self.statusMenu
             self.statusItem.button?.performClick(nil)
             DispatchQueue.main.async {
@@ -138,7 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if !forceQuit && SyncSettings.shared.keepInBackground {
-            panel.orderOut(nil)
+            hidePanel()
             settingsPanel?.close()
             aboutPanel?.close()
             return .terminateCancel
@@ -161,13 +164,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !rightClickHandled else { return }
 
         if panel.isVisible {
-            panel.orderOut(nil)
+            hidePanel()
             return
         }
-
-        // Always sync fresh data when opening the panel
-        store.sync()
-        store.refreshQuotaForVisibleProviders()
 
         guard let button = statusItem.button,
               let buttonWindow = button.window else { return }
@@ -183,6 +182,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         panel.setFrameOrigin(NSPoint(x: x, y: y))
         panel.makeKeyAndOrderFront(nil)
+        store.panelDidOpen()
+        store.refreshQuotaForVisibleProviders()
+    }
+
+    private func hidePanel() {
+        guard panel.isVisible else { return }
+        panel.orderOut(nil)
     }
 
     @objc func openSettings(_ sender: AnyObject?) {
@@ -299,6 +305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 final class FloatingPanel: NSPanel {
     /// Exposed for theme updates
     private(set) var backgroundLayer: CALayer?
+    var onHide: (() -> Void)?
 
     init() {
         super.init(
@@ -364,6 +371,11 @@ final class FloatingPanel: NSPanel {
     }
 
     override var canBecomeKey: Bool { true }
+
+    override func orderOut(_ sender: Any?) {
+        super.orderOut(sender)
+        onHide?()
+    }
 
     override func resignKey() {
         super.resignKey()

@@ -2,11 +2,43 @@ import XCTest
 @testable import MonitorAgent
 
 final class AppStoreTodayRolloverTests: XCTestCase {
+    func testPanelVisibilityTracksSyncLifecycle() {
+        let suiteName = "AppStoreTodayRolloverTests.syncLifecycle"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults.set(SyncInterval.ten.rawValue, forKey: "syncInterval")
+        let syncSettings = SyncSettings(defaults: defaults)
+        let syncManager = SessionSyncManager(
+            database: DatabaseManager(inMemory: true),
+            claudeProjectsPath: "/nonexistent/claude",
+            codexSessionsPath: "/nonexistent/codex",
+            codexArchivedSessionsPath: "/nonexistent/codex-archive"
+        )
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            syncManager: syncManager,
+            syncSettings: syncSettings
+        )
+
+        XCTAssertFalse(store.isPanelVisible)
+        XCTAssertFalse(store.isPeriodicSyncActive)
+
+        store.panelDidOpen()
+        XCTAssertTrue(store.isPanelVisible)
+        XCTAssertTrue(store.isPeriodicSyncActive)
+
+        store.panelDidClose()
+        XCTAssertFalse(store.isPanelVisible)
+        XCTAssertFalse(store.isPeriodicSyncActive)
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
     func testSelectActivityDateForTodayUsesDynamicTodayPreset() {
         let now = date(year: 2026, month: 7, day: 9, hour: 10)
         let store = AppStore(
             database: DatabaseManager(inMemory: true),
-            autoStartSync: false,
+            observeSyncIntervalChanges: false,
             currentDateProvider: { now }
         )
 
@@ -20,7 +52,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         var now = date(year: 2026, month: 7, day: 9, hour: 23)
         let store = AppStore(
             database: DatabaseManager(inMemory: true),
-            autoStartSync: false,
+            observeSyncIntervalChanges: false,
             currentDateProvider: { now }
         )
         store.timeRange = .custom(
@@ -55,7 +87,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
     func testReloadClearsUnavailableYearsAndResetsYearMode() {
         let store = AppStore(
             database: DatabaseManager(inMemory: true),
-            autoStartSync: false
+            observeSyncIntervalChanges: false
         )
         store.availableYears = [2025]
         store.heatmapMode = .year(2025)
