@@ -56,6 +56,19 @@ final class QuotaFeatureTests: XCTestCase {
         )
     }
 
+    func testResetCreditCountUrgencyUsesNearestFutureExpiration() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let expired = now.addingTimeInterval(-60)
+        let warning = now.addingTimeInterval(6 * 24 * 60 * 60)
+        let standard = now.addingTimeInterval(8 * 24 * 60 * 60)
+
+        XCTAssertEqual(
+            ResetCreditExpiration.urgency(in: [standard, warning, expired], after: now),
+            .warning
+        )
+        XCTAssertNil(ResetCreditExpiration.urgency(in: [expired], after: now))
+    }
+
     func testCodexDetectionIncludesBundledMacAppExecutables() {
         let paths = QuotaEnvironmentDetector.fixedExecutablePaths(.codex, home: "/Users/test")
 
