@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Show the nearest Codex reset-credit expiration in the quota card and highlight expirations under 7 or 3 days
+- Remove separators and tighten spacing between items in the Codex reset-credit tip
+
 ## [0.3.4] - 2026-07-13
 
 ### Fixed

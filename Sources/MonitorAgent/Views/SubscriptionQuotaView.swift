@@ -130,6 +130,13 @@ private struct SubscriptionQuotaCard: View {
                         Text("\(credits)")
                             .fontWeight(.semibold)
                             .foregroundStyle(Color.green)
+                        if let expiration = ResetCreditExpiration.next(
+                            in: snapshot.resetCreditExpirations
+                        ) {
+                            Text(QuotaDateFormat.resetDateTime(expiration))
+                                .font(.system(size: 10))
+                                .foregroundStyle(resetCreditExpirationColor(expiration))
+                        }
                     }
                     .lineLimit(1)
                     .fixedSize()
@@ -213,6 +220,14 @@ private struct SubscriptionQuotaCard: View {
         return .green
     }
 
+    private func resetCreditExpirationColor(_ expiration: Date) -> Color {
+        switch ResetCreditExpiration.urgency(for: expiration) {
+        case .standard: return .secondary
+        case .warning: return .orange
+        case .critical: return .red
+        }
+    }
+
 }
 
 private struct QuotaMetricItem {
@@ -239,9 +254,6 @@ private struct ResetCreditsTip: View {
 
             VStack(spacing: 0) {
                 ForEach(0..<count, id: \.self) { index in
-                    if index > 0 {
-                        Divider().overlay(theme.tooltipForeground.opacity(0.12))
-                    }
                     HStack(spacing: 8) {
                         Circle()
                             .fill(Color.green)
@@ -253,7 +265,7 @@ private struct ResetCreditsTip: View {
                             .font(.system(size: 10))
                             .foregroundStyle(theme.tooltipForeground.opacity(0.72))
                     }
-                    .padding(.vertical, 7)
+                    .padding(.vertical, 5)
                 }
             }
         }
@@ -289,6 +301,28 @@ enum ResetCreditsCopy {
 
     static func expires(_ date: String) -> String {
         "Expires \(date)"
+    }
+}
+
+enum ResetCreditExpirationUrgency: Equatable {
+    case standard
+    case warning
+    case critical
+}
+
+enum ResetCreditExpiration {
+    static let warningInterval: TimeInterval = 7 * 24 * 60 * 60
+    static let criticalInterval: TimeInterval = 3 * 24 * 60 * 60
+
+    static func next(in expirations: [Date], after now: Date = Date()) -> Date? {
+        expirations.filter { $0 > now }.min()
+    }
+
+    static func urgency(for expiration: Date, now: Date = Date()) -> ResetCreditExpirationUrgency {
+        let remaining = expiration.timeIntervalSince(now)
+        if remaining < criticalInterval { return .critical }
+        if remaining < warningInterval { return .warning }
+        return .standard
     }
 }
 
