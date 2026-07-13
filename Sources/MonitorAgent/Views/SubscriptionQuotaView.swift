@@ -129,13 +129,15 @@ private struct SubscriptionQuotaCard: View {
                             .foregroundStyle(.secondary)
                         Text("\(credits)")
                             .fontWeight(.semibold)
-                            .foregroundStyle(Color.green)
+                            .foregroundStyle(resetCreditCountColor(
+                                expirations: snapshot.resetCreditExpirations
+                            ))
                         if let expiration = ResetCreditExpiration.next(
                             in: snapshot.resetCreditExpirations
                         ) {
                             Text(QuotaDateFormat.resetDateTime(expiration))
                                 .font(.system(size: 10))
-                                .foregroundStyle(resetCreditExpirationColor(expiration))
+                                .foregroundStyle(.secondary)
                         }
                     }
                     .lineLimit(1)
@@ -220,9 +222,9 @@ private struct SubscriptionQuotaCard: View {
         return .green
     }
 
-    private func resetCreditExpirationColor(_ expiration: Date) -> Color {
-        switch ResetCreditExpiration.urgency(for: expiration) {
-        case .standard: return .secondary
+    private func resetCreditCountColor(expirations: [Date]) -> Color {
+        switch ResetCreditExpiration.urgency(in: expirations) {
+        case nil, .standard: return .green
         case .warning: return .orange
         case .critical: return .red
         }
@@ -316,6 +318,14 @@ enum ResetCreditExpiration {
 
     static func next(in expirations: [Date], after now: Date = Date()) -> Date? {
         expirations.filter { $0 > now }.min()
+    }
+
+    static func urgency(
+        in expirations: [Date],
+        after now: Date = Date()
+    ) -> ResetCreditExpirationUrgency? {
+        guard let expiration = next(in: expirations, after: now) else { return nil }
+        return urgency(for: expiration, now: now)
     }
 
     static func urgency(for expiration: Date, now: Date = Date()) -> ResetCreditExpirationUrgency {

@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Apply Codex reset-credit expiration urgency colors to the count while keeping the date subdued
+
 ## [0.3.5] - 2026-07-13
 
 ### Changed
