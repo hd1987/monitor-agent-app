@@ -61,4 +61,17 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertFalse(time.contains("\n"))
         XCTAssertFalse(dateTime.contains("\n"))
     }
+
+    func testCodexWindowUsesServerDurationForItsLabel() {
+        let weekly = QuotaWindow(
+            remainingPercent: 100,
+            resetsAt: Date(timeIntervalSince1970: 1_784_510_557),
+            durationSeconds: 604_800
+        )
+
+        XCTAssertEqual(weekly.remainingPercent, 100)
+        XCTAssertEqual(weekly.durationSeconds, 604_800)
+        XCTAssertEqual(weekly.displayLabel(fallback: "5h"), "1w")
+        XCTAssertTrue(weekly.usesDateTimeReset)
+    }
 }

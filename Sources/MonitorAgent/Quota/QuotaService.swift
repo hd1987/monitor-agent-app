@@ -274,7 +274,8 @@ private extension QuotaService {
               let utilization = number(value["utilization"]) else { return nil }
         return QuotaWindow(
             remainingPercent: min(100, max(0, 100 - utilization)),
-            resetsAt: parseDate(value["resets_at"] ?? value["resetsAt"])
+            resetsAt: parseDate(value["resets_at"] ?? value["resetsAt"]),
+            durationSeconds: nil
         )
     }
 
@@ -291,7 +292,10 @@ private extension QuotaService {
         guard let remaining else { return nil }
         return QuotaWindow(
             remainingPercent: min(100, max(0, remaining)),
-            resetsAt: parseDate(value["reset_at"] ?? value["resetAt"] ?? value["resets_at"] ?? value["resetsAt"])
+            resetsAt: parseDate(value["reset_at"] ?? value["resetAt"] ?? value["resets_at"] ?? value["resetsAt"]),
+            durationSeconds: number(
+                value["limit_window_seconds"] ?? value["limitWindowSeconds"]
+            ).map(Int.init)
         )
     }
 

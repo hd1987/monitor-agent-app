@@ -151,15 +151,23 @@ private struct SubscriptionQuotaCard: View {
     private func metricItems(_ snapshot: QuotaSnapshot) -> [QuotaMetricItem] {
         var items: [QuotaMetricItem] = []
         if let window = snapshot.fiveHour {
-            items.append(.init(label: "5h", window: window, reset: QuotaDateFormat.resetTime(window.resetsAt)))
+            items.append(metricItem(fallbackLabel: "5h", window: window))
         }
         if let window = snapshot.weekly {
-            items.append(.init(label: "1w", window: window, reset: QuotaDateFormat.resetDateTime(window.resetsAt)))
+            items.append(metricItem(fallbackLabel: "1w", window: window))
         }
         if provider == .claude, let window = snapshot.opusWeekly {
             items.append(.init(label: "Opus", window: window, reset: QuotaDateFormat.resetDateTime(window.resetsAt)))
         }
         return items
+    }
+
+    private func metricItem(fallbackLabel: String, window: QuotaWindow) -> QuotaMetricItem {
+        let label = provider == .codex ? window.displayLabel(fallback: fallbackLabel) : fallbackLabel
+        let reset = window.usesDateTimeReset || fallbackLabel == "1w"
+            ? QuotaDateFormat.resetDateTime(window.resetsAt)
+            : QuotaDateFormat.resetTime(window.resetsAt)
+        return QuotaMetricItem(label: label, window: window, reset: reset)
     }
 
     private func quotaMetric(label: String, window: QuotaWindow, reset: String) -> some View {

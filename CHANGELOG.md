@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-07-13
+
+### Fixed
+- Label Codex quota windows from the server-provided duration when temporary limit changes alter the primary window
+
 ## [0.3.3] - 2026-07-12
 
 ### Changed

@@ -15,6 +15,25 @@ enum QuotaProviderID: String, CaseIterable, Hashable {
 struct QuotaWindow: Equatable {
     let remainingPercent: Double
     let resetsAt: Date?
+    let durationSeconds: Int?
+
+    func displayLabel(fallback: String) -> String {
+        guard let durationSeconds else { return fallback }
+        if durationSeconds % 604_800 == 0 {
+            return "\(durationSeconds / 604_800)w"
+        }
+        if durationSeconds % 86_400 == 0 {
+            return "\(durationSeconds / 86_400)d"
+        }
+        if durationSeconds % 3_600 == 0 {
+            return "\(durationSeconds / 3_600)h"
+        }
+        return fallback
+    }
+
+    var usesDateTimeReset: Bool {
+        (durationSeconds ?? 0) >= 86_400
+    }
 }
 
 enum QuotaSnapshotStatus: Equatable {
