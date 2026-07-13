@@ -67,7 +67,7 @@ Open settings from the right-click menu or `Cmd+,`.
 
 | Page | What it controls |
 |------|------------------|
-| General | Theme, sync interval (`10s`, `30s`, `60s`, `Never`), Keep in Background, Launch at Login, local usage data rebuild |
+| General | Theme, usage sync interval (`10s`, `30s`, `60s`, `Never`), subscription quota visibility and refresh interval (`1 min`, `2 min`, `5 min`, `Never`), Keep in Background, Launch at Login, local usage data rebuild |
 | Config | `~/.claude/settings.json` and `~/.codex/config.toml` |
 | Prompt | `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` |
 
@@ -82,7 +82,9 @@ Monitor Agent reads the JSONL session logs that Claude Code and Codex write loca
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
 | Codex | `~/.codex/sessions/**/rollout-*.jsonl` and `~/.codex/archived_sessions/rollout-*.jsonl` |
 
-All data stays on your machine. Nothing is sent anywhere. The app stores parsed results in `~/.monitor-agent/monitor.db` and syncs incrementally based on the selected sync interval. Opening the panel always triggers an on-demand sync.
+Session logs and parsed usage data stay on your machine. The app stores parsed results in `~/.monitor-agent/monitor.db` and syncs incrementally based on the selected sync interval. Opening the panel always triggers an on-demand sync.
+
+Subscription quota data comes from the providers' account usage endpoints. While the panel is open, every enabled provider refreshes at the selected quota interval; closing the panel stops quota refreshes. `Never` refreshes only when the panel opens, with a 2-minute minimum request interval. The top app filter only changes the displayed quota cards.
 
 `monitor.db` is a derived local cache. The General settings page can rebuild it by syncing all source logs into `~/.monitor-agent/monitor-rebuild.tmp.db`, validating the temporary database, and replacing `monitor.db` only after the rebuild succeeds. The rebuild dialog shows file-level progress and the final requests/sessions/files summary. Original Claude Code and Codex logs, settings, and prompt files are not changed.
 
@@ -130,7 +132,7 @@ MIT
 
 | 页面 | 内容 |
 |------|------|
-| General | 主题、同步间隔（`10s`、`30s`、`60s`、`Never`）、后台保留、登录启动、本地使用数据重建 |
+| General | 主题、用量同步间隔（`10s`、`30s`、`60s`、`Never`）、订阅额度显示和刷新间隔（`1 min`、`2 min`、`5 min`、`Never`）、后台保留、登录启动、本地使用数据重建 |
 | Config | `~/.claude/settings.json` 和 `~/.codex/config.toml` |
 | Prompt | `~/.claude/CLAUDE.md` 和 `~/.codex/AGENTS.md` |
 
@@ -145,7 +147,9 @@ Monitor Agent 读取 Claude Code 和 Codex 在本地生成的 JSONL 会话日志
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
 | Codex | `~/.codex/sessions/**/rollout-*.jsonl` 和 `~/.codex/archived_sessions/rollout-*.jsonl` |
 
-所有数据保留在本地，不会上传。解析结果存储在 `~/.monitor-agent/monitor.db`，按照设置的同步间隔增量同步；打开面板时始终会触发一次同步。
+会话日志和解析后的用量数据保留在本地。解析结果存储在 `~/.monitor-agent/monitor.db`，按照设置的同步间隔增量同步；打开面板时始终会触发一次同步。
+
+订阅额度数据来自提供方的账户用量接口。面板打开期间，所有已启用的提供方都会按照额度刷新间隔更新；关闭面板后停止更新。`Never` 只在面板打开时刷新一次，并使用 2 分钟最小请求间隔。顶部应用筛选只控制显示哪些额度卡片。
 
 `monitor.db` 是派生本地缓存。General 设置页可以把所有源日志同步到 `~/.monitor-agent/monitor-rebuild.tmp.db`，校验临时数据库后再替换 `monitor.db`。重建弹窗会显示文件级进度，以及最终请求数、会话数和文件数汇总。Claude Code 和 Codex 的原始日志、设置和提示词文件不会被修改。
 

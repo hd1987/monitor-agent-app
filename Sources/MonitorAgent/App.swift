@@ -183,7 +183,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.setFrameOrigin(NSPoint(x: x, y: y))
         panel.makeKeyAndOrderFront(nil)
         store.panelDidOpen()
-        store.refreshQuotaForVisibleProviders()
     }
 
     private func hidePanel() {
@@ -219,7 +218,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 850, height: 580),
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: SettingsWindowLayout.minimumWidth,
+                height: SettingsWindowLayout.minimumHeight
+            ),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered, defer: false
         )

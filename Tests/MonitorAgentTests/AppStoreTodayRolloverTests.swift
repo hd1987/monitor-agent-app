@@ -14,23 +14,110 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             codexSessionsPath: "/nonexistent/codex",
             codexArchivedSessionsPath: "/nonexistent/codex-archive"
         )
+        let quotaDefaults = UserDefaults(suiteName: "\(suiteName).quota")!
+        quotaDefaults.removePersistentDomain(forName: "\(suiteName).quota")
+        let quotaSettings = QuotaSettings(defaults: quotaDefaults)
+        let quotaService = RecordingQuotaService()
         let store = AppStore(
             database: DatabaseManager(inMemory: true),
             syncManager: syncManager,
-            syncSettings: syncSettings
+            syncSettings: syncSettings,
+            quotaService: quotaService,
+            quotaSettings: quotaSettings
         )
 
         XCTAssertFalse(store.isPanelVisible)
         XCTAssertFalse(store.isPeriodicSyncActive)
+        XCTAssertFalse(store.isPeriodicQuotaRefreshActive)
 
         store.panelDidOpen()
         XCTAssertTrue(store.isPanelVisible)
         XCTAssertTrue(store.isPeriodicSyncActive)
+        XCTAssertTrue(store.isPeriodicQuotaRefreshActive)
+        XCTAssertEqual(quotaService.providers, [.claude, .codex])
+        XCTAssertEqual(quotaService.minimumIntervals, [120, 120])
 
         store.panelDidClose()
         XCTAssertFalse(store.isPanelVisible)
         XCTAssertFalse(store.isPeriodicSyncActive)
+        XCTAssertFalse(store.isPeriodicQuotaRefreshActive)
 
+        defaults.removePersistentDomain(forName: suiteName)
+        quotaDefaults.removePersistentDomain(forName: "\(suiteName).quota")
+    }
+
+    func testAppFilterDoesNotTriggerQuotaRefresh() {
+        let quotaService = RecordingQuotaService()
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            quotaService: quotaService,
+            observeSyncIntervalChanges: false
+        )
+
+        store.appFilter = .claude
+        store.appFilter = .codex
+
+        XCTAssertTrue(quotaService.providers.isEmpty)
+    }
+
+    func testPanelOpenRefreshesAllEnabledQuotaProvidersRegardlessOfFilter() {
+        let quotaService = RecordingQuotaService()
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            quotaService: quotaService,
+            observeSyncIntervalChanges: false
+        )
+        store.appFilter = .claude
+
+        store.panelDidOpen()
+
+        XCTAssertEqual(quotaService.providers, [.claude, .codex])
+        store.panelDidClose()
+    }
+
+    func testQuotaSettingsChangeRestartsVisiblePanelWithNewInterval() {
+        let suiteName = "AppStoreTodayRolloverTests.quotaInterval"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        let quotaService = RecordingQuotaService()
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            quotaService: quotaService,
+            quotaSettings: quotaSettings,
+            observeSyncIntervalChanges: false
+        )
+        store.panelDidOpen()
+
+        quotaSettings.refreshInterval = .fiveMinutes
+        store.quotaSettingsDidChange()
+
+        XCTAssertTrue(store.isPeriodicQuotaRefreshActive)
+        XCTAssertEqual(quotaService.minimumIntervals, [120, 120, 300, 300])
+        store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testNeverQuotaIntervalRefreshesOnOpenWithoutStartingTimer() {
+        let suiteName = "AppStoreTodayRolloverTests.neverQuotaInterval"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        quotaSettings.refreshInterval = .never
+        let quotaService = RecordingQuotaService()
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            quotaService: quotaService,
+            quotaSettings: quotaSettings,
+            observeSyncIntervalChanges: false
+        )
+
+        store.panelDidOpen()
+
+        XCTAssertFalse(store.isPeriodicQuotaRefreshActive)
+        XCTAssertEqual(quotaService.providers, [.claude, .codex])
+        XCTAssertEqual(quotaService.minimumIntervals, [120, 120])
+        store.panelDidClose()
         defaults.removePersistentDomain(forName: suiteName)
     }
 
@@ -125,5 +212,21 @@ final class AppStoreTodayRolloverTests: XCTestCase {
     private func date(year: Int, month: Int, day: Int, hour: Int = 0) -> Date {
         let calendar = Calendar.current
         return calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour))!
+    }
+}
+
+private final class RecordingQuotaService: QuotaRefreshing {
+    private(set) var providers: [QuotaProviderID] = []
+    private(set) var minimumIntervals: [TimeInterval] = []
+
+    func refresh(
+        provider: QuotaProviderID,
+        minimumInterval: TimeInterval,
+        force: Bool,
+        now: Date,
+        completion: @escaping (QuotaSnapshot) -> Void
+    ) {
+        providers.append(provider)
+        minimumIntervals.append(minimumInterval)
     }
 }
