@@ -3,6 +3,11 @@ import SwiftUI
 @testable import MonitorAgent
 
 final class SettingsSaveConfirmationTests: XCTestCase {
+    func testSettingsWindowUsesExpandedMinimumSize() {
+        XCTAssertEqual(SettingsWindowLayout.minimumWidth, 960)
+        XCTAssertEqual(SettingsWindowLayout.minimumHeight, 680)
+    }
+
     func testSaveConfirmationContentMatchesEachSettingsCategory() {
         XCTAssertEqual(SettingsCategory.general.saveConfirmationTitle, "Save General settings?")
         XCTAssertEqual(SettingsCategory.config.saveConfirmationTitle, "Save Config settings?")
@@ -33,9 +38,13 @@ final class SettingsSaveConfirmationTests: XCTestCase {
 
     func testSubscriptionQuotaSettingsArePresentedAsOneGroup() {
         XCTAssertEqual(QuotaSettingsCopy.title, "Subscription Quota")
-        XCTAssertEqual(QuotaSettingsCopy.description, "Choose which subscription quotas appear in the main panel.")
         XCTAssertEqual(QuotaSettingsCopy.claudeTitle, "Claude Code")
+        XCTAssertEqual(QuotaSettingsCopy.claudeDescription, "Show Claude Code subscription quota in the main panel.")
         XCTAssertEqual(QuotaSettingsCopy.codexTitle, "Codex")
+        XCTAssertEqual(QuotaSettingsCopy.codexDescription, "Show Codex subscription quota in the main panel.")
+        XCTAssertEqual(QuotaSettingsCopy.refreshIntervalTitle, "Refresh Interval")
+        XCTAssertEqual(QuotaSettingsCopy.refreshIntervalDescription, "Refresh while the panel is open. \"Never\" refreshes once when opened.")
+        XCTAssertEqual(QuotaRefreshInterval.allCases.map(\.displayName), ["1 min", "2 min", "5 min", "Never"])
     }
 
     func testUsageDataRebuildCopyMatchesSettingsDataSection() {

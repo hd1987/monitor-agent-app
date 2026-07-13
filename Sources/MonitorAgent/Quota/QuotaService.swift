@@ -1,13 +1,41 @@
 import Foundation
 import Security
 
-final class QuotaService {
+protocol QuotaRefreshing: AnyObject {
+    func refresh(
+        provider: QuotaProviderID,
+        minimumInterval: TimeInterval,
+        force: Bool,
+        now: Date,
+        completion: @escaping (QuotaSnapshot) -> Void
+    )
+}
+
+struct QuotaRefreshThrottle {
+    private var lastAttempts: [QuotaProviderID: Date] = [:]
+
+    mutating func allowsRefresh(
+        provider: QuotaProviderID,
+        minimumInterval: TimeInterval,
+        force: Bool,
+        now: Date
+    ) -> Bool {
+        if !force,
+           let lastAttempt = lastAttempts[provider],
+           now.timeIntervalSince(lastAttempt) < minimumInterval {
+            return false
+        }
+        lastAttempts[provider] = now
+        return true
+    }
+}
+
+final class QuotaService: QuotaRefreshing {
     static let shared = QuotaService()
-    static let minimumRefreshInterval: TimeInterval = 60
 
     private let session: URLSession
     private let queue = DispatchQueue(label: "com.monitoragent.quota-service")
-    private var lastAttempts: [QuotaProviderID: Date] = [:]
+    private var throttle = QuotaRefreshThrottle()
     private var inFlight = Set<QuotaProviderID>()
 
     init(session: URLSession = .shared) {
@@ -16,18 +44,21 @@ final class QuotaService {
 
     func refresh(
         provider: QuotaProviderID,
+        minimumInterval: TimeInterval,
         force: Bool = false,
         now: Date = Date(),
         completion: @escaping (QuotaSnapshot) -> Void
     ) {
         queue.async {
             if self.inFlight.contains(provider) { return }
-            if !force,
-               let lastAttempt = self.lastAttempts[provider],
-               now.timeIntervalSince(lastAttempt) < Self.minimumRefreshInterval {
+            guard self.throttle.allowsRefresh(
+                provider: provider,
+                minimumInterval: minimumInterval,
+                force: force,
+                now: now
+            ) else {
                 return
             }
-            self.lastAttempts[provider] = now
             self.inFlight.insert(provider)
 
             let finish: (QuotaSnapshot) -> Void = { snapshot in

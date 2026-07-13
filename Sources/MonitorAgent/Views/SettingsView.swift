@@ -41,6 +41,11 @@ enum SaveSuccessToastStyle {
     static let backgroundColor = Color.green
 }
 
+enum SettingsWindowLayout {
+    static let minimumWidth: CGFloat = 960
+    static let minimumHeight: CGFloat = 680
+}
+
 enum UsageDataRebuildCopy {
     static let buttonTitle = "Rebuild Local Usage Data"
     static let description = "Rebuilds Monitor Agent's local usage database from Claude Code and Codex session logs. Original session logs and settings will not be changed."
@@ -68,6 +73,7 @@ struct SettingsView: View {
     @State private var draftLaunchAtLogin: Bool = false
     @State private var draftClaudeQuotaEnabled: Bool = true
     @State private var draftCodexQuotaEnabled: Bool = true
+    @State private var draftQuotaRefreshInterval: QuotaRefreshInterval = .twoMinutes
 
     // Config drafts
     @State private var claudeConfigText: String = ""
@@ -133,7 +139,8 @@ struct SettingsView: View {
                             draftKeepInBackground: $draftKeepInBackground,
                             draftLaunchAtLogin: $draftLaunchAtLogin,
                             draftClaudeQuotaEnabled: $draftClaudeQuotaEnabled,
-                            draftCodexQuotaEnabled: $draftCodexQuotaEnabled
+                            draftCodexQuotaEnabled: $draftCodexQuotaEnabled,
+                            draftQuotaRefreshInterval: $draftQuotaRefreshInterval
                         )
                     }
                     .frame(maxWidth: .infinity)
@@ -183,7 +190,10 @@ struct SettingsView: View {
                 .padding(.vertical, 12)
             }
         }
-        .frame(minWidth: 680, minHeight: 460)
+        .frame(
+            minWidth: SettingsWindowLayout.minimumWidth,
+            minHeight: SettingsWindowLayout.minimumHeight
+        )
         .overlay(alignment: SaveSuccessToastPlacement.alignment) {
             if showSaveSuccess {
                 Text(saveSuccessMessage)
@@ -232,6 +242,7 @@ struct SettingsView: View {
             draftLaunchAtLogin = SyncSettings.shared.launchAtLogin
             draftClaudeQuotaEnabled = QuotaSettings.shared.claudeEnabled
             draftCodexQuotaEnabled = QuotaSettings.shared.codexEnabled
+            draftQuotaRefreshInterval = QuotaSettings.shared.refreshInterval
         case .config:
             configTab = .claude
             loadFileContent(
@@ -268,6 +279,7 @@ struct SettingsView: View {
             SyncSettings.shared.launchAtLogin = draftLaunchAtLogin
             QuotaSettings.shared.claudeEnabled = draftClaudeQuotaEnabled
             QuotaSettings.shared.codexEnabled = draftCodexQuotaEnabled
+            QuotaSettings.shared.refreshInterval = draftQuotaRefreshInterval
             store.quotaSettingsDidChange()
 
         case .config:
@@ -390,6 +402,7 @@ struct GeneralSettingsView: View {
     @Binding var draftLaunchAtLogin: Bool
     @Binding var draftClaudeQuotaEnabled: Bool
     @Binding var draftCodexQuotaEnabled: Bool
+    @Binding var draftQuotaRefreshInterval: QuotaRefreshInterval
     @State private var showUsageDataRebuildSheet = false
 
     var body: some View {
@@ -466,7 +479,8 @@ struct GeneralSettingsView: View {
 
             QuotaSettingsGroup(
                 claudeEnabled: $draftClaudeQuotaEnabled,
-                codexEnabled: $draftCodexQuotaEnabled
+                codexEnabled: $draftCodexQuotaEnabled,
+                refreshInterval: $draftQuotaRefreshInterval
             )
 
             Divider().padding(.vertical, 4)
@@ -499,39 +513,58 @@ struct GeneralSettingsView: View {
 
 enum QuotaSettingsCopy {
     static let title = "Subscription Quota"
-    static let description = "Choose which subscription quotas appear in the main panel."
     static let claudeTitle = "Claude Code"
+    static let claudeDescription = "Show Claude Code subscription quota in the main panel."
     static let codexTitle = "Codex"
+    static let codexDescription = "Show Codex subscription quota in the main panel."
+    static let refreshIntervalTitle = "Refresh Interval"
+    static let refreshIntervalDescription = "Refresh while the panel is open. \"Never\" refreshes once when opened."
 }
 
 private struct QuotaSettingsGroup: View {
     @Binding var claudeEnabled: Bool
     @Binding var codexEnabled: Bool
+    @Binding var refreshInterval: QuotaRefreshInterval
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(QuotaSettingsCopy.title)
                 .font(.system(size: 13, weight: .semibold))
-            Text(QuotaSettingsCopy.description)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
 
             VStack(spacing: 0) {
                 quotaRow(
                     title: QuotaSettingsCopy.claudeTitle,
+                    description: QuotaSettingsCopy.claudeDescription,
                     isOn: $claudeEnabled
                 )
                 Divider().padding(.leading, 12)
                 quotaRow(
                     title: QuotaSettingsCopy.codexTitle,
+                    description: QuotaSettingsCopy.codexDescription,
                     isOn: $codexEnabled
                 )
+                Divider().padding(.leading, 12)
+                HStack(spacing: 16) {
+                    settingLabel(
+                        title: QuotaSettingsCopy.refreshIntervalTitle,
+                        description: QuotaSettingsCopy.refreshIntervalDescription
+                    )
+                    Spacer(minLength: 16)
+                    Picker("", selection: $refreshInterval) {
+                        ForEach(QuotaRefreshInterval.allCases) { interval in
+                            Text(interval.displayName).tag(interval)
+                        }
+                    }
+                    .frame(width: 100)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
             }
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+            .background(Color(nsColor: .separatorColor).opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 0.5)
+                    .stroke(Color(nsColor: .separatorColor).opacity(0.35), lineWidth: 0.5)
             )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -539,17 +572,27 @@ private struct QuotaSettingsGroup: View {
 
     private func quotaRow(
         title: String,
+        description: String,
         isOn: Binding<Bool>
     ) -> some View {
         HStack(spacing: 16) {
-            Text(title)
-                .font(.system(size: 12, weight: .medium))
+            settingLabel(title: title, description: description)
             Spacer(minLength: 16)
             Toggle("", isOn: isOn)
                 .toggleStyle(.switch)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+    }
+
+    private func settingLabel(title: String, description: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+            Text(description)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
     }
 }
 
