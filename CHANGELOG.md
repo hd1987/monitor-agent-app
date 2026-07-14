@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-14
+
 ### Changed
 - Give the main panel the same native window shadow as the General settings window and remove its edge border
 
