@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-14
+
 ### Added
 - Add a draggable main-panel header region and a reset-position button after the pin control
 
