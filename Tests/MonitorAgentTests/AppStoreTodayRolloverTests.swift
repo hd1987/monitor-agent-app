@@ -135,6 +135,28 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         XCTAssertEqual(store.selectedActivityDate, "2026-07-09")
     }
 
+    func testSelectZeroActivityDateKeepsSelectionAndLoadsZeroHourlyUsage() {
+        let now = date(year: 2026, month: 7, day: 9, hour: 10)
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            observeSyncIntervalChanges: false,
+            currentDateProvider: { now }
+        )
+
+        store.selectActivityDate("2026-07-08")
+
+        let loaded = expectation(description: "zero hourly usage loads")
+        waitUntil(attemptsRemaining: 50) {
+            store.hourlyTokenUsage.count == 24
+        } completion: {
+            XCTAssertEqual(store.selectedActivityDate, "2026-07-08")
+            XCTAssertTrue(store.hourlyTokenUsage.allSatisfy { !$0.hasTokenUsage && $0.requestCount == 0 })
+            loaded.fulfill()
+        }
+
+        wait(for: [loaded], timeout: 1)
+    }
+
     func testReloadAfterDayRolloverResetsAnySelectionToToday() {
         var now = date(year: 2026, month: 7, day: 9, hour: 23)
         let store = AppStore(
