@@ -123,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = AppStore()
     private let panelPresentationState = PanelPresentationState()
     private let themeManager = ThemeManager.shared
+    private let globalShortcutController = GlobalShortcutController.shared
     private var themeCancellable: AnyCancellable?
 
     private var forceQuit = false
@@ -191,6 +192,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.panelPresentationState.setPanelFocused(isFocused)
         }
         panel.contentView = hostingView
+        globalShortcutController.configure { [weak self] in
+            self?.togglePanel(nil)
+        }
 
         // Apply theme to panel and react to changes
         applyTheme()

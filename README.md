@@ -67,7 +67,7 @@ Open settings from the right-click menu or `Cmd+,`.
 
 | Page | What it controls |
 |------|------------------|
-| General | Theme, usage sync interval (`10s`, `30s`, `60s`, `Never`), subscription quota visibility and refresh interval (`1 min`, `2 min`, `5 min`, `Never`), Keep in Background, Launch at Login, local usage data rebuild |
+| General | Theme, usage sync interval (`10s`, `30s`, `60s`, `Never`), global shortcut for toggling the main panel, subscription quota visibility and refresh interval (`1 min`, `2 min`, `5 min`, `Never`), Keep in Background, Launch at Login, local usage data rebuild |
 | Config | `~/.claude/settings.json` and `~/.codex/config.toml` |
 | Prompt | `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` |
 
@@ -132,7 +132,7 @@ MIT
 
 | 页面 | 内容 |
 |------|------|
-| General | 主题、用量同步间隔（`10s`、`30s`、`60s`、`Never`）、订阅额度显示和刷新间隔（`1 min`、`2 min`、`5 min`、`Never`）、后台保留、登录启动、本地使用数据重建 |
+| General | 主题、用量同步间隔（`10s`、`30s`、`60s`、`Never`）、用于切换主面板的全局快捷键、订阅额度显示和刷新间隔（`1 min`、`2 min`、`5 min`、`Never`）、后台保留、登录启动、本地使用数据重建 |
 | Config | `~/.claude/settings.json` 和 `~/.codex/config.toml` |
 | Prompt | `~/.claude/CLAUDE.md` 和 `~/.codex/AGENTS.md` |
 

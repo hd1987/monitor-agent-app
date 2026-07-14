@@ -68,6 +68,7 @@ Sources/MonitorAgent/
 ├── DatabaseManager.swift          # GRDB r/w, schema setup, path-based databases, all queries + insert/sync methods
 ├── Models.swift                   # AppFilter, TimeRange, UsageStats, DayActivity, HourlyTokenUsage, ParsedRecord, SyncState, rebuild summaries
 ├── SyncSettings.swift             # SyncInterval enum + UserDefaults persistence (default 30s)
+├── GlobalShortcut.swift           # Configurable global shortcut persistence, recording model, and Carbon registration
 ├── UpdateCheckView.swift          # SwiftUI update-check dialog state and view
 ├── UpdateChecker.swift            # GitHub release check, staged app validation, atomic install, and restart
 ├── UsageDataRebuilder.swift       # Temporary database rebuild, validation, and successful replacement
@@ -91,7 +92,7 @@ Sources/MonitorAgent/
 
 ## UI Layout
 
-**Menu Bar**: Robot icon (template image from bundled SVG). Left-click opens the panel and triggers an immediate sync. While the panel remains visible, Sync Interval controls periodic usage-data refreshes; hiding the panel stops the timer, and `Never` performs only the immediate open sync. Right-click opens About / General / Config / Prompt / Check for Updates / Quit. Update-check dialogs use a SwiftUI-hosted panel with structured states for checking, up-to-date, new version, downloading, installing, completion, and failure. New-version dialogs show current build metadata and scrollable release notes; downloads show determinate MB progress. Updates are extracted into a staging directory, validated as a MonitorAgent app bundle, and only then replace the installed app. Activation policy is `.accessory` (no Dock icon). Re-clicking the app icon shows the panel via `applicationShouldHandleReopen`.
+**Menu Bar**: Robot icon (template image from bundled SVG). Left-click opens the panel and triggers an immediate sync. While the panel remains visible, Sync Interval controls periodic usage-data refreshes; hiding the panel stops the timer, and `Never` performs only the immediate open sync. A user-configured global shortcut can toggle the panel from any app; it is unassigned by default, requires at least one modifier, can be cleared, and is registered immediately after General settings are saved. Shortcut conflicts prevent the General save and keep the previous shortcut active. Right-click opens About / General / Config / Prompt / Check for Updates / Quit. Update-check dialogs use a SwiftUI-hosted panel with structured states for checking, up-to-date, new version, downloading, installing, completion, and failure. New-version dialogs show current build metadata and scrollable release notes; downloads show determinate MB progress. Updates are extracted into a staging directory, validated as a MonitorAgent app bundle, and only then replace the installed app. Activation policy is `.accessory` (no Dock icon). Re-clicking the app icon shows the panel via `applicationShouldHandleReopen`.
 
 **Panel** (top → bottom): The borderless main panel uses the same native macOS window shadow as the General settings window, without a separate edge border. Pressing `Esc` hides the panel even when it is pinned.
 
@@ -105,7 +106,7 @@ Sources/MonitorAgent/
 
 **Settings** — The window uses a `960 × 680` default and minimum content size, with a left sidebar (General / Config / Prompt) plus right content area. Cancel closes the window. Save asks for confirmation before applying the current category, then keeps the window open and shows a top green success toast. Save only applies to the current category. Switching categories reloads from disk. Config/Prompt use a Claude Code / Codex tab bar. Subscription Quota settings use per-row descriptions and a subdued grouped background rather than a shared section description or bright card surface.
 
-- **General** — Theme (System/Light/Dark), Sync Interval (10s/30s/60s/Never), Keep in Background toggle, Launch at Login toggle, a full-width rounded Subscription Quota group with one shared description above simple Claude Code and Codex toggle rows, Data rebuild action with progress/result sheet
+- **General** — Theme (System/Light/Dark), Sync Interval (10s/30s/60s/Never), configurable global shortcut for toggling the main panel, Keep in Background toggle, Launch at Login toggle, a full-width rounded Subscription Quota group with one shared description above simple Claude Code and Codex toggle rows, Data rebuild action with progress/result sheet
 - **Config** — TextEditor for `~/.claude/settings.json` (JSON validated on save) and `~/.codex/config.toml`; shows "File not found" if missing
 - **Prompt** — TextEditor for `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`; shows "File not found" if missing
 
