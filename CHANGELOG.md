@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-14
+
 ### Added
 - Add a configurable global shortcut in General settings for toggling the main panel
 
