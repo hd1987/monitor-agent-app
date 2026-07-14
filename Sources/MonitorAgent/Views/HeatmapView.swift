@@ -17,9 +17,6 @@ struct HeatmapView: View {
     private let hPadding: CGFloat = 16
     /// Panel width minus padding → available width for grid
     private var availableWidth: CGFloat { 620 - hPadding * 2 }
-    private var hasSelectedActivityTokenUsage: Bool {
-        store.hourlyTokenUsage.contains(where: \.hasTokenUsage)
-    }
     private var tooltipWidth: CGFloat {
         tooltipSize.width > 0 ? tooltipSize.width : ActivityTokenChartLayout.defaultTooltipWidth
     }
@@ -77,7 +74,7 @@ struct HeatmapView: View {
                                         )
                                     })
                                     .overlay {
-                                        if store.selectedActivityDate == entry.date && hasSelectedActivityTokenUsage {
+                                        if store.selectedActivityDate == entry.date {
                                             RoundedRectangle(cornerRadius: 2)
                                                 .stroke(Color.accentColor, lineWidth: 1.5)
                                         }
@@ -93,7 +90,7 @@ struct HeatmapView: View {
                                         }
                                     }
                                     .onTapGesture {
-                                        if !entry.isPlaceholder && entry.count > 0 {
+                                        if !entry.isPlaceholder {
                                             store.selectActivityDate(entry.date)
                                         }
                                     }
@@ -171,7 +168,7 @@ struct HeatmapView: View {
                 alignment: .leading
             )
 
-            if let selectedDate = store.selectedActivityDate, hasSelectedActivityTokenUsage {
+            if let selectedDate = store.selectedActivityDate {
                 ActivityTokenChartView(date: selectedDate, usage: store.hourlyTokenUsage)
                     .environmentObject(theme)
                     .transition(.opacity.combined(with: .move(edge: .top)))
@@ -185,7 +182,7 @@ struct HeatmapView: View {
                     activityFrameInWindow = frame
                 }
                 ActivityChartClickMonitor(
-                    isActive: store.selectedActivityDate != nil && hasSelectedActivityTokenUsage,
+                    isActive: store.selectedActivityDate != nil,
                     excludedFrames: [activityFrameInWindow, appFilterFrameInWindow],
                     onOutsideClick: {
                         store.clearSelectedActivityDate()

@@ -2,7 +2,9 @@ import SwiftUI
 
 struct FilterBar: View {
     @EnvironmentObject var store: AppStore
+    @EnvironmentObject var panelPresentationState: PanelPresentationState
     @EnvironmentObject var theme: ThemeManager
+    let onOpenGeneralSettings: () -> Void
     let onAppFilterFrameChange: (CGRect) -> Void
 
     @State private var isTimeRangePopoverPresented = false
@@ -46,6 +48,39 @@ struct FilterBar: View {
             )
 
             Spacer()
+
+            HStack(spacing: 4) {
+                Button {
+                    panelPresentationState.togglePin()
+                } label: {
+                    Image(systemName: panelPresentationState.isPinned ? "pin.fill" : "pin")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(
+                            panelPresentationState.isPinned
+                                ? Color.accentColor
+                                : Color.secondary.opacity(0.35)
+                        )
+                        .rotationEffect(panelPresentationState.isPinned ? .zero : .degrees(45))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(panelPresentationState.isPinned ? "Unpin Panel" : "Keep Panel Open")
+                .accessibilityLabel(panelPresentationState.isPinned ? "Unpin panel" : "Keep panel open")
+
+                Button {
+                    onOpenGeneralSettings()
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.secondary.opacity(0.35))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Open General Settings")
+                .accessibilityLabel("Open General settings")
+            }
 
             Button {
                 syncCalendarSelection(from: store.timeRange)

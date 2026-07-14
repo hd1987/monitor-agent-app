@@ -285,11 +285,7 @@ final class AppStore: ObservableObject {
             let usage = db.fetchHourlyTokenUsage(app: app, date: date)
             DispatchQueue.main.async { [weak self] in
                 guard self?.selectedActivityDate == date else { return }
-                if usage.contains(where: \.hasTokenUsage) {
-                    self?.hourlyTokenUsage = usage
-                } else {
-                    self?.clearSelectedActivityDate()
-                }
+                self?.hourlyTokenUsage = usage
             }
         }
     }
