@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-07-14
+
 ### Added
 - Add a persistent borderless pin button with compact left-angled inactive styling beside General settings on the right
 - Add a faint borderless General settings gear button on the right that opens settings without hiding the main panel
