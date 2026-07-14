@@ -83,7 +83,7 @@ struct FilterBar: View {
                     Image(systemName: panelPresentationState.isPinned ? "pin.fill" : "pin")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(
-                            panelPresentationState.isPinned
+                            panelPresentationState.isPinHighlighted
                                 ? Color.accentColor
                                 : Color.secondary.opacity(0.35)
                         )

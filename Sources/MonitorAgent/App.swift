@@ -56,11 +56,20 @@ enum PanelPositioning {
 
 final class PanelPresentationState: ObservableObject {
     @Published private(set) var isPinned = false
+    @Published private(set) var isPanelFocused = false
     private(set) var hasCustomPosition = false
     private var suppressesNextAutomaticDismissal = false
 
+    var isPinHighlighted: Bool {
+        isPinned && isPanelFocused
+    }
+
     func togglePin() {
         isPinned.toggle()
+    }
+
+    func setPanelFocused(_ isFocused: Bool) {
+        isPanelFocused = isFocused
     }
 
     func allowsDismissal(for reason: PanelDismissalReason) -> Bool {
@@ -177,6 +186,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         panel.onUserMove = { [weak self] in
             self?.panelPresentationState.recordCustomPosition()
+        }
+        panel.onFocusChange = { [weak self] isFocused in
+            self?.panelPresentationState.setPanelFocused(isFocused)
         }
         panel.contentView = hostingView
 
@@ -433,6 +445,7 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     var onHide: (() -> Void)?
     var allowsAutomaticDismissal: (() -> Bool)?
     var onUserMove: (() -> Void)?
+    var onFocusChange: ((Bool) -> Void)?
 
     init() {
         super.init(
@@ -502,6 +515,14 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         onUserMove?()
     }
 
+    func windowDidBecomeKey(_ notification: Notification) {
+        onFocusChange?(true)
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        onFocusChange?(false)
+    }
+
     func constrainToVisibleFrame(at screenPoint: NSPoint) {
         guard let targetScreen = NSScreen.screens.first(where: { $0.visibleFrame.contains(screenPoint) })
             ?? screen else { return }
@@ -515,6 +536,7 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
 
     override func orderOut(_ sender: Any?) {
         super.orderOut(sender)
+        onFocusChange?(false)
         onHide?()
     }
 
