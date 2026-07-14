@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Replace the main-panel reset-position icon with a scope symbol
+
 ## [0.4.1] - 2026-07-14
 
 ### Changed
