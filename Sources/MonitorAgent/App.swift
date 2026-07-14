@@ -518,6 +518,10 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         onHide?()
     }
 
+    override func cancelOperation(_ sender: Any?) {
+        orderOut(sender)
+    }
+
     override func resignKey() {
         super.resignKey()
         guard allowsAutomaticDismissal?() != false else { return }

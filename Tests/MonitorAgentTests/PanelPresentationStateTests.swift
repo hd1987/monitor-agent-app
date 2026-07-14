@@ -66,4 +66,15 @@ final class PanelPresentationStateTests: XCTestCase {
         XCTAssertEqual(origin.x, 0)
         XCTAssertEqual(origin.y, 500)
     }
+
+    func testEscapeHidesPanelRegardlessOfAutomaticDismissalPolicy() {
+        let panel = FloatingPanel()
+        var didHide = false
+        panel.allowsAutomaticDismissal = { false }
+        panel.onHide = { didHide = true }
+
+        panel.cancelOperation(nil)
+
+        XCTAssertTrue(didHide)
+    }
 }
