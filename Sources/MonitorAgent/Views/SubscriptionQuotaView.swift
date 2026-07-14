@@ -98,8 +98,7 @@ private struct SubscriptionQuotaCard: View {
 
     private var header: some View {
         HStack(spacing: 5) {
-            Image(systemName: provider == .claude ? "sparkles" : "terminal")
-                .foregroundStyle(provider == .claude ? .orange : .blue)
+            ProviderIcon(provider: provider)
             Text(provider.displayName)
                 .fontWeight(.semibold)
 

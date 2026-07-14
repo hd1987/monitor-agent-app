@@ -2,6 +2,15 @@ import XCTest
 @testable import MonitorAgent
 
 final class QuotaFeatureTests: XCTestCase {
+    func testQuotaProviderIconsUseSuppliedSVGAssets() throws {
+        XCTAssertEqual(ProviderIconAsset.claudeSourceFileName, "claude.svg")
+        XCTAssertEqual(ProviderIconAsset.codexSourceFileName, "chatgpt.svg")
+        XCTAssertFalse(try XCTUnwrap(ProviderIconAsset.data(for: .claude)).isEmpty)
+        XCTAssertFalse(try XCTUnwrap(ProviderIconAsset.data(for: .codex)).isEmpty)
+        XCTAssertFalse(ProviderIconAsset.image(for: .claude).isTemplate)
+        XCTAssertTrue(ProviderIconAsset.image(for: .codex).isTemplate)
+    }
+
     func testQuotaCardUsesCompactSingleLineLayout() {
         XCTAssertEqual(QuotaCardLayout.cardHeight, 34)
         XCTAssertEqual(QuotaCardLayout.metricHeight, 20)

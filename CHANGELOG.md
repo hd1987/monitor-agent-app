@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Replace the subscription quota card placeholders with the supplied Claude Code and ChatGPT SVG icons
+
 ## [0.3.6] - 2026-07-13
 
 ### Changed
