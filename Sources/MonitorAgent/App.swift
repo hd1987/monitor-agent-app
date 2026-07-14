@@ -25,8 +25,38 @@ enum PanelDismissalReason {
     case explicit
 }
 
+enum PanelPositioning {
+    static let statusItemSpacing: CGFloat = 4
+
+    static func anchoredOrigin(
+        statusItemFrame: NSRect,
+        panelSize: NSSize,
+        visibleFrame: NSRect
+    ) -> NSPoint {
+        let origin = NSPoint(
+            x: statusItemFrame.midX - panelSize.width / 2,
+            y: statusItemFrame.minY - panelSize.height - statusItemSpacing
+        )
+        return constrainedOrigin(origin, panelSize: panelSize, visibleFrame: visibleFrame)
+    }
+
+    static func constrainedOrigin(
+        _ origin: NSPoint,
+        panelSize: NSSize,
+        visibleFrame: NSRect
+    ) -> NSPoint {
+        let maximumX = max(visibleFrame.minX, visibleFrame.maxX - panelSize.width)
+        let maximumY = max(visibleFrame.minY, visibleFrame.maxY - panelSize.height)
+        return NSPoint(
+            x: min(max(origin.x, visibleFrame.minX), maximumX),
+            y: min(max(origin.y, visibleFrame.minY), maximumY)
+        )
+    }
+}
+
 final class PanelPresentationState: ObservableObject {
     @Published private(set) var isPinned = false
+    private(set) var hasCustomPosition = false
     private var suppressesNextAutomaticDismissal = false
 
     func togglePin() {
@@ -46,6 +76,14 @@ final class PanelPresentationState: ObservableObject {
 
     func suppressNextAutomaticDismissal() {
         suppressesNextAutomaticDismissal = true
+    }
+
+    func recordCustomPosition() {
+        hasCustomPosition = true
+    }
+
+    func resetCustomPosition() {
+        hasCustomPosition = false
     }
 }
 
@@ -121,6 +159,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hostingView = NSHostingView(
             rootView: PopoverView { [weak self] in
                 self?.openSettings(category: .general, keepingMainPanelVisible: true)
+            } onResetPanelPosition: { [weak self] in
+                self?.resetPanelPosition()
             }
                 .environmentObject(store)
                 .environmentObject(panelPresentationState)
@@ -134,6 +174,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         panel.onHide = { [weak self] in
             self?.store.panelDidClose()
+        }
+        panel.onUserMove = { [weak self] in
+            self?.panelPresentationState.recordCustomPosition()
         }
         panel.contentView = hostingView
 
@@ -213,12 +256,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let panelSize = panel.contentView?.fittingSize ?? NSSize(width: 620, height: 400)
         panel.setContentSize(panelSize)
 
-        let x = screenRect.midX - panelSize.width / 2
-        let y = screenRect.minY - panelSize.height - 4
-
-        panel.setFrameOrigin(NSPoint(x: x, y: y))
+        if panelPresentationState.hasCustomPosition {
+            constrainPanelToVisibleFrame(fallbackScreen: buttonWindow.screen)
+        } else {
+            positionPanelBelowStatusItem(screenRect, fallbackScreen: buttonWindow.screen)
+        }
         panel.makeKeyAndOrderFront(nil)
         store.panelDidOpen()
+    }
+
+    private func resetPanelPosition() {
+        guard let button = statusItem.button,
+              let buttonWindow = button.window else { return }
+
+        let buttonRect = button.convert(button.bounds, to: nil)
+        let screenRect = buttonWindow.convertToScreen(buttonRect)
+        panelPresentationState.resetCustomPosition()
+        positionPanelBelowStatusItem(screenRect, fallbackScreen: buttonWindow.screen)
+    }
+
+    private func positionPanelBelowStatusItem(_ statusItemFrame: NSRect, fallbackScreen: NSScreen?) {
+        let visibleFrame = fallbackScreen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? statusItemFrame
+        panel.setFrameOrigin(
+            PanelPositioning.anchoredOrigin(
+                statusItemFrame: statusItemFrame,
+                panelSize: panel.frame.size,
+                visibleFrame: visibleFrame
+            )
+        )
+    }
+
+    private func constrainPanelToVisibleFrame(fallbackScreen: NSScreen?) {
+        guard let visibleFrame = panel.screen?.visibleFrame
+            ?? fallbackScreen?.visibleFrame
+            ?? NSScreen.main?.visibleFrame else { return }
+        panel.setFrameOrigin(
+            PanelPositioning.constrainedOrigin(
+                panel.frame.origin,
+                panelSize: panel.frame.size,
+                visibleFrame: visibleFrame
+            )
+        )
     }
 
     private func hidePanel(reason: PanelDismissalReason = .automatic) {
@@ -349,11 +427,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 // MARK: - Floating Panel
 
-final class FloatingPanel: NSPanel {
+final class FloatingPanel: NSPanel, NSWindowDelegate {
     /// Exposed for theme updates
     private(set) var backgroundLayer: CALayer?
     var onHide: (() -> Void)?
     var allowsAutomaticDismissal: (() -> Bool)?
+    var onUserMove: (() -> Void)?
 
     init() {
         super.init(
@@ -364,6 +443,7 @@ final class FloatingPanel: NSPanel {
         )
 
         isFloatingPanel = true
+        delegate = self
         level = .statusBar
         isOpaque = false
         backgroundColor = .clear
@@ -419,6 +499,21 @@ final class FloatingPanel: NSPanel {
     }
 
     override var canBecomeKey: Bool { true }
+
+    func windowWillMove(_ notification: Notification) {
+        onUserMove?()
+    }
+
+    func constrainToVisibleFrame(at screenPoint: NSPoint) {
+        guard let targetScreen = NSScreen.screens.first(where: { $0.visibleFrame.contains(screenPoint) })
+            ?? screen else { return }
+        let origin = PanelPositioning.constrainedOrigin(
+            frame.origin,
+            panelSize: frame.size,
+            visibleFrame: targetScreen.visibleFrame
+        )
+        setFrameOrigin(origin)
+    }
 
     override func orderOut(_ sender: Any?) {
         super.orderOut(sender)

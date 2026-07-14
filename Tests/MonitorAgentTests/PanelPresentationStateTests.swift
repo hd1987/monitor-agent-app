@@ -32,4 +32,38 @@ final class PanelPresentationStateTests: XCTestCase {
         XCTAssertTrue(state.allowsDismissal(for: .automatic))
         XCTAssertFalse(state.isPinned)
     }
+
+    func testCustomPositionPersistsUntilReset() {
+        let state = PanelPresentationState()
+
+        state.recordCustomPosition()
+
+        XCTAssertTrue(state.hasCustomPosition)
+
+        state.resetCustomPosition()
+
+        XCTAssertFalse(state.hasCustomPosition)
+    }
+
+    func testAnchoredPositionIsCenteredBelowStatusItemAndConstrainedToScreen() {
+        let origin = PanelPositioning.anchoredOrigin(
+            statusItemFrame: NSRect(x: 880, y: 900, width: 24, height: 24),
+            panelSize: NSSize(width: 620, height: 400),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1000, height: 900)
+        )
+
+        XCTAssertEqual(origin.x, 380)
+        XCTAssertEqual(origin.y, 496)
+    }
+
+    func testPanelPositionIsConstrainedInsideVisibleFrame() {
+        let origin = PanelPositioning.constrainedOrigin(
+            NSPoint(x: -100, y: 700),
+            panelSize: NSSize(width: 620, height: 400),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1000, height: 900)
+        )
+
+        XCTAssertEqual(origin.x, 0)
+        XCTAssertEqual(origin.y, 500)
+    }
 }

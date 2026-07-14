@@ -6,9 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Added
+- Add a draggable main-panel header region and a reset-position button after the pin control
+
 ### Changed
 - Shorten the reset-credit detail label to `Full reset`
 - Keep a pinned main panel visible beneath the status-item context menu
+- Preserve the dragged main-panel position while the app remains running
+- Expand main-panel dragging to every non-interactive FilterBar margin and padding region
+- Keep every main-panel app-filter label on one line
+- Reduce the main-panel date range control width from 150pt to 120pt
 
 ## [0.3.7] - 2026-07-14
 

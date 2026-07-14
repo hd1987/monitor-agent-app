@@ -4,6 +4,7 @@ struct PopoverView: View {
     @EnvironmentObject var store: AppStore
     @EnvironmentObject var theme: ThemeManager
     let onOpenGeneralSettings: () -> Void
+    let onResetPanelPosition: () -> Void
     @State private var appFilterFrameInWindow: CGRect = .null
     @State private var isTokenBreakdownPresented = false
 
@@ -11,6 +12,7 @@ struct PopoverView: View {
         VStack(spacing: 0) {
             FilterBar(
                 onOpenGeneralSettings: onOpenGeneralSettings,
+                onResetPanelPosition: onResetPanelPosition,
                 onAppFilterFrameChange: { frame in
                     appFilterFrameInWindow = frame
                 }
