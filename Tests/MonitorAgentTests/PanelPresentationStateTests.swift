@@ -24,6 +24,22 @@ final class PanelPresentationStateTests: XCTestCase {
         XCTAssertFalse(state.allowsDismissal(for: .automatic))
     }
 
+    func testPinnedPanelIsHighlightedOnlyWhileFocused() {
+        let state = PanelPresentationState()
+        state.togglePin()
+
+        XCTAssertFalse(state.isPinHighlighted)
+
+        state.setPanelFocused(true)
+
+        XCTAssertTrue(state.isPinHighlighted)
+
+        state.setPanelFocused(false)
+
+        XCTAssertFalse(state.isPinHighlighted)
+        XCTAssertTrue(state.isPinned)
+    }
+
     func testAutomaticDismissalCanBeSuppressedOnceWithoutPinning() {
         let state = PanelPresentationState()
         state.suppressNextAutomaticDismissal()
@@ -65,5 +81,16 @@ final class PanelPresentationStateTests: XCTestCase {
 
         XCTAssertEqual(origin.x, 0)
         XCTAssertEqual(origin.y, 500)
+    }
+
+    func testEscapeHidesPanelRegardlessOfAutomaticDismissalPolicy() {
+        let panel = FloatingPanel()
+        var didHide = false
+        panel.allowsAutomaticDismissal = { false }
+        panel.onHide = { didHide = true }
+
+        panel.cancelOperation(nil)
+
+        XCTAssertTrue(didHide)
     }
 }

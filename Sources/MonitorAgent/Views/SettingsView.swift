@@ -69,6 +69,7 @@ struct SettingsView: View {
     // General drafts
     @State private var draftTheme: Theme = .system
     @State private var draftSyncInterval: SyncInterval = .thirty
+    @State private var draftGlobalShortcut: GlobalShortcut?
     @State private var draftKeepInBackground: Bool = true
     @State private var draftLaunchAtLogin: Bool = false
     @State private var draftClaudeQuotaEnabled: Bool = true
@@ -136,6 +137,7 @@ struct SettingsView: View {
                         GeneralSettingsView(
                             draftTheme: $draftTheme,
                             draftSyncInterval: $draftSyncInterval,
+                            draftGlobalShortcut: $draftGlobalShortcut,
                             draftKeepInBackground: $draftKeepInBackground,
                             draftLaunchAtLogin: $draftLaunchAtLogin,
                             draftClaudeQuotaEnabled: $draftClaudeQuotaEnabled,
@@ -238,6 +240,7 @@ struct SettingsView: View {
         case .general:
             draftTheme = themeManager.theme
             draftSyncInterval = SyncSettings.shared.interval
+            draftGlobalShortcut = GlobalShortcutController.shared.shortcut
             draftKeepInBackground = SyncSettings.shared.keepInBackground
             draftLaunchAtLogin = SyncSettings.shared.launchAtLogin
             draftClaudeQuotaEnabled = QuotaSettings.shared.claudeEnabled
@@ -273,6 +276,13 @@ struct SettingsView: View {
     private func saveCurrentCategory() {
         switch selectedCategory {
         case .general:
+            do {
+                try GlobalShortcutController.shared.updateShortcut(draftGlobalShortcut)
+            } catch {
+                saveErrorMessage = error.localizedDescription
+                showSaveError = true
+                return
+            }
             themeManager.theme = draftTheme
             SyncSettings.shared.interval = draftSyncInterval
             SyncSettings.shared.keepInBackground = draftKeepInBackground
@@ -398,6 +408,7 @@ struct GeneralSettingsView: View {
 
     @Binding var draftTheme: Theme
     @Binding var draftSyncInterval: SyncInterval
+    @Binding var draftGlobalShortcut: GlobalShortcut?
     @Binding var draftKeepInBackground: Bool
     @Binding var draftLaunchAtLogin: Bool
     @Binding var draftClaudeQuotaEnabled: Bool
@@ -450,6 +461,15 @@ struct GeneralSettingsView: View {
                     }
                 }
                 .frame(width: 100)
+            }
+
+            Divider().padding(.vertical, 4)
+
+            SettingsRow(
+                title: "Global Shortcut",
+                description: "Show or hide the main panel from any app. Requires at least one modifier key."
+            ) {
+                GlobalShortcutRecorder(shortcut: $draftGlobalShortcut)
             }
 
             Divider().padding(.vertical, 4)
@@ -509,6 +529,71 @@ struct GeneralSettingsView: View {
         }
     }
 
+}
+
+struct GlobalShortcutRecorder: View {
+    @Binding var shortcut: GlobalShortcut?
+    @State private var isRecording = false
+    @State private var eventMonitor: Any?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button {
+                beginRecording()
+            } label: {
+                Text(buttonTitle)
+                    .font(.system(size: 12))
+                    .frame(minWidth: 150)
+            }
+
+            if shortcut != nil {
+                Button {
+                    shortcut = nil
+                    stopRecording()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear global shortcut")
+                .accessibilityLabel("Clear global shortcut")
+            }
+        }
+        .onDisappear {
+            stopRecording()
+        }
+    }
+
+    private var buttonTitle: String {
+        if isRecording { return "Press shortcut…" }
+        return shortcut?.displayName ?? "Record Shortcut"
+    }
+
+    private func beginRecording() {
+        stopRecording()
+        isRecording = true
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if GlobalShortcut.isRecordingCancellation(event) {
+                stopRecording()
+                return nil
+            }
+            guard let recordedShortcut = GlobalShortcut.make(from: event) else {
+                NSSound.beep()
+                return nil
+            }
+            shortcut = recordedShortcut
+            stopRecording()
+            return nil
+        }
+    }
+
+    private func stopRecording() {
+        if let eventMonitor {
+            NSEvent.removeMonitor(eventMonitor)
+            self.eventMonitor = nil
+        }
+        isRecording = false
+    }
 }
 
 enum QuotaSettingsCopy {

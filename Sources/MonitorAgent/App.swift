@@ -56,11 +56,20 @@ enum PanelPositioning {
 
 final class PanelPresentationState: ObservableObject {
     @Published private(set) var isPinned = false
+    @Published private(set) var isPanelFocused = false
     private(set) var hasCustomPosition = false
     private var suppressesNextAutomaticDismissal = false
 
+    var isPinHighlighted: Bool {
+        isPinned && isPanelFocused
+    }
+
     func togglePin() {
         isPinned.toggle()
+    }
+
+    func setPanelFocused(_ isFocused: Bool) {
+        isPanelFocused = isFocused
     }
 
     func allowsDismissal(for reason: PanelDismissalReason) -> Bool {
@@ -114,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = AppStore()
     private let panelPresentationState = PanelPresentationState()
     private let themeManager = ThemeManager.shared
+    private let globalShortcutController = GlobalShortcutController.shared
     private var themeCancellable: AnyCancellable?
 
     private var forceQuit = false
@@ -178,7 +188,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onUserMove = { [weak self] in
             self?.panelPresentationState.recordCustomPosition()
         }
+        panel.onFocusChange = { [weak self] isFocused in
+            self?.panelPresentationState.setPanelFocused(isFocused)
+        }
         panel.contentView = hostingView
+        globalShortcutController.configure { [weak self] in
+            self?.togglePanel(nil)
+        }
 
         // Apply theme to panel and react to changes
         applyTheme()
@@ -433,6 +449,7 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     var onHide: (() -> Void)?
     var allowsAutomaticDismissal: (() -> Bool)?
     var onUserMove: (() -> Void)?
+    var onFocusChange: ((Bool) -> Void)?
 
     init() {
         super.init(
@@ -502,6 +519,14 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         onUserMove?()
     }
 
+    func windowDidBecomeKey(_ notification: Notification) {
+        onFocusChange?(true)
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        onFocusChange?(false)
+    }
+
     func constrainToVisibleFrame(at screenPoint: NSPoint) {
         guard let targetScreen = NSScreen.screens.first(where: { $0.visibleFrame.contains(screenPoint) })
             ?? screen else { return }
@@ -515,7 +540,12 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
 
     override func orderOut(_ sender: Any?) {
         super.orderOut(sender)
+        onFocusChange?(false)
         onHide?()
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        orderOut(sender)
     }
 
     override func resignKey() {

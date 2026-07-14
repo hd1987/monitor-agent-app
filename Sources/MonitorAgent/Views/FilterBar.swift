@@ -83,7 +83,7 @@ struct FilterBar: View {
                     Image(systemName: panelPresentationState.isPinned ? "pin.fill" : "pin")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(
-                            panelPresentationState.isPinned
+                            panelPresentationState.isPinHighlighted
                                 ? Color.accentColor
                                 : Color.secondary.opacity(0.35)
                         )
@@ -98,7 +98,7 @@ struct FilterBar: View {
                 Button {
                     onResetPanelPosition()
                 } label: {
-                    Image(systemName: "arrow.counterclockwise")
+                    Image(systemName: "scope")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Color.secondary.opacity(0.35))
                         .frame(width: 28, height: 28)

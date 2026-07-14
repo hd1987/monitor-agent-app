@@ -6,6 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-14
+
+### Added
+- Add a configurable global shortcut in General settings for toggling the main panel
+
+### Changed
+- Replace the main-panel reset-position icon with a scope symbol
+- Hide the main panel when Escape is pressed, including while pinned
+- Show the pinned icon in blue only while the main panel has focus
+
 ## [0.4.1] - 2026-07-14
 
 ### Changed
