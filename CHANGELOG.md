@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Added
+- Add a persistent borderless pin button with compact left-angled inactive styling beside General settings on the right
+- Add a faint borderless General settings gear button on the right that opens settings without hiding the main panel
+
 ### Changed
 - Replace the subscription quota card placeholders with the supplied Claude Code and ChatGPT SVG icons
 - Allow zero-activity days to open the Activity hourly chart with zero values

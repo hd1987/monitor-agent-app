@@ -20,6 +20,35 @@ enum ForceTermination {
     }
 }
 
+enum PanelDismissalReason {
+    case automatic
+    case explicit
+}
+
+final class PanelPresentationState: ObservableObject {
+    @Published private(set) var isPinned = false
+    private var suppressesNextAutomaticDismissal = false
+
+    func togglePin() {
+        isPinned.toggle()
+    }
+
+    func allowsDismissal(for reason: PanelDismissalReason) -> Bool {
+        if reason == .explicit {
+            return true
+        }
+        if suppressesNextAutomaticDismissal {
+            suppressesNextAutomaticDismissal = false
+            return false
+        }
+        return !isPinned
+    }
+
+    func suppressNextAutomaticDismissal() {
+        suppressesNextAutomaticDismissal = true
+    }
+}
+
 @main
 struct MonitorAgentApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -45,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusMenu: NSMenu!
     private var rightClickHandled = false
     private let store = AppStore()
+    private let panelPresentationState = PanelPresentationState()
     private let themeManager = ThemeManager.shared
     private var themeCancellable: AnyCancellable?
 
@@ -89,13 +119,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusMenu = menu
 
         let hostingView = NSHostingView(
-            rootView: PopoverView()
+            rootView: PopoverView { [weak self] in
+                self?.openSettings(category: .general, keepingMainPanelVisible: true)
+            }
                 .environmentObject(store)
+                .environmentObject(panelPresentationState)
                 .environmentObject(themeManager)
         )
         hostingView.translatesAutoresizingMaskIntoConstraints = false
 
         panel = FloatingPanel()
+        panel.allowsAutomaticDismissal = { [weak self] in
+            self?.panelPresentationState.allowsDismissal(for: .automatic) ?? true
+        }
         panel.onHide = { [weak self] in
             self?.store.panelDidClose()
         }
@@ -118,7 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   let button = self.statusItem.button,
                   event.window == button.window else { return event }
             self.rightClickHandled = true
-            self.hidePanel()
+            self.hidePanel(reason: .explicit)
             self.statusItem.menu = self.statusMenu
             self.statusItem.button?.performClick(nil)
             DispatchQueue.main.async {
@@ -141,7 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if !forceQuit && SyncSettings.shared.keepInBackground {
-            hidePanel()
+            hidePanel(reason: .explicit)
             settingsPanel?.close()
             aboutPanel?.close()
             return .terminateCancel
@@ -164,7 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !rightClickHandled else { return }
 
         if panel.isVisible {
-            hidePanel()
+            hidePanel(reason: .explicit)
             return
         }
 
@@ -185,8 +221,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.panelDidOpen()
     }
 
-    private func hidePanel() {
-        guard panel.isVisible else { return }
+    private func hidePanel(reason: PanelDismissalReason = .automatic) {
+        guard panel.isVisible,
+              panelPresentationState.allowsDismissal(for: reason) else { return }
         panel.orderOut(nil)
     }
 
@@ -206,7 +243,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openSettings(category: .prompt)
     }
 
-    private func openSettings(category: SettingsCategory) {
+    private func openSettings(
+        category: SettingsCategory,
+        keepingMainPanelVisible: Bool = false
+    ) {
         // Always recreate so @State drafts reset to saved values
         settingsPanel?.close()
         settingsPanel = nil
@@ -236,6 +276,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.appearance = themeManager.nsAppearance
         w.contentView = hosting
         w.center()
+        if keepingMainPanelVisible && panel.isVisible {
+            panelPresentationState.suppressNextAutomaticDismissal()
+        }
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         settingsPanel = w
@@ -310,6 +353,7 @@ final class FloatingPanel: NSPanel {
     /// Exposed for theme updates
     private(set) var backgroundLayer: CALayer?
     var onHide: (() -> Void)?
+    var allowsAutomaticDismissal: (() -> Bool)?
 
     init() {
         super.init(
@@ -383,6 +427,7 @@ final class FloatingPanel: NSPanel {
 
     override func resignKey() {
         super.resignKey()
+        guard allowsAutomaticDismissal?() != false else { return }
         orderOut(nil)
     }
 }
