@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ### Changed
 - Shorten the reset-credit detail label to `Full reset`
+- Keep a pinned main panel visible beneath the status-item context menu
 
 ## [0.3.7] - 2026-07-14
 

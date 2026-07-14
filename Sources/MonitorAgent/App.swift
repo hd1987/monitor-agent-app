@@ -154,7 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   let button = self.statusItem.button,
                   event.window == button.window else { return event }
             self.rightClickHandled = true
-            self.hidePanel(reason: .explicit)
+            self.hidePanel()
             self.statusItem.menu = self.statusMenu
             self.statusItem.button?.performClick(nil)
             DispatchQueue.main.async {
