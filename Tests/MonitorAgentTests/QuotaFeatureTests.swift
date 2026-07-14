@@ -22,7 +22,7 @@ final class QuotaFeatureTests: XCTestCase {
 
     func testResetCreditsCopyDescribesAvailabilityWithoutAnAction() {
         XCTAssertEqual(ResetCreditsCopy.availableCount(3), "3 available")
-        XCTAssertEqual(ResetCreditsCopy.fullReset, "Full reset (1w + 5h)")
+        XCTAssertEqual(ResetCreditsCopy.fullReset, "Full reset")
         XCTAssertEqual(ResetCreditsCopy.expires("Jul 18, 08:00"), "Expires Jul 18, 08:00")
     }
 

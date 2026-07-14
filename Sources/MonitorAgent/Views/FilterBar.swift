@@ -5,6 +5,7 @@ struct FilterBar: View {
     @EnvironmentObject var panelPresentationState: PanelPresentationState
     @EnvironmentObject var theme: ThemeManager
     let onOpenGeneralSettings: () -> Void
+    let onResetPanelPosition: () -> Void
     let onAppFilterFrameChange: (CGRect) -> Void
 
     @State private var isTimeRangePopoverPresented = false
@@ -12,6 +13,28 @@ struct FilterBar: View {
     @State private var displayedMonth = Calendar.current.startOfDay(for: Date())
 
     var body: some View {
+        VStack(spacing: 0) {
+            PanelDragArea()
+                .frame(maxWidth: .infinity)
+                .frame(height: 10)
+
+            HStack(spacing: 0) {
+                PanelDragArea()
+                    .frame(width: 16, height: 28)
+
+                headerContent
+
+                PanelDragArea()
+                    .frame(width: 16, height: 28)
+            }
+
+            PanelDragArea()
+                .frame(maxWidth: .infinity)
+                .frame(height: 10)
+        }
+    }
+
+    private var headerContent: some View {
         HStack(spacing: 12) {
             // App filter (segmented)
             HStack(spacing: 2) {
@@ -21,6 +44,8 @@ struct FilterBar: View {
                     } label: {
                         Text(filter.rawValue)
                             .font(.system(size: 11, weight: .medium))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 4)
                             .background(
@@ -46,8 +71,10 @@ struct FilterBar: View {
                 }
                 .allowsHitTesting(false)
             )
+            .layoutPriority(1)
 
-            Spacer()
+            PanelDragArea()
+                .frame(maxWidth: .infinity, maxHeight: 28)
 
             HStack(spacing: 4) {
                 Button {
@@ -67,6 +94,19 @@ struct FilterBar: View {
                 .buttonStyle(.plain)
                 .help(panelPresentationState.isPinned ? "Unpin Panel" : "Keep Panel Open")
                 .accessibilityLabel(panelPresentationState.isPinned ? "Unpin panel" : "Keep panel open")
+
+                Button {
+                    onResetPanelPosition()
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.secondary.opacity(0.35))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Reset Panel Position")
+                .accessibilityLabel("Reset panel position")
 
                 Button {
                     onOpenGeneralSettings()
@@ -96,7 +136,7 @@ struct FilterBar: View {
                 .foregroundStyle(.primary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .frame(width: 150, alignment: .trailing)
+                .frame(width: 120, alignment: .trailing)
             }
             .buttonStyle(.plain)
             .background(theme.cardBackground)
@@ -104,7 +144,7 @@ struct FilterBar: View {
             .overlay(alignment: .trailing) {
                 Color.clear
                     .frame(width: 1, height: 1)
-                    .padding(.trailing, 68)
+                    .padding(.trailing, 53)
                     .offset(y: 10)
                     .allowsHitTesting(false)
                     .popover(isPresented: $isTimeRangePopoverPresented, arrowEdge: .top) {
@@ -114,8 +154,6 @@ struct FilterBar: View {
                     }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
     }
 
     private var timeRangePopover: some View {
@@ -331,6 +369,21 @@ struct FilterBar: View {
         formatter.setLocalizedDateFormatFromTemplate("MMMM yyyy")
         return formatter
     }()
+}
+
+private struct PanelDragArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> PanelDragView {
+        PanelDragView()
+    }
+
+    func updateNSView(_ nsView: PanelDragView, context: Context) {}
+}
+
+private final class PanelDragView: NSView {
+    override func mouseDown(with event: NSEvent) {
+        window?.performDrag(with: event)
+        (window as? FloatingPanel)?.constrainToVisibleFrame(at: NSEvent.mouseLocation)
+    }
 }
 
 private struct CalendarCell: Identifiable {
