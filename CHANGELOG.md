@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Shorten the reset-credit detail label to `Full reset`
+
 ## [0.3.7] - 2026-07-14
 
 ### Added

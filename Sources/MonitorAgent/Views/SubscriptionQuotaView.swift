@@ -293,7 +293,7 @@ private struct ResetCreditsTip: View {
 
 enum ResetCreditsCopy {
     static let title = "Usage limit resets"
-    static let fullReset = "Full reset (1w + 5h)"
+    static let fullReset = "Full reset"
     static let expirationUnavailable = "Expiration unavailable"
 
     static func availableCount(_ count: Int) -> String {
