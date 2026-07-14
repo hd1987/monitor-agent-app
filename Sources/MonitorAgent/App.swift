@@ -447,7 +447,7 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         level = .statusBar
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = false
+        hasShadow = true
         isMovableByWindowBackground = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
@@ -456,8 +456,6 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         bg.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.98).cgColor
         bg.layer?.cornerRadius = 12
         bg.layer?.masksToBounds = true
-        bg.layer?.borderWidth = 1.0 / (NSScreen.main?.backingScaleFactor ?? 2)
-        bg.layer?.borderColor = NSColor.black.withAlphaComponent(0.01).cgColor
         bg.translatesAutoresizingMaskIntoConstraints = false
         backgroundLayer = bg.layer
 
