@@ -14,9 +14,12 @@ final class QuotaFeatureTests: XCTestCase {
     func testQuotaCardUsesCompactSingleLineLayout() {
         XCTAssertEqual(QuotaCardLayout.cardHeight, 34)
         XCTAssertEqual(QuotaCardLayout.metricHeight, 20)
+        XCTAssertEqual(QuotaCardLayout.horizontalPadding, 12)
         XCTAssertEqual(QuotaCardLayout.contentSpacing, 16)
+        XCTAssertEqual(QuotaCardLayout.expirationHoverInset, 8)
         XCTAssertEqual(QuotaCardLayout.metricSpacing, 28)
         XCTAssertLessThan(QuotaCardLayout.metricHeight, QuotaCardLayout.cardHeight)
+        XCTAssertEqual(QuotaCardLayout.expirationTipWidth, 200)
         XCTAssertEqual(QuotaCardLayout.resetTipWidth, 220)
         XCTAssertEqual(QuotaCardLayout.resetTipSectionSpacing, 10)
         XCTAssertEqual(QuotaCardLayout.resetTipItemSpacing, 8)
@@ -25,6 +28,11 @@ final class QuotaFeatureTests: XCTestCase {
     func testResetCreditsCopyUsesExpirationColumnHeading() {
         XCTAssertEqual(ResetCreditsCopy.expiresTitle, "Expires")
         XCTAssertEqual(ResetCreditsCopy.fullReset, "Full reset")
+    }
+
+    func testSubscriptionExpirationTipUsesCompactColumnHeadings() {
+        XCTAssertEqual(SubscriptionExpirationCopy.remainingTitle, "Remaining")
+        XCTAssertEqual(SubscriptionExpirationCopy.expiresTitle, "Expires")
     }
 
     func testResetCreditExpirationUsesNearestFutureDate() throws {
@@ -94,13 +102,83 @@ final class QuotaFeatureTests: XCTestCase {
         let settings = QuotaSettings(defaults: defaults)
         XCTAssertTrue(settings.claudeEnabled)
         XCTAssertTrue(settings.codexEnabled)
+        XCTAssertNil(settings.claudeExpirationDate)
+        XCTAssertNil(settings.codexExpirationDate)
         XCTAssertEqual(settings.refreshInterval, .twoMinutes)
 
+        let claudeExpiration = Date(timeIntervalSince1970: 1_800_000_000)
+        let codexExpiration = Date(timeIntervalSince1970: 1_900_000_000)
         settings.claudeEnabled = false
+        settings.claudeExpirationDate = claudeExpiration
+        settings.codexExpirationDate = codexExpiration
         settings.refreshInterval = .fiveMinutes
         XCTAssertFalse(QuotaSettings(defaults: defaults).claudeEnabled)
         XCTAssertTrue(QuotaSettings(defaults: defaults).codexEnabled)
+        XCTAssertEqual(QuotaSettings(defaults: defaults).claudeExpirationDate, claudeExpiration)
+        XCTAssertEqual(QuotaSettings(defaults: defaults).codexExpirationDate, codexExpiration)
+        XCTAssertEqual(QuotaSettings(defaults: defaults).expirationDate(for: .claude), claudeExpiration)
+        XCTAssertEqual(QuotaSettings(defaults: defaults).expirationDate(for: .codex), codexExpiration)
         XCTAssertEqual(QuotaSettings(defaults: defaults).refreshInterval, .fiveMinutes)
+
+        settings.claudeExpirationDate = nil
+        XCTAssertNil(QuotaSettings(defaults: defaults).claudeExpirationDate)
+    }
+
+    func testSubscriptionExpirationUsesCalendarDayDistance() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = Date(timeIntervalSince1970: 1_783_756_800)
+
+        XCTAssertEqual(
+            SubscriptionExpiration.distanceText(
+                to: now.addingTimeInterval(3 * 24 * 60 * 60),
+                now: now,
+                calendar: calendar
+            ),
+            "3 days"
+        )
+        XCTAssertEqual(
+            SubscriptionExpiration.distanceText(to: now, now: now, calendar: calendar),
+            "Today"
+        )
+        XCTAssertEqual(
+            SubscriptionExpiration.distanceText(
+                to: now.addingTimeInterval(-24 * 60 * 60),
+                now: now,
+                calendar: calendar
+            ),
+            "1 day ago"
+        )
+        XCTAssertFalse(SubscriptionExpiration.isExpired(now, now: now, calendar: calendar))
+        XCTAssertTrue(SubscriptionExpiration.isExpired(
+            now.addingTimeInterval(-24 * 60 * 60),
+            now: now,
+            calendar: calendar
+        ))
+        XCTAssertEqual(
+            SubscriptionExpiration.urgency(
+                for: now.addingTimeInterval(7 * 24 * 60 * 60),
+                now: now,
+                calendar: calendar
+            ),
+            .standard
+        )
+        XCTAssertEqual(
+            SubscriptionExpiration.urgency(
+                for: now.addingTimeInterval(6 * 24 * 60 * 60),
+                now: now,
+                calendar: calendar
+            ),
+            .warning
+        )
+        XCTAssertEqual(
+            SubscriptionExpiration.urgency(
+                for: now.addingTimeInterval(2 * 24 * 60 * 60),
+                now: now,
+                calendar: calendar
+            ),
+            .critical
+        )
     }
 
     func testQuotaRefreshIntervalOptionsAndFallback() throws {

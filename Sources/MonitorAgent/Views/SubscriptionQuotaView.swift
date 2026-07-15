@@ -15,7 +15,8 @@ struct SubscriptionQuotaView: View {
                 ForEach(providers, id: \.self) { provider in
                     SubscriptionQuotaCard(
                         provider: provider,
-                        snapshot: store.quotaSnapshots[provider]
+                        snapshot: store.quotaSnapshots[provider],
+                        expirationDate: QuotaSettings.shared.expirationDate(for: provider)
                     )
                 }
             }
@@ -27,24 +28,74 @@ struct SubscriptionQuotaView: View {
 
 private struct SubscriptionQuotaCard: View {
     @EnvironmentObject var theme: ThemeManager
+    @State private var isExpirationTipPresented = false
     @State private var isResetTipPresented = false
     @State private var cardWidth: CGFloat = 0
-    @State private var tipAnchorX: CGFloat = 0
+    @State private var rightRegionWidth: CGFloat = 0
+    @State private var resetTipAnchorX: CGFloat = 0
     let provider: QuotaProviderID
     let snapshot: QuotaSnapshot?
+    let expirationDate: Date?
 
     var body: some View {
-        HStack(spacing: QuotaCardLayout.contentSpacing) {
+        HStack(spacing: 0) {
             header
-
+                .padding(.trailing, QuotaCardLayout.expirationHoverInset)
+                .frame(maxHeight: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active:
+                        guard expirationDate != nil else { return }
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            isExpirationTipPresented = true
+                        }
+                    case .ended:
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            isExpirationTipPresented = false
+                        }
+                    }
+                }
+            Spacer(minLength: QuotaCardLayout.contentSpacing)
             if let snapshot {
                 snapshotContent(snapshot)
+                    .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear
+                                .onAppear { rightRegionWidth = proxy.size.width }
+                                .onChange(of: proxy.size.width) { _, newValue in
+                                    rightRegionWidth = newValue
+                                }
+                        }
+                    )
+                    .onContinuousHover { phase in
+                        guard hasResetCredits(snapshot) else { return }
+                        switch phase {
+                        case .active(let location):
+                            if !isResetTipPresented {
+                                resetTipAnchorX = max(
+                                    0,
+                                    cardWidth - QuotaCardLayout.horizontalPadding - rightRegionWidth
+                                ) + location.x
+                            }
+                            withAnimation(.easeOut(duration: 0.12)) {
+                                isResetTipPresented = true
+                            }
+                        case .ended:
+                            withAnimation(.easeOut(duration: 0.12)) {
+                                isResetTipPresented = false
+                            }
+                        }
+                    }
             } else {
                 loadingContent
+                    .frame(maxHeight: .infinity)
             }
         }
         .font(.system(size: 11))
-        .padding(.horizontal, 12)
+        .padding(.horizontal, QuotaCardLayout.horizontalPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: QuotaCardLayout.cardHeight)
         .background(theme.cardBackground)
@@ -61,6 +112,15 @@ private struct SubscriptionQuotaCard: View {
                 .stroke(theme.cardBorder, lineWidth: 0.5)
         )
         .overlay(alignment: .bottomLeading) {
+            if isExpirationTipPresented, let expirationDate {
+                SubscriptionExpirationTip(expirationDate: expirationDate)
+                    .padding(.leading, 8)
+                    .offset(y: -(QuotaCardLayout.cardHeight + 6))
+                    .allowsHitTesting(false)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottomLeading)))
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
             if isResetTipPresented,
                let snapshot,
                let credits = snapshot.resetCredits,
@@ -69,31 +129,16 @@ private struct SubscriptionQuotaCard: View {
                     count: credits,
                     expirations: snapshot.resetCreditExpirations
                 )
-                .offset(x: clampedTipX, y: -(QuotaCardLayout.cardHeight + 6))
+                .offset(x: clampedResetTipX, y: -(QuotaCardLayout.cardHeight + 6))
                 .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
             }
         }
-        .zIndex(isResetTipPresented ? 2 : 0)
-        .onContinuousHover { phase in
-            guard hasResetCredits else { return }
-            switch phase {
-            case .active(let location):
-                if !isResetTipPresented { tipAnchorX = location.x }
-                withAnimation(.easeOut(duration: 0.12)) { isResetTipPresented = true }
-            case .ended:
-                withAnimation(.easeOut(duration: 0.12)) { isResetTipPresented = false }
-            }
-        }
+        .zIndex(isExpirationTipPresented || isResetTipPresented ? 2 : 0)
     }
 
-    private var hasResetCredits: Bool {
-        (snapshot?.resetCredits ?? 0) > 0
-    }
-
-    /// Center the tip on the initial hover x while keeping it inside the card bounds.
-    private var clampedTipX: CGFloat {
+    private var clampedResetTipX: CGFloat {
         let maxX = max(0, cardWidth - QuotaCardLayout.resetTipWidth)
-        return min(max(0, tipAnchorX - QuotaCardLayout.resetTipWidth / 2), maxX)
+        return min(max(0, resetTipAnchorX - QuotaCardLayout.resetTipWidth / 2), maxX)
     }
 
     private var header: some View {
@@ -104,7 +149,7 @@ private struct SubscriptionQuotaCard: View {
 
             if let plan = snapshot?.plan, !plan.isEmpty, snapshot?.status == .available {
                 Text("· \(plan)")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(planColor)
             }
         }
         .lineLimit(1)
@@ -200,7 +245,6 @@ private struct SubscriptionQuotaCard: View {
         Text(text)
             .foregroundStyle(.secondary)
             .lineLimit(1)
-            .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: QuotaCardLayout.metricHeight)
     }
 
@@ -211,7 +255,6 @@ private struct SubscriptionQuotaCard: View {
             Text("Loading quota")
                 .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: QuotaCardLayout.metricHeight)
     }
 
@@ -219,6 +262,19 @@ private struct SubscriptionQuotaCard: View {
         if percent < 20 { return .red }
         if percent < 50 { return .orange }
         return .green
+    }
+
+    private var planColor: Color {
+        guard let expirationDate else { return Color.secondary }
+        switch SubscriptionExpiration.urgency(for: expirationDate) {
+        case .standard: return Color.secondary
+        case .warning: return .orange
+        case .critical: return .red
+        }
+    }
+
+    private func hasResetCredits(_ snapshot: QuotaSnapshot) -> Bool {
+        provider == .codex && (snapshot.resetCredits ?? 0) > 0
     }
 
     private func resetCreditCountColor(expirations: [Date]) -> Color {
@@ -235,6 +291,55 @@ private struct QuotaMetricItem {
     let label: String
     let window: QuotaWindow
     let reset: String
+}
+
+private struct SubscriptionExpirationTip: View {
+    @EnvironmentObject var theme: ThemeManager
+    let expirationDate: Date
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Text(SubscriptionExpirationCopy.remainingTitle)
+                    .font(.system(size: 11, weight: .semibold))
+                Spacer()
+                Text(SubscriptionExpirationCopy.expiresTitle)
+                    .font(.system(size: 10))
+            }
+            HStack(spacing: 12) {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 6, height: 6)
+                    Text(SubscriptionExpiration.distanceText(to: expirationDate))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(theme.tooltipForeground.opacity(0.72))
+                }
+                Spacer()
+                Text(SubscriptionExpiration.dateText(expirationDate))
+                    .font(.system(size: 10))
+            }
+        }
+        .foregroundStyle(theme.tooltipForeground)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .frame(width: QuotaCardLayout.expirationTipWidth)
+        .background(theme.tooltipBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.10), radius: 5, x: 0, y: 2)
+    }
+
+    private var statusColor: Color {
+        switch SubscriptionExpiration.urgency(for: expirationDate) {
+        case .standard: return .green
+        case .warning: return .orange
+        case .critical: return .red
+        }
+    }
 }
 
 private struct ResetCreditsTip: View {
@@ -306,6 +411,67 @@ enum ResetCreditsCopy {
     static let expirationUnavailable = "Expiration unavailable"
 }
 
+enum SubscriptionExpirationCopy {
+    static let remainingTitle = "Remaining"
+    static let expiresTitle = "Expires"
+    static let today = "Today"
+
+    static func days(_ days: Int) -> String {
+        "\(days) \(days == 1 ? "day" : "days")"
+    }
+
+    static func daysExpired(_ days: Int) -> String {
+        "\(days) \(days == 1 ? "day" : "days") ago"
+    }
+}
+
+enum SubscriptionExpiration {
+    static func dateText(_ date: Date) -> String {
+        dateFormatter.string(from: date)
+    }
+
+    static func distanceText(
+        to expirationDate: Date,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> String {
+        let today = calendar.startOfDay(for: now)
+        let expirationDay = calendar.startOfDay(for: expirationDate)
+        let days = calendar.dateComponents([.day], from: today, to: expirationDay).day ?? 0
+        if days > 0 { return SubscriptionExpirationCopy.days(days) }
+        if days < 0 { return SubscriptionExpirationCopy.daysExpired(abs(days)) }
+        return SubscriptionExpirationCopy.today
+    }
+
+    static func isExpired(
+        _ expirationDate: Date,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Bool {
+        calendar.startOfDay(for: expirationDate) < calendar.startOfDay(for: now)
+    }
+
+    static func urgency(
+        for expirationDate: Date,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> ResetCreditExpirationUrgency {
+        let today = calendar.startOfDay(for: now)
+        let expirationDay = calendar.startOfDay(for: expirationDate)
+        let days = calendar.dateComponents([.day], from: today, to: expirationDay).day ?? 0
+        if days < 3 { return .critical }
+        if days < 7 { return .warning }
+        return .standard
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MMM d, yyyy"
+        return formatter
+    }()
+}
+
 enum ResetCreditExpirationUrgency: Equatable {
     case standard
     case warning
@@ -339,8 +505,11 @@ enum ResetCreditExpiration {
 enum QuotaCardLayout {
     static let cardHeight: CGFloat = 34
     static let metricHeight: CGFloat = 20
+    static let horizontalPadding: CGFloat = 12
     static let contentSpacing: CGFloat = 16
+    static let expirationHoverInset: CGFloat = 8
     static let metricSpacing: CGFloat = 28
+    static let expirationTipWidth: CGFloat = 200
     static let resetTipWidth: CGFloat = 220
     static let resetTipSectionSpacing: CGFloat = 10
     static let resetTipItemSpacing: CGFloat = 8
