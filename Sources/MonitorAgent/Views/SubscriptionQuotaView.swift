@@ -243,7 +243,7 @@ private struct ResetCreditsTip: View {
     let expirations: [Date]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: QuotaCardLayout.resetTipSectionSpacing) {
             HStack {
                 Text(ResetCreditsCopy.title)
                     .font(.system(size: 11, weight: .semibold))
@@ -252,7 +252,7 @@ private struct ResetCreditsTip: View {
                     .font(.system(size: 10))
             }
 
-            VStack(spacing: 0) {
+            VStack(spacing: QuotaCardLayout.resetTipItemSpacing) {
                 ForEach(0..<count, id: \.self) { index in
                     HStack(spacing: 8) {
                         Circle()
@@ -260,12 +260,12 @@ private struct ResetCreditsTip: View {
                             .frame(width: 6, height: 6)
                         Text(ResetCreditsCopy.fullReset)
                             .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(theme.tooltipForeground.opacity(0.72))
                         Spacer(minLength: 12)
                         Text(expirationText(at: index))
                             .font(.system(size: 10))
-                            .foregroundStyle(theme.tooltipForeground.opacity(0.72))
+                            .foregroundStyle(theme.tooltipForeground)
                     }
-                    .padding(.vertical, 5)
                 }
             }
         }
@@ -341,5 +341,7 @@ enum QuotaCardLayout {
     static let metricHeight: CGFloat = 20
     static let contentSpacing: CGFloat = 16
     static let metricSpacing: CGFloat = 28
-    static let resetTipWidth: CGFloat = 250
+    static let resetTipWidth: CGFloat = 220
+    static let resetTipSectionSpacing: CGFloat = 10
+    static let resetTipItemSpacing: CGFloat = 8
 }

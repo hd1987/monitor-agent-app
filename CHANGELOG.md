@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-07-15
+
+### Changed
+- Refine reset-credit tip sizing and colors, and increase Tokens and reset-credit tip item spacing
+
 ## [0.5.1] - 2026-07-15
 
 ### Added
