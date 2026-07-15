@@ -70,10 +70,11 @@ struct SettingsView: View {
     @State private var draftTheme: Theme = .system
     @State private var draftSyncInterval: SyncInterval = .thirty
     @State private var draftGlobalShortcut: GlobalShortcut?
-    @State private var draftKeepInBackground: Bool = true
     @State private var draftLaunchAtLogin: Bool = false
     @State private var draftClaudeQuotaEnabled: Bool = true
     @State private var draftCodexQuotaEnabled: Bool = true
+    @State private var draftClaudeExpirationDate: Date?
+    @State private var draftCodexExpirationDate: Date?
     @State private var draftQuotaRefreshInterval: QuotaRefreshInterval = .twoMinutes
 
     // Config drafts
@@ -138,10 +139,11 @@ struct SettingsView: View {
                             draftTheme: $draftTheme,
                             draftSyncInterval: $draftSyncInterval,
                             draftGlobalShortcut: $draftGlobalShortcut,
-                            draftKeepInBackground: $draftKeepInBackground,
                             draftLaunchAtLogin: $draftLaunchAtLogin,
                             draftClaudeQuotaEnabled: $draftClaudeQuotaEnabled,
                             draftCodexQuotaEnabled: $draftCodexQuotaEnabled,
+                            draftClaudeExpirationDate: $draftClaudeExpirationDate,
+                            draftCodexExpirationDate: $draftCodexExpirationDate,
                             draftQuotaRefreshInterval: $draftQuotaRefreshInterval
                         )
                     }
@@ -241,10 +243,11 @@ struct SettingsView: View {
             draftTheme = themeManager.theme
             draftSyncInterval = SyncSettings.shared.interval
             draftGlobalShortcut = GlobalShortcutController.shared.shortcut
-            draftKeepInBackground = SyncSettings.shared.keepInBackground
             draftLaunchAtLogin = SyncSettings.shared.launchAtLogin
             draftClaudeQuotaEnabled = QuotaSettings.shared.claudeEnabled
             draftCodexQuotaEnabled = QuotaSettings.shared.codexEnabled
+            draftClaudeExpirationDate = QuotaSettings.shared.claudeExpirationDate
+            draftCodexExpirationDate = QuotaSettings.shared.codexExpirationDate
             draftQuotaRefreshInterval = QuotaSettings.shared.refreshInterval
         case .config:
             configTab = .claude
@@ -285,10 +288,11 @@ struct SettingsView: View {
             }
             themeManager.theme = draftTheme
             SyncSettings.shared.interval = draftSyncInterval
-            SyncSettings.shared.keepInBackground = draftKeepInBackground
             SyncSettings.shared.launchAtLogin = draftLaunchAtLogin
             QuotaSettings.shared.claudeEnabled = draftClaudeQuotaEnabled
             QuotaSettings.shared.codexEnabled = draftCodexQuotaEnabled
+            QuotaSettings.shared.claudeExpirationDate = draftClaudeExpirationDate
+            QuotaSettings.shared.codexExpirationDate = draftCodexExpirationDate
             QuotaSettings.shared.refreshInterval = draftQuotaRefreshInterval
             store.quotaSettingsDidChange()
 
@@ -409,10 +413,11 @@ struct GeneralSettingsView: View {
     @Binding var draftTheme: Theme
     @Binding var draftSyncInterval: SyncInterval
     @Binding var draftGlobalShortcut: GlobalShortcut?
-    @Binding var draftKeepInBackground: Bool
     @Binding var draftLaunchAtLogin: Bool
     @Binding var draftClaudeQuotaEnabled: Bool
     @Binding var draftCodexQuotaEnabled: Bool
+    @Binding var draftClaudeExpirationDate: Date?
+    @Binding var draftCodexExpirationDate: Date?
     @Binding var draftQuotaRefreshInterval: QuotaRefreshInterval
     @State private var showUsageDataRebuildSheet = false
 
@@ -452,34 +457,10 @@ struct GeneralSettingsView: View {
             Divider().padding(.vertical, 4)
 
             SettingsRow(
-                title: "Sync Interval",
-                description: "How often to sync while the panel is open. \"Never\" syncs once when opened."
-            ) {
-                Picker("", selection: $draftSyncInterval) {
-                    ForEach(SyncInterval.allCases) { interval in
-                        Text(interval.displayName).tag(interval)
-                    }
-                }
-                .frame(width: 100)
-            }
-
-            Divider().padding(.vertical, 4)
-
-            SettingsRow(
                 title: "Global Shortcut",
                 description: "Show or hide the main panel from any app. Requires at least one modifier key."
             ) {
                 GlobalShortcutRecorder(shortcut: $draftGlobalShortcut)
-            }
-
-            Divider().padding(.vertical, 4)
-
-            SettingsRow(
-                title: "Keep in Background",
-                description: "Keep the app running when you press ⌘Q. Use right-click → Quit to fully exit."
-            ) {
-                Toggle("", isOn: $draftKeepInBackground)
-                    .toggleStyle(.switch)
             }
 
             Divider().padding(.vertical, 4)
@@ -497,9 +478,25 @@ struct GeneralSettingsView: View {
 
             Divider().padding(.vertical, 4)
 
+            SettingsRow(
+                title: "Sync Interval",
+                description: "How often to sync while the panel is open. \"Never\" syncs once when opened."
+            ) {
+                Picker("", selection: $draftSyncInterval) {
+                    ForEach(SyncInterval.allCases) { interval in
+                        Text(interval.displayName).tag(interval)
+                    }
+                }
+                .frame(width: 100)
+            }
+
+            Divider().padding(.vertical, 4)
+
             QuotaSettingsGroup(
                 claudeEnabled: $draftClaudeQuotaEnabled,
                 codexEnabled: $draftCodexQuotaEnabled,
+                claudeExpirationDate: $draftClaudeExpirationDate,
+                codexExpirationDate: $draftCodexExpirationDate,
                 refreshInterval: $draftQuotaRefreshInterval
             )
 
@@ -602,6 +599,9 @@ enum QuotaSettingsCopy {
     static let claudeDescription = "Show Claude Code subscription quota in the main panel."
     static let codexTitle = "Codex"
     static let codexDescription = "Show Codex subscription quota in the main panel."
+    static let expirationNotSet = "Not set"
+    static let expirationPickerTitle = "Subscription Expiration"
+    static let clearExpiration = "Clear"
     static let refreshIntervalTitle = "Refresh Interval"
     static let refreshIntervalDescription = "Refresh while the panel is open. \"Never\" refreshes once when opened."
 }
@@ -609,6 +609,8 @@ enum QuotaSettingsCopy {
 private struct QuotaSettingsGroup: View {
     @Binding var claudeEnabled: Bool
     @Binding var codexEnabled: Bool
+    @Binding var claudeExpirationDate: Date?
+    @Binding var codexExpirationDate: Date?
     @Binding var refreshInterval: QuotaRefreshInterval
 
     var body: some View {
@@ -620,12 +622,14 @@ private struct QuotaSettingsGroup: View {
                 quotaRow(
                     title: QuotaSettingsCopy.claudeTitle,
                     description: QuotaSettingsCopy.claudeDescription,
+                    expirationDate: $claudeExpirationDate,
                     isOn: $claudeEnabled
                 )
                 Divider().padding(.leading, 12)
                 quotaRow(
                     title: QuotaSettingsCopy.codexTitle,
                     description: QuotaSettingsCopy.codexDescription,
+                    expirationDate: $codexExpirationDate,
                     isOn: $codexEnabled
                 )
                 Divider().padding(.leading, 12)
@@ -658,11 +662,13 @@ private struct QuotaSettingsGroup: View {
     private func quotaRow(
         title: String,
         description: String,
+        expirationDate: Binding<Date?>,
         isOn: Binding<Bool>
     ) -> some View {
         HStack(spacing: 16) {
             settingLabel(title: title, description: description)
             Spacer(minLength: 16)
+            ExpirationDateControl(expirationDate: expirationDate)
             Toggle("", isOn: isOn)
                 .toggleStyle(.switch)
         }
@@ -679,6 +685,198 @@ private struct QuotaSettingsGroup: View {
                 .foregroundStyle(.secondary)
         }
     }
+}
+
+private struct ExpirationDateControl: View {
+    @EnvironmentObject var theme: ThemeManager
+    @Binding var expirationDate: Date?
+    @State private var isPickerPresented = false
+    @State private var displayedMonth = Calendar.current.startOfDay(for: Date())
+
+    var body: some View {
+        Button {
+            displayedMonth = expirationDate ?? Calendar.current.startOfDay(for: Date())
+            isPickerPresented.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Text(expirationDate.map(SubscriptionExpiration.dateText) ?? QuotaSettingsCopy.expirationNotSet)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .frame(width: 120, alignment: .trailing)
+        }
+        .buttonStyle(.plain)
+        .background(theme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(theme.cardBorder, lineWidth: 0.5)
+        )
+        .overlay(alignment: .trailing) {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .padding(.trailing, 53)
+                .offset(y: 10)
+                .allowsHitTesting(false)
+                .popover(isPresented: $isPickerPresented, arrowEdge: .top) {
+                    expirationPopover
+                        .frame(width: 252)
+                        .padding(10)
+                }
+        }
+        .accessibilityLabel(QuotaSettingsCopy.expirationPickerTitle)
+    }
+
+    private var expirationPopover: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            calendarPicker
+
+            if expirationDate != nil {
+                Divider()
+                Button(QuotaSettingsCopy.clearExpiration) {
+                    expirationDate = nil
+                    isPickerPresented = false
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+    }
+
+    private var calendarPicker: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Button {
+                    moveDisplayedMonth(by: -1)
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    displayedMonth = Calendar.current.startOfDay(for: Date())
+                } label: {
+                    Text(monthTitle(for: displayedMonth))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    moveDisplayedMonth(by: 1)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+            }
+
+            HStack(spacing: 0) {
+                ForEach(Calendar.current.shortWeekdaySymbols, id: \.self) { symbol in
+                    Text(symbol)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 7),
+                spacing: 3
+            ) {
+                ForEach(calendarCells(for: displayedMonth)) { cell in
+                    if let date = cell.date {
+                        Button {
+                            expirationDate = Calendar.current.startOfDay(for: date)
+                            isPickerPresented = false
+                        } label: {
+                            Text(dayTitle(for: date))
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(isSelected(date) ? Color.white : Color.primary)
+                                .frame(maxWidth: .infinity, minHeight: 32)
+                                .background(dayBackground(for: date))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Color.clear
+                            .frame(maxWidth: .infinity, minHeight: 32)
+                    }
+                }
+            }
+        }
+    }
+
+    private func moveDisplayedMonth(by value: Int) {
+        if let month = Calendar.current.date(byAdding: .month, value: value, to: displayedMonth) {
+            displayedMonth = month
+        }
+    }
+
+    private func calendarCells(for month: Date) -> [ExpirationCalendarCell] {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.year, .month], from: month)
+        guard
+            let firstDay = calendar.date(from: components),
+            let dayRange = calendar.range(of: .day, in: .month, for: firstDay)
+        else {
+            return []
+        }
+
+        let leadingEmptyCount = calendar.component(.weekday, from: firstDay) - calendar.firstWeekday
+        let normalizedLeadingCount = (leadingEmptyCount + 7) % 7
+        var cells = (0..<normalizedLeadingCount).map {
+            ExpirationCalendarCell(index: $0, date: nil)
+        }
+
+        for day in dayRange {
+            let date = calendar.date(byAdding: .day, value: day - 1, to: firstDay)
+            cells.append(ExpirationCalendarCell(index: cells.count, date: date))
+        }
+
+        return cells
+    }
+
+    private func dayTitle(for date: Date) -> String {
+        String(Calendar.current.component(.day, from: date))
+    }
+
+    private func monthTitle(for date: Date) -> String {
+        Self.monthFormatter.string(from: date)
+    }
+
+    private func isSelected(_ date: Date) -> Bool {
+        expirationDate.map { Calendar.current.isDate(date, inSameDayAs: $0) } == true
+    }
+
+    private func dayBackground(for date: Date) -> Color {
+        if isSelected(date) { return .accentColor }
+        if Calendar.current.isDateInToday(date) { return Color.accentColor.opacity(0.08) }
+        return .clear
+    }
+
+    private static let monthFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("MMMM yyyy")
+        return formatter
+    }()
+}
+
+private struct ExpirationCalendarCell: Identifiable {
+    let index: Int
+    let date: Date?
+
+    var id: Int { index }
 }
 
 struct UsageDataRebuildSheetView: View {

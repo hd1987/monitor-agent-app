@@ -6,6 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-07-16
+
+### Added
+- Add optional Claude Code and Codex subscription expiration dates with urgency dots and compact remaining-day hover details
+
+### Changed
+- Remove the Keep in Background setting so Cmd+Q always quits the app
+- Color quota plans by subscription expiration urgency, refine the card hover regions, restore pointer-anchored reset tips, and reuse the main-panel calendar style for expiration dates
+- Reorder General settings by interface, interaction, startup, refresh, quota, and maintenance concerns
+
 ## [0.5.2] - 2026-07-15
 
 ### Changed

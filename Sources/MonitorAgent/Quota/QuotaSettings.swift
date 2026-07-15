@@ -34,6 +34,14 @@ final class QuotaSettings: ObservableObject {
         didSet { defaults.set(codexEnabled, forKey: Keys.codexEnabled) }
     }
 
+    @Published var claudeExpirationDate: Date? {
+        didSet { persist(claudeExpirationDate, forKey: Keys.claudeExpirationDate) }
+    }
+
+    @Published var codexExpirationDate: Date? {
+        didSet { persist(codexExpirationDate, forKey: Keys.codexExpirationDate) }
+    }
+
     @Published var refreshInterval: QuotaRefreshInterval {
         didSet { defaults.set(refreshInterval.rawValue, forKey: Keys.refreshInterval) }
     }
@@ -44,6 +52,8 @@ final class QuotaSettings: ObservableObject {
         self.defaults = defaults
         claudeEnabled = defaults.object(forKey: Keys.claudeEnabled) as? Bool ?? true
         codexEnabled = defaults.object(forKey: Keys.codexEnabled) as? Bool ?? true
+        claudeExpirationDate = defaults.object(forKey: Keys.claudeExpirationDate) as? Date
+        codexExpirationDate = defaults.object(forKey: Keys.codexExpirationDate) as? Date
         if defaults.object(forKey: Keys.refreshInterval) == nil {
             refreshInterval = .twoMinutes
         } else {
@@ -60,9 +70,26 @@ final class QuotaSettings: ObservableObject {
         }
     }
 
+    func expirationDate(for provider: QuotaProviderID) -> Date? {
+        switch provider {
+        case .claude: return claudeExpirationDate
+        case .codex: return codexExpirationDate
+        }
+    }
+
+    private func persist(_ date: Date?, forKey key: String) {
+        if let date {
+            defaults.set(date, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
     private enum Keys {
         static let claudeEnabled = "quotaClaudeEnabled"
         static let codexEnabled = "quotaCodexEnabled"
+        static let claudeExpirationDate = "quotaClaudeExpirationDate"
+        static let codexExpirationDate = "quotaCodexExpirationDate"
         static let refreshInterval = "quotaRefreshInterval"
     }
 }

@@ -126,8 +126,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let globalShortcutController = GlobalShortcutController.shared
     private var themeCancellable: AnyCancellable?
 
-    private var forceQuit = false
-
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -239,16 +237,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             togglePanel(nil)
         }
         return false
-    }
-
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if !forceQuit && SyncSettings.shared.keepInBackground {
-            hidePanel(reason: .explicit)
-            settingsPanel?.close()
-            aboutPanel?.close()
-            return .terminateCancel
-        }
-        return .terminateNow
     }
 
     private func applyTheme() {
@@ -420,9 +408,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UpdateChecker.shared.checkForUpdates(silent: false)
     }
 
-    /// Force quit bypassing keepInBackground check (used by update restart)
+    /// Terminate the app and guarantee exit if AppKit does not complete termination.
     func forceTerminate() {
-        forceQuit = true
         NSApplication.shared.terminate(nil)
         ForceTermination.scheduleFallbackExit()
     }

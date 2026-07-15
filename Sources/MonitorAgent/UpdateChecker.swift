@@ -272,7 +272,7 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
         let command = RestartLauncher.makeCommand(appURL: appURL, delay: 0.5)
         do {
             try RestartLauncher.launch(command)
-            // Force quit to bypass keepInBackground cancellation
+            // Guarantee the old instance exits before the relaunched app takes over.
             if let delegate = NSApplication.shared.delegate as? AppDelegate {
                 delegate.forceTerminate()
             } else {

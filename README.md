@@ -67,7 +67,7 @@ Open settings from the right-click menu or `Cmd+,`.
 
 | Page | What it controls |
 |------|------------------|
-| General | Theme, usage sync interval (`10s`, `30s`, `60s`, `Never`), global shortcut for toggling the main panel, subscription quota visibility and refresh interval (`1 min`, `2 min`, `5 min`, `Never`), Keep in Background, Launch at Login, local usage data rebuild |
+| General | Theme, usage sync interval (`10s`, `30s`, `60s`, `Never`), global shortcut for toggling the main panel, subscription quota visibility and refresh interval (`1 min`, `2 min`, `5 min`, `Never`), Launch at Login, local usage data rebuild |
 | Config | `~/.claude/settings.json` and `~/.codex/config.toml` |
 | Prompt | `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` |
 
