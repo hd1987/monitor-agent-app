@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Remove the Keep in Background setting so Cmd+Q always quits the app
+
 ## [0.5.2] - 2026-07-15
 
 ### Changed

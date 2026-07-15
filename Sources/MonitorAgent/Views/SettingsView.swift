@@ -70,7 +70,6 @@ struct SettingsView: View {
     @State private var draftTheme: Theme = .system
     @State private var draftSyncInterval: SyncInterval = .thirty
     @State private var draftGlobalShortcut: GlobalShortcut?
-    @State private var draftKeepInBackground: Bool = true
     @State private var draftLaunchAtLogin: Bool = false
     @State private var draftClaudeQuotaEnabled: Bool = true
     @State private var draftCodexQuotaEnabled: Bool = true
@@ -138,7 +137,6 @@ struct SettingsView: View {
                             draftTheme: $draftTheme,
                             draftSyncInterval: $draftSyncInterval,
                             draftGlobalShortcut: $draftGlobalShortcut,
-                            draftKeepInBackground: $draftKeepInBackground,
                             draftLaunchAtLogin: $draftLaunchAtLogin,
                             draftClaudeQuotaEnabled: $draftClaudeQuotaEnabled,
                             draftCodexQuotaEnabled: $draftCodexQuotaEnabled,
@@ -241,7 +239,6 @@ struct SettingsView: View {
             draftTheme = themeManager.theme
             draftSyncInterval = SyncSettings.shared.interval
             draftGlobalShortcut = GlobalShortcutController.shared.shortcut
-            draftKeepInBackground = SyncSettings.shared.keepInBackground
             draftLaunchAtLogin = SyncSettings.shared.launchAtLogin
             draftClaudeQuotaEnabled = QuotaSettings.shared.claudeEnabled
             draftCodexQuotaEnabled = QuotaSettings.shared.codexEnabled
@@ -285,7 +282,6 @@ struct SettingsView: View {
             }
             themeManager.theme = draftTheme
             SyncSettings.shared.interval = draftSyncInterval
-            SyncSettings.shared.keepInBackground = draftKeepInBackground
             SyncSettings.shared.launchAtLogin = draftLaunchAtLogin
             QuotaSettings.shared.claudeEnabled = draftClaudeQuotaEnabled
             QuotaSettings.shared.codexEnabled = draftCodexQuotaEnabled
@@ -409,7 +405,6 @@ struct GeneralSettingsView: View {
     @Binding var draftTheme: Theme
     @Binding var draftSyncInterval: SyncInterval
     @Binding var draftGlobalShortcut: GlobalShortcut?
-    @Binding var draftKeepInBackground: Bool
     @Binding var draftLaunchAtLogin: Bool
     @Binding var draftClaudeQuotaEnabled: Bool
     @Binding var draftCodexQuotaEnabled: Bool
@@ -470,16 +465,6 @@ struct GeneralSettingsView: View {
                 description: "Show or hide the main panel from any app. Requires at least one modifier key."
             ) {
                 GlobalShortcutRecorder(shortcut: $draftGlobalShortcut)
-            }
-
-            Divider().padding(.vertical, 4)
-
-            SettingsRow(
-                title: "Keep in Background",
-                description: "Keep the app running when you press ⌘Q. Use right-click → Quit to fully exit."
-            ) {
-                Toggle("", isOn: $draftKeepInBackground)
-                    .toggleStyle(.switch)
             }
 
             Divider().padding(.vertical, 4)

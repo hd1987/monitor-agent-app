@@ -28,11 +28,6 @@ final class SyncSettings: ObservableObject {
         didSet { defaults.set(interval.rawValue, forKey: "syncInterval") }
     }
 
-    /// Keep running in background when Cmd+Q is pressed (default: true)
-    @Published var keepInBackground: Bool {
-        didSet { defaults.set(keepInBackground, forKey: "keepInBackground") }
-    }
-
     /// Launch at login via SMAppService (only works for .app bundles)
     var launchAtLogin: Bool {
         get {
@@ -66,12 +61,6 @@ final class SyncSettings: ObservableObject {
             self.interval = .thirty
         } else {
             self.interval = SyncInterval(rawValue: raw) ?? .thirty
-        }
-
-        if defaults.object(forKey: "keepInBackground") == nil {
-            self.keepInBackground = true
-        } else {
-            self.keepInBackground = defaults.bool(forKey: "keepInBackground")
         }
     }
 }
