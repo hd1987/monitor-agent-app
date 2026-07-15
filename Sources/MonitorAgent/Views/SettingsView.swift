@@ -457,20 +457,6 @@ struct GeneralSettingsView: View {
             Divider().padding(.vertical, 4)
 
             SettingsRow(
-                title: "Sync Interval",
-                description: "How often to sync while the panel is open. \"Never\" syncs once when opened."
-            ) {
-                Picker("", selection: $draftSyncInterval) {
-                    ForEach(SyncInterval.allCases) { interval in
-                        Text(interval.displayName).tag(interval)
-                    }
-                }
-                .frame(width: 100)
-            }
-
-            Divider().padding(.vertical, 4)
-
-            SettingsRow(
                 title: "Global Shortcut",
                 description: "Show or hide the main panel from any app. Requires at least one modifier key."
             ) {
@@ -488,6 +474,20 @@ struct GeneralSettingsView: View {
                 Toggle("", isOn: $draftLaunchAtLogin)
                     .toggleStyle(.switch)
                     .disabled(!SyncSettings.shared.canControlLaunchAtLogin)
+            }
+
+            Divider().padding(.vertical, 4)
+
+            SettingsRow(
+                title: "Sync Interval",
+                description: "How often to sync while the panel is open. \"Never\" syncs once when opened."
+            ) {
+                Picker("", selection: $draftSyncInterval) {
+                    ForEach(SyncInterval.allCases) { interval in
+                        Text(interval.displayName).tag(interval)
+                    }
+                }
+                .frame(width: 100)
             }
 
             Divider().padding(.vertical, 4)
