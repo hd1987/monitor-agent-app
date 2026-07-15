@@ -6,6 +6,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-15
+
+### Added
+- Add Tab and Shift-Tab app-filter cycling and Enter panel-position reset shortcuts
+
+### Changed
+- Color each reset-credit tip dot by its expiration urgency and simplify the expiration heading
+
 ## [0.5.0] - 2026-07-14
 
 ### Added

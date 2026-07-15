@@ -248,16 +248,15 @@ private struct ResetCreditsTip: View {
                 Text(ResetCreditsCopy.title)
                     .font(.system(size: 11, weight: .semibold))
                 Spacer()
-                Text(ResetCreditsCopy.availableCount(count))
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Color.green)
+                Text(ResetCreditsCopy.expiresTitle)
+                    .font(.system(size: 10))
             }
 
             VStack(spacing: 0) {
                 ForEach(0..<count, id: \.self) { index in
                     HStack(spacing: 8) {
                         Circle()
-                            .fill(Color.green)
+                            .fill(expirationColor(at: index))
                             .frame(width: 6, height: 6)
                         Text(ResetCreditsCopy.fullReset)
                             .font(.system(size: 10, weight: .medium))
@@ -287,22 +286,24 @@ private struct ResetCreditsTip: View {
 
     private func expirationText(at index: Int) -> String {
         guard expirations.indices.contains(index) else { return ResetCreditsCopy.expirationUnavailable }
-        return ResetCreditsCopy.expires(QuotaDateFormat.resetDateTime(expirations[index]))
+        return QuotaDateFormat.resetDateTime(expirations[index])
+    }
+
+    private func expirationColor(at index: Int) -> Color {
+        guard expirations.indices.contains(index) else { return .green }
+        switch ResetCreditExpiration.urgency(for: expirations[index]) {
+        case .standard: return .green
+        case .warning: return .orange
+        case .critical: return .red
+        }
     }
 }
 
 enum ResetCreditsCopy {
     static let title = "Usage limit resets"
+    static let expiresTitle = "Expires"
     static let fullReset = "Full reset"
     static let expirationUnavailable = "Expiration unavailable"
-
-    static func availableCount(_ count: Int) -> String {
-        "\(count) available"
-    }
-
-    static func expires(_ date: String) -> String {
-        "Expires \(date)"
-    }
 }
 
 enum ResetCreditExpirationUrgency: Equatable {
@@ -340,5 +341,5 @@ enum QuotaCardLayout {
     static let metricHeight: CGFloat = 20
     static let contentSpacing: CGFloat = 16
     static let metricSpacing: CGFloat = 28
-    static let resetTipWidth: CGFloat = 280
+    static let resetTipWidth: CGFloat = 250
 }

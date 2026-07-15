@@ -191,6 +191,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onFocusChange = { [weak self] isFocused in
             self?.panelPresentationState.setPanelFocused(isFocused)
         }
+        panel.onCycleAppFilter = { [weak self] reverse in
+            guard let self else { return }
+            self.store.appFilter = self.store.appFilter.cycled(reverse: reverse)
+        }
+        panel.onResetPosition = { [weak self] in
+            self?.resetPanelPosition()
+        }
         panel.contentView = hostingView
         globalShortcutController.configure { [weak self] in
             self?.togglePanel(nil)
@@ -450,6 +457,8 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     var allowsAutomaticDismissal: (() -> Bool)?
     var onUserMove: (() -> Void)?
     var onFocusChange: ((Bool) -> Void)?
+    var onCycleAppFilter: ((Bool) -> Void)?
+    var onResetPosition: (() -> Void)?
 
     init() {
         super.init(
@@ -514,6 +523,29 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     }
 
     override var canBecomeKey: Bool { true }
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, handlePanelShortcut(event) {
+            return
+        }
+        super.sendEvent(event)
+    }
+
+    private func handlePanelShortcut(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard modifiers.subtracting(.shift).isEmpty else { return false }
+
+        switch event.charactersIgnoringModifiers {
+        case "\t":
+            onCycleAppFilter?(modifiers.contains(.shift))
+            return true
+        case "\r", "\u{3}":
+            onResetPosition?()
+            return true
+        default:
+            return false
+        }
+    }
 
     func windowWillMove(_ notification: Notification) {
         onUserMove?()

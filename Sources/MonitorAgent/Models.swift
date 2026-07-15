@@ -9,6 +9,12 @@ enum AppFilter: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    func cycled(reverse: Bool = false) -> AppFilter {
+        guard let index = Self.allCases.firstIndex(of: self) else { return self }
+        let offset = reverse ? Self.allCases.count - 1 : 1
+        return Self.allCases[(index + offset) % Self.allCases.count]
+    }
+
     /// Map to db `app_type` values; nil means no filter
     var dbValues: [String]? {
         switch self {
