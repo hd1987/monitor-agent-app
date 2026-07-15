@@ -2,6 +2,13 @@ import XCTest
 @testable import MonitorAgent
 
 final class PanelPresentationStateTests: XCTestCase {
+    func testAppFilterCyclesForwardAndBackward() {
+        XCTAssertEqual(AppFilter.all.cycled(), .claude)
+        XCTAssertEqual(AppFilter.claude.cycled(), .codex)
+        XCTAssertEqual(AppFilter.codex.cycled(), .all)
+        XCTAssertEqual(AppFilter.all.cycled(reverse: true), .codex)
+    }
+
     func testPinnedPanelRejectsAutomaticDismissalButAllowsExplicitDismissal() {
         let state = PanelPresentationState()
 

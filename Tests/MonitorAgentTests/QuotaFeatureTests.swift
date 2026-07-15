@@ -17,13 +17,12 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(QuotaCardLayout.contentSpacing, 16)
         XCTAssertEqual(QuotaCardLayout.metricSpacing, 28)
         XCTAssertLessThan(QuotaCardLayout.metricHeight, QuotaCardLayout.cardHeight)
-        XCTAssertEqual(QuotaCardLayout.resetTipWidth, 280)
+        XCTAssertEqual(QuotaCardLayout.resetTipWidth, 250)
     }
 
-    func testResetCreditsCopyDescribesAvailabilityWithoutAnAction() {
-        XCTAssertEqual(ResetCreditsCopy.availableCount(3), "3 available")
+    func testResetCreditsCopyUsesExpirationColumnHeading() {
+        XCTAssertEqual(ResetCreditsCopy.expiresTitle, "Expires")
         XCTAssertEqual(ResetCreditsCopy.fullReset, "Full reset")
-        XCTAssertEqual(ResetCreditsCopy.expires("Jul 18, 08:00"), "Expires Jul 18, 08:00")
     }
 
     func testResetCreditExpirationUsesNearestFutureDate() throws {
