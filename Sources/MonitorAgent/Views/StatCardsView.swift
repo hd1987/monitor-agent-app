@@ -29,6 +29,10 @@ enum StatCardLayout {
     static let titleRowHeight: CGFloat = 12
 }
 
+enum TokenBreakdownTipLayout {
+    static let itemSpacing: CGFloat = 8
+}
+
 struct StatCard: View {
     let title: String
     let value: String
@@ -116,7 +120,7 @@ private struct TokenBreakdownTip: View {
                     .foregroundStyle(theme.tooltipForeground)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: TokenBreakdownTipLayout.itemSpacing) {
                 tokenRow(label: "Input", color: .blue, value: stats.inputTokens)
                 tokenRow(label: "Output", color: .green, value: stats.outputTokens)
                 tokenRow(label: "Cache Read", color: .orange, value: stats.cacheReadTokens)

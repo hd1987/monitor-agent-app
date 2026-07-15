@@ -17,7 +17,9 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(QuotaCardLayout.contentSpacing, 16)
         XCTAssertEqual(QuotaCardLayout.metricSpacing, 28)
         XCTAssertLessThan(QuotaCardLayout.metricHeight, QuotaCardLayout.cardHeight)
-        XCTAssertEqual(QuotaCardLayout.resetTipWidth, 250)
+        XCTAssertEqual(QuotaCardLayout.resetTipWidth, 220)
+        XCTAssertEqual(QuotaCardLayout.resetTipSectionSpacing, 10)
+        XCTAssertEqual(QuotaCardLayout.resetTipItemSpacing, 8)
     }
 
     func testResetCreditsCopyUsesExpirationColumnHeading() {

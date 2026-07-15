@@ -8,5 +8,6 @@ final class StatCardsLayoutTests: XCTestCase {
         XCTAssertEqual(StatCardLayout.sessionsWidth, StatCardLayout.metricWidth)
         XCTAssertEqual(StatCardLayout.cacheHitWidth, StatCardLayout.metricWidth)
         XCTAssertGreaterThan(StatCardLayout.tokensWidth, StatCardLayout.metricWidth)
+        XCTAssertEqual(TokenBreakdownTipLayout.itemSpacing, 8)
     }
 }
