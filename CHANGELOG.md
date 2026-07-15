@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-07-16
+
 ### Added
 - Add optional Claude Code and Codex subscription expiration dates with urgency dots and compact remaining-day hover details
 
