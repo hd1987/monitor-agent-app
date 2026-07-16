@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-07-16
+
 ### Changed
 - Rename the subscription tip heading and show calendar-day countdowns in reset-credit tips
 
