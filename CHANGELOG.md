@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-07-16
+
+### Changed
 - Match the Subscription Quota item spacing with the other General settings items
 - Stop keeping Settings, About, and update-check windows above other apps
 
