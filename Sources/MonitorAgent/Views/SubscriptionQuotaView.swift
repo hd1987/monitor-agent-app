@@ -300,7 +300,7 @@ private struct SubscriptionExpirationTip: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
-                Text(SubscriptionExpirationCopy.remainingTitle)
+                Text(SubscriptionExpirationCopy.subscriptionTitle)
                     .font(.system(size: 11, weight: .semibold))
                 Spacer()
                 Text(SubscriptionExpirationCopy.expiresTitle)
@@ -363,7 +363,7 @@ private struct ResetCreditsTip: View {
                         Circle()
                             .fill(expirationColor(at: index))
                             .frame(width: 6, height: 6)
-                        Text(ResetCreditsCopy.fullReset)
+                        Text(countdownText(at: index))
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(theme.tooltipForeground.opacity(0.72))
                         Spacer(minLength: 12)
@@ -394,6 +394,11 @@ private struct ResetCreditsTip: View {
         return QuotaDateFormat.resetDateTime(expirations[index])
     }
 
+    private func countdownText(at index: Int) -> String {
+        guard expirations.indices.contains(index) else { return ResetCreditsCopy.expirationUnavailable }
+        return SubscriptionExpiration.distanceText(to: expirations[index])
+    }
+
     private func expirationColor(at index: Int) -> Color {
         guard expirations.indices.contains(index) else { return .green }
         switch ResetCreditExpiration.urgency(for: expirations[index]) {
@@ -407,12 +412,11 @@ private struct ResetCreditsTip: View {
 enum ResetCreditsCopy {
     static let title = "Usage limit resets"
     static let expiresTitle = "Expires"
-    static let fullReset = "Full reset"
     static let expirationUnavailable = "Expiration unavailable"
 }
 
 enum SubscriptionExpirationCopy {
-    static let remainingTitle = "Remaining"
+    static let subscriptionTitle = "Subscription"
     static let expiresTitle = "Expires"
     static let today = "Today"
 

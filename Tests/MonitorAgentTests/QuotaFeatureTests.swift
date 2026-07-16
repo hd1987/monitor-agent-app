@@ -27,11 +27,10 @@ final class QuotaFeatureTests: XCTestCase {
 
     func testResetCreditsCopyUsesExpirationColumnHeading() {
         XCTAssertEqual(ResetCreditsCopy.expiresTitle, "Expires")
-        XCTAssertEqual(ResetCreditsCopy.fullReset, "Full reset")
     }
 
     func testSubscriptionExpirationTipUsesCompactColumnHeadings() {
-        XCTAssertEqual(SubscriptionExpirationCopy.remainingTitle, "Remaining")
+        XCTAssertEqual(SubscriptionExpirationCopy.subscriptionTitle, "Subscription")
         XCTAssertEqual(SubscriptionExpirationCopy.expiresTitle, "Expires")
     }
 
