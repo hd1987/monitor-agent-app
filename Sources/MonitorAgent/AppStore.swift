@@ -11,6 +11,7 @@ final class AppStore: ObservableObject {
     @Published var heatmap: [DayActivity] = []
     @Published var selectedActivityDate: String?
     @Published var hourlyTokenUsage: [HourlyTokenUsage] = []
+    @Published var isHourlyTokenUsageLoading = false
     @Published var modelDistribution: [ModelShare] = []
     @Published var availableYears: [Int] = []
     @Published var isRebuildingUsageData = false
@@ -266,6 +267,8 @@ final class AppStore: ObservableObject {
 
         selectedActivityDate = date
         timeRange = range
+        hourlyTokenUsage = []
+        isHourlyTokenUsageLoading = true
         loadHourlyTokenUsage(for: date)
     }
 
@@ -277,6 +280,7 @@ final class AppStore: ObservableObject {
     func clearSelectedActivityDate() {
         selectedActivityDate = nil
         hourlyTokenUsage = []
+        isHourlyTokenUsageLoading = false
     }
 
     private func loadHourlyTokenUsage(for date: String) {
@@ -286,6 +290,7 @@ final class AppStore: ObservableObject {
             DispatchQueue.main.async { [weak self] in
                 guard self?.selectedActivityDate == date else { return }
                 self?.hourlyTokenUsage = usage
+                self?.isHourlyTokenUsageLoading = false
             }
         }
     }

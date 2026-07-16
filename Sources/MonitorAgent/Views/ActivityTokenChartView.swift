@@ -5,7 +5,18 @@ struct ActivityTokenChartView: View {
     @EnvironmentObject var theme: ThemeManager
     let date: String
     let usage: [HourlyTokenUsage]
+    let isLoading: Bool
     @State private var hoveredHour: Int?
+    @State private var hiddenMetrics: Set<String> = []
+
+    private var metricStyles: [TokenMetricStyle] {
+        [
+            TokenMetricStyle(name: "Input Tokens", color: .blue),
+            TokenMetricStyle(name: "Output Tokens", color: .green),
+            TokenMetricStyle(name: "Cache Read", color: .orange),
+            TokenMetricStyle(name: "Cache Creation", color: .purple),
+        ]
+    }
 
     private var visibleUsage: [HourlyTokenUsage] {
         ActivityTokenChartLayout.visibleUsage(usage, for: date)
@@ -19,17 +30,11 @@ struct ActivityTokenChartView: View {
                 TokenSeriesPoint(metric: "Cache Read", hour: item.hour, value: Double(item.cacheReadTokens)),
                 TokenSeriesPoint(metric: "Cache Creation", hour: item.hour, value: Double(item.cacheCreationTokens)),
             ]
-        }
+        }.filter { !hiddenMetrics.contains($0.metric) }
     }
 
     private var maxValue: Double {
         max(points.map(\.value).max() ?? 0, 1)
-    }
-
-    private var totalTokens: Int64 {
-        usage.reduce(Int64(0)) { total, item in
-            total + item.inputTokens + item.outputTokens + item.cacheReadTokens + item.cacheCreationTokens
-        }
     }
 
     private var hoveredUsage: HourlyTokenUsage? {
@@ -44,9 +49,6 @@ struct ActivityTokenChartView: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.primary)
                 Spacer()
-                Text(formatTokens(totalTokens))
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
             }
 
             Chart(points) { point in
@@ -76,13 +78,54 @@ struct ActivityTokenChartView: View {
                     }
                 }
             }
-            .chartLegend(position: .bottom, alignment: .leading)
+            .chartYAxis {
+                AxisMarks { value in
+                    AxisGridLine()
+                    AxisTick()
+                    AxisValueLabel {
+                        if let tokenValue = value.as(Double.self) {
+                            Text(ActivityTokenChartLayout.tokenAxisLabel(for: tokenValue))
+                        }
+                    }
+                }
+            }
+            .chartLegend(.hidden)
             .chartOverlay { proxy in
                 GeometryReader { geometry in
                     if let plotFrame = proxy.plotFrame {
                         let plotAreaFrame = geometry[plotFrame]
 
                         ZStack(alignment: .topLeading) {
+                            if let nowHour = ActivityTokenChartLayout.currentHourPosition(for: date),
+                               let plotX = proxy.position(forX: nowHour) {
+                                let nowX = plotAreaFrame.minX + plotX
+                                let futureWidth = max(0, plotAreaFrame.maxX - nowX)
+
+                                Rectangle()
+                                    .fill(Color.secondary.opacity(0.06))
+                                    .frame(width: futureWidth, height: plotAreaFrame.height)
+                                    .position(
+                                        x: nowX + futureWidth / 2,
+                                        y: plotAreaFrame.midY
+                                    )
+                                    .allowsHitTesting(false)
+
+                                Rectangle()
+                                    .fill(Color.secondary.opacity(0.45))
+                                    .frame(width: 1, height: plotAreaFrame.height)
+                                    .position(x: nowX, y: plotAreaFrame.midY)
+                                    .allowsHitTesting(false)
+
+                                Text("Now")
+                                    .font(.system(size: 8, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                    .position(
+                                        x: min(nowX + 14, plotAreaFrame.maxX - 14),
+                                        y: plotAreaFrame.minY + 6
+                                    )
+                                    .allowsHitTesting(false)
+                            }
+
                             Rectangle()
                                 .fill(.clear)
                                 .contentShape(Rectangle())
@@ -122,6 +165,33 @@ struct ActivityTokenChartView: View {
                 }
             }
             .frame(height: ActivityTokenChartLayout.chartHeight)
+            .overlay {
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            HStack(spacing: 10) {
+                ForEach(metricStyles) { metric in
+                    Button {
+                        toggleMetric(metric.name)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(metric.color)
+                                .frame(width: 6, height: 6)
+                            Text(metric.name)
+                        }
+                        .opacity(hiddenMetrics.contains(metric.name) ? 0.35 : 1)
+                    }
+                    .buttonStyle(.plain)
+                    .help(hiddenMetrics.contains(metric.name) ? "Show \(metric.name)" : "Hide \(metric.name)")
+                    .accessibilityLabel(hiddenMetrics.contains(metric.name) ? "Show \(metric.name)" : "Hide \(metric.name)")
+                }
+            }
+            .font(.system(size: 9))
+            .foregroundStyle(.secondary)
         }
         .padding(10)
         .frame(height: ActivityTokenChartLayout.drawerHeight)
@@ -132,6 +202,14 @@ struct ActivityTokenChartView: View {
                 .stroke(theme.cardBorder, lineWidth: 0.5)
         )
         .accessibilityLabel("Hourly token usage for \(date)")
+    }
+
+    private func toggleMetric(_ metric: String) {
+        if hiddenMetrics.contains(metric) {
+            hiddenMetrics.remove(metric)
+        } else if hiddenMetrics.count < metricStyles.count - 1 {
+            hiddenMetrics.insert(metric)
+        }
     }
 
     private var chartTitle: String {
@@ -216,4 +294,10 @@ private struct TokenSeriesPoint: Identifiable {
     let hour: Int
     let value: Double
     var id: String { "\(metric)-\(hour)" }
+}
+
+private struct TokenMetricStyle: Identifiable {
+    let name: String
+    let color: Color
+    var id: String { name }
 }

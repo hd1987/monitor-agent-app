@@ -24,6 +24,13 @@ final class ActivityTokenChartLayoutTests: XCTestCase {
         XCTAssertEqual(ActivityTokenChartLayout.hourAxisLabel(for: ActivityTokenChartLayout.lastHourAxisMark), "21h")
     }
 
+    func testTokenAxisLabelsUseWholeNumberAbbreviations() {
+        XCTAssertEqual(ActivityTokenChartLayout.tokenAxisLabel(for: 0), "0")
+        XCTAssertEqual(ActivityTokenChartLayout.tokenAxisLabel(for: 1_500), "2K")
+        XCTAssertEqual(ActivityTokenChartLayout.tokenAxisLabel(for: 20_400_000), "20M")
+        XCTAssertEqual(ActivityTokenChartLayout.tokenAxisLabel(for: 1_600_000_000), "2B")
+    }
+
     func testHourRangeLabelsUseStartInclusiveOneHourWindow() {
         XCTAssertEqual(ActivityTokenChartLayout.hourRangeLabel(for: 13), "13:00-14:00")
         XCTAssertEqual(ActivityTokenChartLayout.hourRangeLabel(for: 23), "23:00-00:00")
@@ -101,6 +108,44 @@ final class ActivityTokenChartLayoutTests: XCTestCase {
         )
 
         XCTAssertEqual(visible.map(\.hour), Array(0...23))
+    }
+
+    func testCurrentHourPositionIncludesMinutesForToday() {
+        let calendar = Calendar(identifier: .gregorian)
+        let now = calendar.date(from: DateComponents(
+            year: 2026,
+            month: 7,
+            day: 9,
+            hour: 10,
+            minute: 30
+        ))!
+
+        XCTAssertEqual(
+            ActivityTokenChartLayout.currentHourPosition(
+                for: "2026-07-09",
+                now: now,
+                calendar: calendar
+            ),
+            10.5
+        )
+        XCTAssertNil(
+            ActivityTokenChartLayout.currentHourPosition(
+                for: "2026-07-08",
+                now: now,
+                calendar: calendar
+            )
+        )
+    }
+
+    func testHeatmapThresholdsCreateFiveRelativeIntensityLevels() {
+        let thresholds = ActivityTokenChartLayout.heatmapThresholds(
+            for: [0, 10, 20, 30, 40, 50]
+        )
+
+        XCTAssertEqual(thresholds, [20, 30, 30, 40])
+        XCTAssertEqual(ActivityTokenChartLayout.heatmapIntensity(for: 0, thresholds: thresholds), 0)
+        XCTAssertEqual(ActivityTokenChartLayout.heatmapIntensity(for: 10, thresholds: thresholds), 0.20)
+        XCTAssertEqual(ActivityTokenChartLayout.heatmapIntensity(for: 50, thresholds: thresholds), 1.0)
     }
 
     private func hourlyUsage() -> [HourlyTokenUsage] {
