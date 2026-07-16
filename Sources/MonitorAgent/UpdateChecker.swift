@@ -154,7 +154,7 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
         win.titlebarAppearsTransparent = true
         win.titleVisibility = .hidden
         win.isReleasedWhenClosed = false
-        win.level = .floating
+        win.level = .normal
         win.hidesOnDeactivate = false
         win.isMovableByWindowBackground = true
 
