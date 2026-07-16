@@ -51,6 +51,9 @@ struct HeatmapView: View {
             // Grid — compute cell size to fit all weeks within available width
             let grid = buildGrid()
             let columns = grid.count
+            let heatmapThresholds = ActivityTokenChartLayout.heatmapThresholds(
+                for: store.heatmap.map(\.count)
+            )
             let cellSize = columns > 0
                 ? floor((availableWidth - CGFloat(columns - 1) * cellSpacing) / CGFloat(columns))
                 : CGFloat(8)
@@ -62,7 +65,11 @@ struct HeatmapView: View {
                             ForEach(0..<rows, id: \.self) { row in
                                 let entry = grid[col][row]
                                 RoundedRectangle(cornerRadius: 2)
-                                    .fill(cellColor(count: entry.count, isPlaceholder: entry.isPlaceholder))
+                                    .fill(cellColor(
+                                        count: entry.count,
+                                        isPlaceholder: entry.isPlaceholder,
+                                        thresholds: heatmapThresholds
+                                    ))
                                     .frame(width: cellSize, height: cellSize)
                                     .contentShape(Rectangle())
                                     .background(GeometryReader { geo in
@@ -169,7 +176,11 @@ struct HeatmapView: View {
             )
 
             if let selectedDate = store.selectedActivityDate {
-                ActivityTokenChartView(date: selectedDate, usage: store.hourlyTokenUsage)
+                ActivityTokenChartView(
+                    date: selectedDate,
+                    usage: store.hourlyTokenUsage,
+                    isLoading: store.isHourlyTokenUsageLoading
+                )
                     .environmentObject(theme)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -220,7 +231,7 @@ struct HeatmapView: View {
 
     // MARK: - Tooltip
 
-    /// Format: "6 contributions on May 21st"
+    /// Format: "6 requests on May 21st"
     private func tooltipText(date: String, count: Int) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
@@ -239,7 +250,7 @@ struct HeatmapView: View {
         default:         suffix = "th"
         }
 
-        let noun = count == 1 ? "contribution" : "contributions"
+        let noun = count == 1 ? "request" : "requests"
         return "\(count) \(noun) on \(month) \(day)\(suffix)"
     }
 
@@ -331,19 +342,13 @@ struct HeatmapView: View {
         return (wd + 5) % 7
     }
 
-    private func cellColor(count: Int, isPlaceholder: Bool) -> Color {
+    private func cellColor(count: Int, isPlaceholder: Bool, thresholds: [Int]) -> Color {
         if isPlaceholder { return .clear }
         if count == 0 { return theme.cellEmpty }
-
-        // Determine intensity based on count percentiles
-        let intensity: Double
-        switch count {
-        case 1...10:    intensity = 0.25
-        case 11...50:   intensity = 0.45
-        case 51...150:  intensity = 0.65
-        case 151...400: intensity = 0.80
-        default:        intensity = 1.0
-        }
+        let intensity = ActivityTokenChartLayout.heatmapIntensity(
+            for: count,
+            thresholds: thresholds
+        )
         return theme.cellActive.opacity(intensity)
     }
 

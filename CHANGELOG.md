@@ -6,6 +6,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-07-16
+
+### Changed
+- Improve Activity readability with compact chart axes, more spacious toggleable token legends, a current-time marker, future-hour shading, relative heatmap intensity levels, and clearer request labels
+
+### Fixed
+- Clear previous hourly Activity data while a newly selected day is loading
+
 ## [0.5.5] - 2026-07-16
 
 ### Changed

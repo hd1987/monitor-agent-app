@@ -143,13 +143,27 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             currentDateProvider: { now }
         )
 
+        store.hourlyTokenUsage = [
+            HourlyTokenUsage(
+                hour: 12,
+                requestCount: 1,
+                inputTokens: 999,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                cacheCreationTokens: 0
+            )
+        ]
+
         store.selectActivityDate("2026-07-08")
+
+        XCTAssertFalse(store.hourlyTokenUsage.contains { $0.inputTokens == 999 })
 
         let loaded = expectation(description: "zero hourly usage loads")
         waitUntil(attemptsRemaining: 50) {
             store.hourlyTokenUsage.count == 24
         } completion: {
             XCTAssertEqual(store.selectedActivityDate, "2026-07-08")
+            XCTAssertFalse(store.isHourlyTokenUsageLoading)
             XCTAssertTrue(store.hourlyTokenUsage.allSatisfy { !$0.hasTokenUsage && $0.requestCount == 0 })
             loaded.fulfill()
         }
