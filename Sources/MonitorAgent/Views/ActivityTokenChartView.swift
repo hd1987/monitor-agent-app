@@ -172,7 +172,7 @@ struct ActivityTokenChartView: View {
                 }
             }
 
-            HStack(spacing: 10) {
+            HStack(spacing: 16) {
                 ForEach(metricStyles) { metric in
                     Button {
                         toggleMetric(metric.name)
