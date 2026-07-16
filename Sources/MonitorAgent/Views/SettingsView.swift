@@ -656,6 +656,7 @@ private struct QuotaSettingsGroup: View {
                     .stroke(Color(nsColor: .separatorColor).opacity(0.35), lineWidth: 0.5)
             )
         }
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 

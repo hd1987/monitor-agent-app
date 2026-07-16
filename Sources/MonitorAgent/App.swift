@@ -360,7 +360,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.titlebarAppearsTransparent = true
         w.titleVisibility = .hidden
         w.isReleasedWhenClosed = false
-        w.level = .floating
+        w.level = .normal
         w.hidesOnDeactivate = false
         w.appearance = themeManager.nsAppearance
         w.contentView = hosting
@@ -392,7 +392,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.titlebarAppearsTransparent = true
         w.titleVisibility = .hidden
         w.isReleasedWhenClosed = false
-        w.level = .floating
+        w.level = .normal
         w.hidesOnDeactivate = false
 
         w.appearance = themeManager.nsAppearance
