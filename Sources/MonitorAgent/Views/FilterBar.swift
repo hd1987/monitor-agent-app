@@ -19,7 +19,7 @@ struct FilterBar: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 10)
 
-            HStack(spacing: 0) {
+            HStack(spacing: MainPanelDesign.headerToolSpacing) {
                 PanelDragArea()
                     .frame(width: 16, height: MainPanelDesign.headerControlHeight)
 

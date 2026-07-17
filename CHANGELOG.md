@@ -11,6 +11,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 - Show the selected main-panel app filter with a restrained Activity-blue tint and primary text while preserving the active Pin color
 - Restyle General subscription-expiration inputs with compact calendar fields and clearer set/unset states, and share one locale-aware six-row calendar with larger navigation targets, explicit Today access, continuous range highlighting, and accessible date states
 - Expand the Config and Prompt source tabs into equal-width segments aligned with the full editor content width
+- Reduce the visual weight of the main-panel header tools and increase spacing between them while preserving the active Pin accent
 
 ### Fixed
 - Keep the Settings sidebar visible and remove its redundant title-bar toggle button
