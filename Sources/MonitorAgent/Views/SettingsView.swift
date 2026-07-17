@@ -898,18 +898,57 @@ enum AppSourceTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum AppSourceTabBarLayout {
+    static let horizontalPadding: CGFloat = 20
+    static let height: CGFloat = 28
+    static let segmentSpacing: CGFloat = 2
+    static let containerInset: CGFloat = 2
+    static let cornerRadius: CGFloat = 7
+}
+
 struct AppSourceTabBar: View {
     @Binding var selection: AppSourceTab
 
     var body: some View {
-        Picker("Source", selection: $selection) {
+        HStack(spacing: AppSourceTabBarLayout.segmentSpacing) {
             ForEach(AppSourceTab.allCases) { tab in
-                Text(tab.rawValue).tag(tab)
+                Button {
+                    selection = tab
+                } label: {
+                    Text(tab.rawValue)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(selection == tab ? Color.white : Color.primary)
+                        .frame(maxWidth: .infinity)
+                        .frame(
+                            height: AppSourceTabBarLayout.height
+                                - (AppSourceTabBarLayout.containerInset * 2)
+                        )
+                        .background(selection == tab ? Color.accentColor : Color.clear)
+                        .clipShape(
+                            RoundedRectangle(
+                                cornerRadius: AppSourceTabBarLayout.cornerRadius - 2,
+                                style: .continuous
+                            )
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(UtilityWindowPressButtonStyle())
+                .accessibilityAddTraits(selection == tab ? .isSelected : [])
             }
         }
-        .labelsHidden()
-        .pickerStyle(.segmented)
-        .frame(width: 280)
+        .padding(AppSourceTabBarLayout.containerInset)
+        .frame(maxWidth: .infinity)
+        .frame(height: AppSourceTabBarLayout.height)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: AppSourceTabBarLayout.cornerRadius,
+                style: .continuous
+            )
+        )
+        .padding(.horizontal, AppSourceTabBarLayout.horizontalPadding)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Source")
     }
 }
 

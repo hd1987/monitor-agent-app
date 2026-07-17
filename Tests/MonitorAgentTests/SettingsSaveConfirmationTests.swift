@@ -63,6 +63,14 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         XCTAssertEqual(ExpirationDateControlStyle.borderWidth, 0.5)
     }
 
+    func testAppSourceTabsAlignWithEditorContent() {
+        XCTAssertEqual(AppSourceTabBarLayout.horizontalPadding, 20)
+        XCTAssertEqual(AppSourceTabBarLayout.height, 28)
+        XCTAssertEqual(AppSourceTabBarLayout.segmentSpacing, 2)
+        XCTAssertEqual(AppSourceTabBarLayout.containerInset, 2)
+        XCTAssertEqual(AppSourceTabBarLayout.cornerRadius, 7)
+    }
+
     func testUsageDataRebuildCopyMatchesSettingsDataSection() {
         XCTAssertEqual(UsageDataRebuildCopy.buttonTitle, "Rebuild Local Usage Data")
         XCTAssertEqual(UsageDataRebuildCopy.confirmationTitle, "Rebuild Local Usage Data?")
