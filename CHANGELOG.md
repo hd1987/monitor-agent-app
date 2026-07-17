@@ -9,6 +9,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 ### Changed
 - Show quota remaining percentages in orange below 40% and red below 10%, using the same green, orange, and red palette across quota cards and tips
 - Show the selected main-panel app filter with a restrained Activity-blue tint and primary text while preserving the active Pin color
+- Restyle General subscription-expiration inputs with compact calendar fields and clearer set/unset states, and share one locale-aware six-row calendar with larger navigation targets, explicit Today access, continuous range highlighting, and accessible date states
 
 ### Fixed
 - Keep the Settings sidebar visible and remove its redundant title-bar toggle button

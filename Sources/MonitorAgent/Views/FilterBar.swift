@@ -222,66 +222,12 @@ struct FilterBar: View {
     }
 
     private var calendarPicker: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Button {
-                    moveDisplayedMonth(by: -1)
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .buttonStyle(MainPanelPressButtonStyle())
-
-                Button {
-                    displayedMonth = Calendar.current.startOfDay(for: Date())
-                } label: {
-                    Text(monthTitle(for: displayedMonth))
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(MainPanelPressButtonStyle())
-
-                Button {
-                    moveDisplayedMonth(by: 1)
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .buttonStyle(MainPanelPressButtonStyle())
-            }
-
-            HStack(spacing: 0) {
-                ForEach(shortWeekdaySymbols, id: \.self) { symbol in
-                    Text(symbol)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(theme.panelSecondaryForeground)
-                        .frame(maxWidth: .infinity)
-                }
-            }
-
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 7), spacing: 3) {
-                ForEach(calendarCells(for: displayedMonth)) { cell in
-                    if let date = cell.date {
-                        Button {
-                            selectCalendarDate(date)
-                        } label: {
-                            Text(dayTitle(for: date))
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(dayTextColor(for: date))
-                                .frame(maxWidth: .infinity, minHeight: 32)
-                                .background(dayBackground(for: date))
-                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(MainPanelPressButtonStyle())
-                    } else {
-                        Color.clear
-                            .frame(maxWidth: .infinity, minHeight: 32)
-                    }
-                }
-            }
-        }
+        MonthCalendarView(
+            displayedMonth: $displayedMonth,
+            weekdayForeground: theme.panelSecondaryForeground,
+            appearance: calendarDayAppearance,
+            onSelect: selectCalendarDate
+        )
     }
 
     private func syncCalendarSelection(from range: TimeRange) {
@@ -306,65 +252,21 @@ struct FilterBar: View {
         }
     }
 
-    private func moveDisplayedMonth(by value: Int) {
-        if let month = Calendar.current.date(byAdding: .month, value: value, to: displayedMonth) {
-            displayedMonth = month
-        }
-    }
-
     private func displayTitle(for range: TimeRange) -> String {
         range.displayTitle(formatter: Self.displayFormatter)
     }
 
-    private var shortWeekdaySymbols: [String] {
-        Array(Calendar.current.shortWeekdaySymbols)
-    }
-
-    private func calendarCells(for month: Date) -> [CalendarCell] {
-        let calendar = Calendar.current
-        let components = calendar.dateComponents([.year, .month], from: month)
-        guard
-            let firstDay = calendar.date(from: components),
-            let dayRange = calendar.range(of: .day, in: .month, for: firstDay)
-        else {
-            return []
-        }
-
-        let leadingEmptyCount = calendar.component(.weekday, from: firstDay) - calendar.firstWeekday
-        let normalizedLeadingCount = (leadingEmptyCount + 7) % 7
-        var cells = (0..<normalizedLeadingCount).map { CalendarCell(index: $0, date: nil) }
-
-        for day in dayRange {
-            let date = calendar.date(byAdding: .day, value: day - 1, to: firstDay)
-            cells.append(CalendarCell(index: cells.count, date: date))
-        }
-
-        return cells
-    }
-
-    private func dayTitle(for date: Date) -> String {
-        String(Calendar.current.component(.day, from: date))
-    }
-
-    private func monthTitle(for date: Date) -> String {
-        Self.monthFormatter.string(from: date)
-    }
-
-    private func dayTextColor(for date: Date) -> Color {
-        isRangeBoundary(date) ? .white : .primary
-    }
-
-    private func dayBackground(for date: Date) -> Color {
+    private func calendarDayAppearance(for date: Date) -> MonthCalendarDayAppearance {
         if isRangeBoundary(date) {
-            return .accentColor
+            return .selected
         }
         if isInsideRange(date) {
-            return Color.accentColor.opacity(0.18)
+            return .inRange
         }
         if Calendar.current.isDateInToday(date) {
-            return Color.accentColor.opacity(0.08)
+            return .today
         }
-        return .clear
+        return .standard
     }
 
     private func isRangeBoundary(_ date: Date) -> Bool {
@@ -387,11 +289,6 @@ struct FilterBar: View {
         return formatter
     }()
 
-    private static let monthFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("MMMM yyyy")
-        return formatter
-    }()
 }
 
 private struct PanelDragArea: NSViewRepresentable {
@@ -407,11 +304,4 @@ private final class PanelDragView: NSView {
         window?.performDrag(with: event)
         (window as? FloatingPanel)?.constrainToVisibleFrame(at: NSEvent.mouseLocation)
     }
-}
-
-private struct CalendarCell: Identifiable {
-    let index: Int
-    let date: Date?
-
-    var id: Int { index }
 }

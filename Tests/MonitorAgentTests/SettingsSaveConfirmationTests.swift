@@ -49,10 +49,18 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         XCTAssertEqual(QuotaSettingsCopy.codexDescription, "Show Codex subscription quota in the main panel.")
         XCTAssertEqual(QuotaSettingsCopy.expirationNotSet, "Not set")
         XCTAssertEqual(QuotaSettingsCopy.expirationPickerTitle, "Subscription Expiration")
+        XCTAssertEqual(QuotaSettingsCopy.today, "Today")
         XCTAssertEqual(QuotaSettingsCopy.clearExpiration, "Clear")
         XCTAssertEqual(QuotaSettingsCopy.refreshIntervalTitle, "Refresh Interval")
         XCTAssertEqual(QuotaSettingsCopy.refreshIntervalDescription, "Refresh while the panel is open. \"Never\" refreshes once when opened.")
         XCTAssertEqual(QuotaRefreshInterval.allCases.map(\.displayName), ["1 min", "2 min", "5 min", "Never"])
+    }
+
+    func testExpirationDateControlUsesCompactInputGeometry() {
+        XCTAssertEqual(ExpirationDateControlStyle.width, 120)
+        XCTAssertEqual(ExpirationDateControlStyle.height, 28)
+        XCTAssertEqual(ExpirationDateControlStyle.cornerRadius, 7)
+        XCTAssertEqual(ExpirationDateControlStyle.borderWidth, 0.5)
     }
 
     func testUsageDataRebuildCopyMatchesSettingsDataSection() {

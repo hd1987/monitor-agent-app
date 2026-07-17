@@ -552,9 +552,17 @@ enum QuotaSettingsCopy {
     static let codexDescription = "Show Codex subscription quota in the main panel."
     static let expirationNotSet = "Not set"
     static let expirationPickerTitle = "Subscription Expiration"
+    static let today = "Today"
     static let clearExpiration = "Clear"
     static let refreshIntervalTitle = "Refresh Interval"
     static let refreshIntervalDescription = "Refresh while the panel is open. \"Never\" refreshes once when opened."
+}
+
+enum ExpirationDateControlStyle {
+    static let width: CGFloat = 120
+    static let height: CGFloat = 28
+    static let cornerRadius: CGFloat = 7
+    static let borderWidth: CGFloat = 0.5
 }
 
 private struct QuotaSettingsGroup: View {
@@ -637,18 +645,42 @@ private struct ExpirationDateControl: View {
             isPickerPresented.toggle()
         } label: {
             HStack(spacing: 6) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
                 Text(expirationDate.map(SubscriptionExpiration.dateText) ?? QuotaSettingsCopy.expirationNotSet)
                     .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(expirationDate == nil ? Color.secondary : Color.primary)
                     .lineLimit(1)
+                Spacer(minLength: 0)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
             }
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .frame(width: 120, alignment: .trailing)
+            .padding(.horizontal, 8)
+            .frame(
+                width: ExpirationDateControlStyle.width,
+                height: ExpirationDateControlStyle.height
+            )
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(
+                RoundedRectangle(
+                    cornerRadius: ExpirationDateControlStyle.cornerRadius,
+                    style: .continuous
+                )
+            )
+            .overlay {
+                RoundedRectangle(
+                    cornerRadius: ExpirationDateControlStyle.cornerRadius,
+                    style: .continuous
+                )
+                .stroke(
+                    Color(nsColor: .separatorColor).opacity(0.65),
+                    lineWidth: ExpirationDateControlStyle.borderWidth
+                )
+            }
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(UtilityWindowPressButtonStyle())
         .overlay(alignment: .trailing) {
             Color.clear
                 .frame(width: 1, height: 1)
@@ -662,155 +694,63 @@ private struct ExpirationDateControl: View {
                 }
         }
         .accessibilityLabel(QuotaSettingsCopy.expirationPickerTitle)
+        .accessibilityValue(
+            expirationDate.map(SubscriptionExpiration.dateText) ?? QuotaSettingsCopy.expirationNotSet
+        )
     }
 
     private var expirationPopover: some View {
         VStack(alignment: .leading, spacing: 8) {
             calendarPicker
 
-            if expirationDate != nil {
-                Divider()
-                Button(QuotaSettingsCopy.clearExpiration) {
-                    expirationDate = nil
+            Divider()
+            HStack {
+                Button(QuotaSettingsCopy.today) {
+                    expirationDate = Calendar.current.startOfDay(for: Date())
                     isPickerPresented = false
                 }
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
                 .buttonStyle(UtilityWindowPressButtonStyle())
-                .frame(maxWidth: .infinity, alignment: .trailing)
+
+                Spacer()
+
+                if expirationDate != nil {
+                    Button(QuotaSettingsCopy.clearExpiration) {
+                        expirationDate = nil
+                        isPickerPresented = false
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .buttonStyle(UtilityWindowPressButtonStyle())
+                }
             }
         }
     }
 
     private var calendarPicker: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Button {
-                    moveDisplayedMonth(by: -1)
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .buttonStyle(UtilityWindowPressButtonStyle())
+        MonthCalendarView(
+            displayedMonth: $displayedMonth,
+            weekdayForeground: .secondary,
+            appearance: expirationDayAppearance,
+            onSelect: selectExpirationDate
+        )
+    }
 
-                Button {
-                    displayedMonth = Calendar.current.startOfDay(for: Date())
-                } label: {
-                    Text(monthTitle(for: displayedMonth))
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(UtilityWindowPressButtonStyle())
+    private func selectExpirationDate(_ date: Date) {
+        expirationDate = Calendar.current.startOfDay(for: date)
+        isPickerPresented = false
+    }
 
-                Button {
-                    moveDisplayedMonth(by: 1)
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .buttonStyle(UtilityWindowPressButtonStyle())
-            }
-
-            HStack(spacing: 0) {
-                ForEach(Calendar.current.shortWeekdaySymbols, id: \.self) { symbol in
-                    Text(symbol)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity)
-                }
-            }
-
-            LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 7),
-                spacing: 3
-            ) {
-                ForEach(calendarCells(for: displayedMonth)) { cell in
-                    if let date = cell.date {
-                        Button {
-                            expirationDate = Calendar.current.startOfDay(for: date)
-                            isPickerPresented = false
-                        } label: {
-                            Text(dayTitle(for: date))
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(isSelected(date) ? Color.white : Color.primary)
-                                .frame(maxWidth: .infinity, minHeight: 32)
-                                .background(dayBackground(for: date))
-                                .clipShape(
-                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                )
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(UtilityWindowPressButtonStyle())
-                    } else {
-                        Color.clear
-                            .frame(maxWidth: .infinity, minHeight: 32)
-                    }
-                }
-            }
+    private func expirationDayAppearance(for date: Date) -> MonthCalendarDayAppearance {
+        if expirationDate.map({ Calendar.current.isDate(date, inSameDayAs: $0) }) == true {
+            return .selected
         }
-    }
-
-    private func moveDisplayedMonth(by value: Int) {
-        if let month = Calendar.current.date(byAdding: .month, value: value, to: displayedMonth) {
-            displayedMonth = month
+        if Calendar.current.isDateInToday(date) {
+            return .today
         }
+        return .standard
     }
-
-    private func calendarCells(for month: Date) -> [ExpirationCalendarCell] {
-        let calendar = Calendar.current
-        let components = calendar.dateComponents([.year, .month], from: month)
-        guard
-            let firstDay = calendar.date(from: components),
-            let dayRange = calendar.range(of: .day, in: .month, for: firstDay)
-        else {
-            return []
-        }
-
-        let leadingEmptyCount = calendar.component(.weekday, from: firstDay) - calendar.firstWeekday
-        let normalizedLeadingCount = (leadingEmptyCount + 7) % 7
-        var cells = (0..<normalizedLeadingCount).map {
-            ExpirationCalendarCell(index: $0, date: nil)
-        }
-
-        for day in dayRange {
-            let date = calendar.date(byAdding: .day, value: day - 1, to: firstDay)
-            cells.append(ExpirationCalendarCell(index: cells.count, date: date))
-        }
-
-        return cells
-    }
-
-    private func dayTitle(for date: Date) -> String {
-        String(Calendar.current.component(.day, from: date))
-    }
-
-    private func monthTitle(for date: Date) -> String {
-        Self.monthFormatter.string(from: date)
-    }
-
-    private func isSelected(_ date: Date) -> Bool {
-        expirationDate.map { Calendar.current.isDate(date, inSameDayAs: $0) } == true
-    }
-
-    private func dayBackground(for date: Date) -> Color {
-        if isSelected(date) { return .accentColor }
-        if Calendar.current.isDateInToday(date) { return Color.accentColor.opacity(0.08) }
-        return .clear
-    }
-
-    private static let monthFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("MMMM yyyy")
-        return formatter
-    }()
-}
-
-private struct ExpirationCalendarCell: Identifiable {
-    let index: Int
-    let date: Date?
-
-    var id: Int { index }
 }
 
 struct UsageDataRebuildSheetView: View {
