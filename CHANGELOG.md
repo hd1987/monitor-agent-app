@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Build formal releases with Xcode 26.6 and the macOS 26.5 SDK so native SwiftUI styling matches local development
+
 ## [0.5.7] - 2026-07-17
 
 ### Changed

@@ -11,6 +11,7 @@ macOS menu bar app that displays usage statistics for Claude Code and Codex.
 - Build: `swift build`
 - Test: `swift test`
 - Release build: `swift build -c release`
+- Release toolchain: GitHub Actions `macos-26` runner + Xcode 26.6 + macOS 26.5 SDK
 - Run locally: `swift run MonitorAgent &`
 - Stop locally: `pkill -f MonitorAgent`
 
@@ -126,7 +127,7 @@ The reset-credit tip uses a compact width, labels its date column `Expires`, and
 See [RELEASE.md](RELEASE.md) for full workflow. Summary:
 1. Agent: verify → move `[Unreleased]` entries → commit → tag on `develop`
 2. You: push `develop` + tags, create PR, merge `develop` into `main`
-3. GitHub Actions: release only after `main` receives a reachable unreleased tag
+3. GitHub Actions: release only after `main` receives a reachable unreleased tag, using the pinned Xcode 26.6 toolchain so native SwiftUI styling matches local development
 
 ## Conventions
 
