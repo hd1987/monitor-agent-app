@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SubscriptionQuotaView: View {
     @EnvironmentObject var store: AppStore
-    @EnvironmentObject var theme: ThemeManager
 
     private var providers: [QuotaProviderID] {
         store.visibleQuotaProviders.filter(QuotaSettings.shared.isEnabled)
@@ -11,7 +10,6 @@ struct SubscriptionQuotaView: View {
     var body: some View {
         if !providers.isEmpty {
             VStack(spacing: 8) {
-                Divider().opacity(theme.dividerOpacity)
                 ForEach(providers, id: \.self) { provider in
                     SubscriptionQuotaCard(
                         provider: provider,
@@ -20,14 +18,16 @@ struct SubscriptionQuotaView: View {
                     )
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, MainPanelDesign.horizontalPadding)
+            .padding(.top, 2)
             .padding(.bottom, 12)
         }
     }
 }
 
 private struct SubscriptionQuotaCard: View {
-    @EnvironmentObject var theme: ThemeManager
+    @EnvironmentObject private var theme: ThemeManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isExpirationTipPresented = false
     @State private var isResetTipPresented = false
     @State private var cardWidth: CGFloat = 0
@@ -47,11 +47,11 @@ private struct SubscriptionQuotaCard: View {
                     switch phase {
                     case .active:
                         guard expirationDate != nil else { return }
-                        withAnimation(.easeOut(duration: 0.12)) {
+                        withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
                             isExpirationTipPresented = true
                         }
                     case .ended:
-                        withAnimation(.easeOut(duration: 0.12)) {
+                        withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
                             isExpirationTipPresented = false
                         }
                     }
@@ -80,11 +80,11 @@ private struct SubscriptionQuotaCard: View {
                                     cardWidth - QuotaCardLayout.horizontalPadding - rightRegionWidth
                                 ) + location.x
                             }
-                            withAnimation(.easeOut(duration: 0.12)) {
+                            withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
                                 isResetTipPresented = true
                             }
                         case .ended:
-                            withAnimation(.easeOut(duration: 0.12)) {
+                            withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
                                 isResetTipPresented = false
                             }
                         }
@@ -98,7 +98,7 @@ private struct SubscriptionQuotaCard: View {
         .padding(.horizontal, QuotaCardLayout.horizontalPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: QuotaCardLayout.cardHeight)
-        .background(theme.cardBackground)
+        .mainPanelGroupedSurface()
         .background(
             GeometryReader { proxy in
                 Color.clear
@@ -106,18 +106,17 @@ private struct SubscriptionQuotaCard: View {
                     .onChange(of: proxy.size.width) { _, newValue in cardWidth = newValue }
             }
         )
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(theme.cardBorder, lineWidth: 0.5)
-        )
         .overlay(alignment: .bottomLeading) {
             if isExpirationTipPresented, let expirationDate {
                 SubscriptionExpirationTip(expirationDate: expirationDate)
                     .padding(.leading, 8)
                     .offset(y: -(QuotaCardLayout.cardHeight + 6))
                     .allowsHitTesting(false)
-                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottomLeading)))
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .opacity.combined(with: .scale(scale: 0.98, anchor: .bottomLeading))
+                    )
             }
         }
         .overlay(alignment: .bottomLeading) {
@@ -130,7 +129,11 @@ private struct SubscriptionQuotaCard: View {
                     expirations: snapshot.resetCreditExpirations
                 )
                 .offset(x: clampedResetTipX, y: -(QuotaCardLayout.cardHeight + 6))
-                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
+                .transition(
+                    reduceMotion
+                        ? .opacity
+                        : .opacity.combined(with: .scale(scale: 0.98, anchor: .bottom))
+                )
             }
         }
         .zIndex(isExpirationTipPresented || isResetTipPresented ? 2 : 0)
@@ -168,9 +171,9 @@ private struct SubscriptionQuotaCard: View {
                     HStack(spacing: 5) {
                         Text("resets")
                             .fontWeight(.medium)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.panelSecondaryForeground)
                         Text("·")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.panelSecondaryForeground)
                         Text("\(credits)")
                             .fontWeight(.semibold)
                             .foregroundStyle(resetCreditCountColor(
@@ -181,7 +184,7 @@ private struct SubscriptionQuotaCard: View {
                         ) {
                             Text(QuotaDateFormat.resetDateTime(expiration))
                                 .font(.system(size: 10))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(theme.panelSecondaryForeground)
                         }
                     }
                     .lineLimit(1)
@@ -227,15 +230,15 @@ private struct SubscriptionQuotaCard: View {
         HStack(spacing: 5) {
             Text(label)
                 .fontWeight(.medium)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.panelSecondaryForeground)
             Text("·")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.panelSecondaryForeground)
             Text("\(Int(window.remainingPercent.rounded()))%")
                 .fontWeight(.semibold)
                 .foregroundStyle(quotaColor(window.remainingPercent))
             Text(reset)
                 .font(.system(size: 10))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.panelSecondaryForeground)
         }
         .lineLimit(1)
         .fixedSize()
@@ -243,7 +246,7 @@ private struct SubscriptionQuotaCard: View {
 
     private func statusText(_ text: String) -> some View {
         Text(text)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(theme.panelSecondaryForeground)
             .lineLimit(1)
             .frame(height: QuotaCardLayout.metricHeight)
     }
@@ -253,7 +256,7 @@ private struct SubscriptionQuotaCard: View {
             ProgressView()
                 .controlSize(.small)
             Text("Loading quota")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.panelSecondaryForeground)
         }
         .frame(height: QuotaCardLayout.metricHeight)
     }
@@ -265,9 +268,9 @@ private struct SubscriptionQuotaCard: View {
     }
 
     private var planColor: Color {
-        guard let expirationDate else { return Color.secondary }
+        guard let expirationDate else { return theme.panelSecondaryForeground }
         switch SubscriptionExpiration.urgency(for: expirationDate) {
-        case .standard: return Color.secondary
+        case .standard: return theme.panelSecondaryForeground
         case .warning: return .orange
         case .critical: return .red
         }

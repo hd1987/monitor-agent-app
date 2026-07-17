@@ -55,17 +55,16 @@ final class ThemeManager: ObservableObject {
 
     // MARK: - Panel Colors (AppKit)
 
-    /// Dark: #1c1c1e (macOS native dark background)
+    /// Theme-aware tint layered over the native popover material.
     var panelBackground: NSColor {
-        isDark
-            ? NSColor(red: 0.11, green: 0.11, blue: 0.118, alpha: 0.98)
-            : NSColor.white.withAlphaComponent(0.98)
-    }
-
-    var panelBorder: NSColor {
-        isDark
-            ? NSColor.white.withAlphaComponent(0.08)
-            : NSColor.black.withAlphaComponent(0.20)
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
+            return isDark
+                ? NSColor(red: 0.11, green: 0.11, blue: 0.118, alpha: 1)
+                : NSColor.white
+        }
+        return isDark
+            ? NSColor(red: 0.08, green: 0.08, blue: 0.09, alpha: 0.82)
+            : NSColor.white.withAlphaComponent(0.88)
     }
 
     // MARK: - View Colors (SwiftUI)
@@ -82,6 +81,34 @@ final class ThemeManager: ObservableObject {
         isDark
             ? Color.white.opacity(0.1)
             : Color.black.opacity(0.12)
+    }
+
+    /// Solid grouped content placed on the panel material.
+    var groupedSurface: Color {
+        isDark
+            ? Color.white.opacity(0.075)
+            : Color.black.opacity(0.045)
+    }
+
+    /// Quiet control chrome placed directly on the panel material.
+    var controlSurface: Color {
+        isDark
+            ? Color.white.opacity(0.09)
+            : Color.black.opacity(0.035)
+    }
+
+    /// Stable label contrast that does not fade when the panel loses focus.
+    var panelSecondaryForeground: Color {
+        isDark
+            ? Color.white.opacity(0.72)
+            : Color.black.opacity(0.62)
+    }
+
+    /// Lower-emphasis panel text that remains legible over material.
+    var panelTertiaryForeground: Color {
+        isDark
+            ? Color.white.opacity(0.54)
+            : Color.black.opacity(0.48)
     }
 
     /// Dark: subtle light squares on dark grid
@@ -104,10 +131,6 @@ final class ThemeManager: ObservableObject {
 
     var tooltipForeground: Color {
         isDark ? .white.opacity(0.9) : .white
-    }
-
-    var dividerOpacity: Double {
-        isDark ? 0.1 : 0.2
     }
 
     /// NSAppearance matching the current theme — use on NSWindow.appearance

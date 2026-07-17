@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Redesign the main panel with brighter stable popover material, readable inactive-state text, compact aligned header controls with ungrouped date and quieter tool icons, quieter grouped surfaces including Activity detail, immediate press feedback, and reduced-motion/transparency adaptations
+
 ## [0.5.6] - 2026-07-16
 
 ### Changed

@@ -74,6 +74,7 @@ struct ActivityTokenChartView: View {
                     AxisValueLabel {
                         if let hour = value.as(Int.self) {
                             Text(ActivityTokenChartLayout.hourAxisLabel(for: hour))
+                                .foregroundStyle(theme.panelSecondaryForeground)
                         }
                     }
                 }
@@ -85,6 +86,7 @@ struct ActivityTokenChartView: View {
                     AxisValueLabel {
                         if let tokenValue = value.as(Double.self) {
                             Text(ActivityTokenChartLayout.tokenAxisLabel(for: tokenValue))
+                                .foregroundStyle(theme.panelSecondaryForeground)
                         }
                     }
                 }
@@ -118,7 +120,7 @@ struct ActivityTokenChartView: View {
 
                                 Text("Now")
                                     .font(.system(size: 8, weight: .medium))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(theme.panelSecondaryForeground)
                                     .position(
                                         x: min(nowX + 14, plotAreaFrame.maxX - 14),
                                         y: plotAreaFrame.minY + 6
@@ -191,16 +193,11 @@ struct ActivityTokenChartView: View {
                 }
             }
             .font(.system(size: 9))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(theme.panelSecondaryForeground)
         }
         .padding(10)
         .frame(height: ActivityTokenChartLayout.drawerHeight)
-        .background(theme.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(theme.cardBorder, lineWidth: 0.5)
-        )
+        .mainPanelGroupedSurface()
         .accessibilityLabel("Hourly token usage for \(date)")
     }
 

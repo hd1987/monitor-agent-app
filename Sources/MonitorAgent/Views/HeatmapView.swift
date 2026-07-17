@@ -4,6 +4,7 @@ import SwiftUI
 struct HeatmapView: View {
     @EnvironmentObject var store: AppStore
     @EnvironmentObject var theme: ThemeManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let appFilterFrameInWindow: CGRect
     @State private var hoveredCell: String?
     @State private var hoveredCount: Int = 0
@@ -14,9 +15,9 @@ struct HeatmapView: View {
     private let rows = 7
     private let cellSpacing: CGFloat = 3
     /// Horizontal padding on each side
-    private let hPadding: CGFloat = 16
+    private let hPadding = MainPanelDesign.horizontalPadding
     /// Panel width minus padding → available width for grid
-    private var availableWidth: CGFloat { 620 - hPadding * 2 }
+    private var availableWidth: CGFloat { MainPanelDesign.width - hPadding * 2 }
     private var tooltipWidth: CGFloat {
         tooltipSize.width > 0 ? tooltipSize.width : ActivityTokenChartLayout.defaultTooltipWidth
     }
@@ -26,18 +27,29 @@ struct HeatmapView: View {
             // Header — tap to dismiss activity chart
             HStack {
                 Text("Activity")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .mainPanelSectionTitle()
                 Spacer()
                 // Unified mode picker: Default | 2025 | 2026 …
                 let options = heatmapModeOptions
-                HStack(spacing: 12) {
+                HStack(spacing: 4) {
                     ForEach(options, id: \.self) { mode in
                         let isActive = store.heatmapMode == mode
-                        Text(heatmapModeLabel(mode))
-                            .font(.system(size: 11, weight: isActive ? .semibold : .regular))
-                            .foregroundStyle(isActive ? .secondary : .tertiary)
-                            .onTapGesture { store.heatmapMode = mode }
+                        Button {
+                            store.heatmapMode = mode
+                        } label: {
+                            Text(heatmapModeLabel(mode))
+                                .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                                .foregroundStyle(
+                                    isActive ? Color.primary : theme.panelSecondaryForeground
+                                )
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(isActive ? theme.controlSurface : Color.clear)
+                                .clipShape(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                )
+                        }
+                        .buttonStyle(MainPanelPressButtonStyle())
                     }
                 }
             }
@@ -71,6 +83,13 @@ struct HeatmapView: View {
                                         thresholds: heatmapThresholds
                                     ))
                                     .frame(width: cellSize, height: cellSize)
+                                    .scaleEffect(
+                                        hoveredCell == entry.date && !reduceMotion ? 1.12 : 1
+                                    )
+                                    .animation(
+                                        MainPanelMotion.feedback(reduceMotion: reduceMotion),
+                                        value: hoveredCell == entry.date
+                                    )
                                     .contentShape(Rectangle())
                                     .background(GeometryReader { geo in
                                         Color.clear.preference(
@@ -145,7 +164,10 @@ struct HeatmapView: View {
             .onPreferenceChange(TooltipSizeKey.self) { size in
                 tooltipSize = size
             }
-            .animation(.easeOut(duration: 0.1), value: hoveredCell)
+            .animation(
+                MainPanelMotion.feedback(reduceMotion: reduceMotion),
+                value: hoveredCell
+            )
 
             // Month labels
             let monthLabels = buildMonthLabels(columns: columns)
@@ -153,7 +175,7 @@ struct HeatmapView: View {
                 ForEach(monthLabels, id: \.offset) { label in
                     Text(label.name)
                         .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(theme.panelTertiaryForeground)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                         .frame(
@@ -182,11 +204,15 @@ struct HeatmapView: View {
                     isLoading: store.isHourlyTokenUsageLoading
                 )
                     .environmentObject(theme)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .opacity.combined(with: .move(edge: .top))
+                    )
             }
         }
         .padding(.horizontal, hPadding)
-        .padding(.vertical, 12)
+        .padding(.vertical, MainPanelDesign.sectionVerticalPadding)
         .background(
             ZStack {
                 WindowFrameReader { frame in

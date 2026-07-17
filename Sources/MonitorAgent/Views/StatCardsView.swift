@@ -15,8 +15,8 @@ struct StatCardsView: View {
             CacheHitCard(stats: store.stats)
                 .frame(width: StatCardLayout.cacheHitWidth)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, MainPanelDesign.horizontalPadding)
+        .padding(.vertical, MainPanelDesign.sectionVerticalPadding)
     }
 }
 
@@ -34,15 +34,16 @@ enum TokenBreakdownTipLayout {
 }
 
 struct StatCard: View {
+    @EnvironmentObject private var theme: ThemeManager
     let title: String
     let value: String
 
     var body: some View {
         StatCardContainer {
             VStack(spacing: 4) {
-                statCardTitle(title)
+                statCardTitle(title, color: theme.panelSecondaryForeground)
                 Text(value)
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
                     .foregroundStyle(.primary)
@@ -53,6 +54,8 @@ struct StatCard: View {
 }
 
 private struct TokenSummaryCard: View {
+    @EnvironmentObject private var theme: ThemeManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let stats: UsageStats
     @Binding var isDetailPresented: Bool
 
@@ -61,9 +64,9 @@ private struct TokenSummaryCard: View {
             StatCardContainer {
                 ZStack(alignment: .topTrailing) {
                     VStack(spacing: 4) {
-                        statCardTitle("Tokens")
+                        statCardTitle("Tokens", color: theme.panelSecondaryForeground)
                         Text(formatTokenDetail(stats.totalTokens))
-                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                            .font(.system(size: 17, weight: .semibold, design: .rounded))
                             .lineLimit(1)
                             .minimumScaleFactor(0.82)
                             .foregroundStyle(.primary)
@@ -72,7 +75,7 @@ private struct TokenSummaryCard: View {
 
                     Image(systemName: "info.circle")
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(theme.panelTertiaryForeground)
                         .padding(.top, 2)
                 }
             }
@@ -81,11 +84,15 @@ private struct TokenSummaryCard: View {
             if isDetailPresented {
                 TokenBreakdownTip(stats: stats)
                     .offset(y: 56)
-                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .opacity.combined(with: .scale(scale: 0.98, anchor: .top))
+                    )
             }
         }
         .onHover { isHovering in
-            withAnimation(.easeOut(duration: 0.12)) {
+            withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
                 isDetailPresented = isHovering
             }
         }
@@ -159,7 +166,6 @@ private struct TokenBreakdownTip: View {
 }
 
 private struct StatCardContainer<Content: View>: View {
-    @EnvironmentObject var theme: ThemeManager
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -168,19 +174,14 @@ private struct StatCardContainer<Content: View>: View {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
         .frame(height: 54)
-        .background(theme.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(theme.cardBorder, lineWidth: 0.5)
-        )
+        .mainPanelGroupedSurface()
     }
 }
 
-private func statCardTitle(_ title: String) -> some View {
+private func statCardTitle(_ title: String, color: Color) -> some View {
     Text(title)
-        .font(.system(size: 10))
-        .foregroundStyle(.secondary)
+        .font(.system(size: 10, weight: .medium))
+        .foregroundStyle(color)
         .frame(height: StatCardLayout.titleRowHeight, alignment: .center)
 }
 
