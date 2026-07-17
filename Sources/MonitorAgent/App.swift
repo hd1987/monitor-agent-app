@@ -350,20 +350,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             contentRect: NSRect(
                 x: 0,
                 y: 0,
-                width: SettingsWindowLayout.minimumWidth,
-                height: SettingsWindowLayout.minimumHeight
+                width: SettingsWindowLayout.defaultWidth,
+                height: SettingsWindowLayout.defaultHeight
             ),
-            styleMask: [.titled, .closable, .resizable],
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false
         )
         w.title = ""
         w.titlebarAppearsTransparent = true
+        w.titlebarSeparatorStyle = .none
         w.titleVisibility = .hidden
         w.isReleasedWhenClosed = false
         w.level = .normal
         w.hidesOnDeactivate = false
         w.appearance = themeManager.nsAppearance
         w.contentView = hosting
+        w.minSize = NSSize(
+            width: SettingsWindowLayout.minimumWidth,
+            height: SettingsWindowLayout.minimumHeight
+        )
         w.center()
         if keepingMainPanelVisible && panel.isVisible {
             panelPresentationState.suppressNextAutomaticDismissal()

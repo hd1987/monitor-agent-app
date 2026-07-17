@@ -30,20 +30,17 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     }
 }
 
-enum SaveSuccessToastPlacement {
-    static let alignment: Alignment = .top
-    static let edge: Edge = .top
-    static let padding: CGFloat = 16
-}
-
-enum SaveSuccessToastStyle {
-    static let backgroundColorName = "green"
-    static let backgroundColor = Color.green
+enum SaveSuccessIndicatorStyle {
+    static let systemImage = "checkmark.circle.fill"
 }
 
 enum SettingsWindowLayout {
-    static let minimumWidth: CGFloat = 960
-    static let minimumHeight: CGFloat = 680
+    static let defaultWidth: CGFloat = 820
+    static let defaultHeight: CGFloat = 600
+    static let minimumWidth: CGFloat = 760
+    static let minimumHeight: CGFloat = 520
+    static let contentTopPadding: CGFloat = 0
+    static let groupedFormTopPadding: CGFloat = -20
 }
 
 enum UsageDataRebuildCopy {
@@ -61,6 +58,7 @@ enum UsageDataRebuildCopy {
 struct SettingsView: View {
     @EnvironmentObject var themeManager: ThemeManager
     @EnvironmentObject var store: AppStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var initialCategory: SettingsCategory = .general
 
@@ -101,79 +99,30 @@ struct SettingsView: View {
     @State private var saveSuccessMessage: String = ""
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Sidebar
-            VStack(spacing: 2) {
+        NavigationSplitView {
+            List(selection: sidebarSelection) {
                 ForEach(SettingsCategory.allCases) { category in
-                    SidebarItem(
-                        title: category.rawValue,
-                        icon: category.icon,
-                        isSelected: selectedCategory == category
-                    ) {
-                        selectedCategory = category
-                    }
+                    Label(category.rawValue, systemImage: category.icon)
+                        .tag(category)
                 }
-                Spacer()
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 8)
-            .frame(width: 160)
-            .background(Color(nsColor: .windowBackgroundColor).opacity(0.6))
-
-            // Content area
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 190)
+        } detail: {
             VStack(spacing: 0) {
-                // Tab bar for Config / Prompt (outside ScrollView for reliable hit testing)
-                if selectedCategory == .config || selectedCategory == .prompt {
-                    AppSourceTabBar(
-                        selection: selectedCategory == .config ? $configTab : $promptTab
-                    )
-                    .padding(.horizontal, 20)
-                    .padding(.top, 16)
-                }
+                settingsContent
 
-                // Content
-                switch selectedCategory {
-                case .general:
-                    ScrollView {
-                        GeneralSettingsView(
-                            draftTheme: $draftTheme,
-                            draftSyncInterval: $draftSyncInterval,
-                            draftGlobalShortcut: $draftGlobalShortcut,
-                            draftLaunchAtLogin: $draftLaunchAtLogin,
-                            draftClaudeQuotaEnabled: $draftClaudeQuotaEnabled,
-                            draftCodexQuotaEnabled: $draftCodexQuotaEnabled,
-                            draftClaudeExpirationDate: $draftClaudeExpirationDate,
-                            draftCodexExpirationDate: $draftCodexExpirationDate,
-                            draftQuotaRefreshInterval: $draftQuotaRefreshInterval
-                        )
-                    }
-                    .frame(maxWidth: .infinity)
-                case .config:
-                    TabbedFileEditorView(
-                        claudeText: $claudeConfigText,
-                        codexText: $codexConfigText,
-                        claudeExists: claudeConfigExists,
-                        codexExists: codexConfigExists,
-                        claudePath: Self.claudeSettingsPath,
-                        codexPath: Self.codexConfigPath,
-                        selectedTab: $configTab
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                case .prompt:
-                    TabbedFileEditorView(
-                        claudeText: $claudePromptText,
-                        codexText: $codexPromptText,
-                        claudeExists: claudePromptExists,
-                        codexExists: codexPromptExists,
-                        claudePath: Self.claudePromptPath,
-                        codexPath: Self.codexPromptPath,
-                        selectedTab: $promptTab
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-
-                // Cancel / Save buttons
+                Divider()
                 HStack {
+                    if showSaveSuccess {
+                        Label(
+                            saveSuccessMessage,
+                            systemImage: SaveSuccessIndicatorStyle.systemImage
+                        )
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .transition(.opacity)
+                    }
                     Spacer()
                     Button {
                         NSApp.keyWindow?.close()
@@ -194,30 +143,18 @@ struct SettingsView: View {
                 .padding(.vertical, 12)
             }
         }
+        .navigationSplitViewStyle(.balanced)
+        .toolbar(removing: .sidebarToggle)
         .frame(
             minWidth: SettingsWindowLayout.minimumWidth,
             minHeight: SettingsWindowLayout.minimumHeight
         )
-        .overlay(alignment: SaveSuccessToastPlacement.alignment) {
-            if showSaveSuccess {
-                Text(saveSuccessMessage)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(
-                        Capsule()
-                            .fill(SaveSuccessToastStyle.backgroundColor)
-                    )
-                    .padding(.top, SaveSuccessToastPlacement.padding)
-                    .transition(.opacity.combined(with: .move(edge: SaveSuccessToastPlacement.edge)))
-            }
-        }
         .onAppear {
             selectedCategory = initialCategory
             loadCategory(initialCategory)
         }
         .onChange(of: selectedCategory) {
+            showSaveSuccess = false
             loadCategory(selectedCategory)
         }
         .alert("Save Error", isPresented: $showSaveError) {
@@ -232,6 +169,65 @@ struct SettingsView: View {
             }
         } message: {
             Text(selectedCategory.saveConfirmationMessage)
+        }
+    }
+
+    private var sidebarSelection: Binding<SettingsCategory?> {
+        Binding(
+            get: { selectedCategory },
+            set: { category in
+                if let category {
+                    selectedCategory = category
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var settingsContent: some View {
+        switch selectedCategory {
+        case .general:
+            GeneralSettingsView(
+                draftTheme: $draftTheme,
+                draftSyncInterval: $draftSyncInterval,
+                draftGlobalShortcut: $draftGlobalShortcut,
+                draftLaunchAtLogin: $draftLaunchAtLogin,
+                draftClaudeQuotaEnabled: $draftClaudeQuotaEnabled,
+                draftCodexQuotaEnabled: $draftCodexQuotaEnabled,
+                draftClaudeExpirationDate: $draftClaudeExpirationDate,
+                draftCodexExpirationDate: $draftCodexExpirationDate,
+                draftQuotaRefreshInterval: $draftQuotaRefreshInterval
+            )
+        case .config:
+            VStack(spacing: 0) {
+                AppSourceTabBar(selection: $configTab)
+                    .padding(.top, SettingsWindowLayout.contentTopPadding)
+                TabbedFileEditorView(
+                    claudeText: $claudeConfigText,
+                    codexText: $codexConfigText,
+                    claudeExists: claudeConfigExists,
+                    codexExists: codexConfigExists,
+                    claudePath: Self.claudeSettingsPath,
+                    codexPath: Self.codexConfigPath,
+                    selectedTab: $configTab
+                )
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .prompt:
+            VStack(spacing: 0) {
+                AppSourceTabBar(selection: $promptTab)
+                    .padding(.top, SettingsWindowLayout.contentTopPadding)
+                TabbedFileEditorView(
+                    claudeText: $claudePromptText,
+                    codexText: $codexPromptText,
+                    claudeExists: claudePromptExists,
+                    codexExists: codexPromptExists,
+                    claudePath: Self.claudePromptPath,
+                    codexPath: Self.codexPromptPath,
+                    selectedTab: $promptTab
+                )
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -323,16 +319,16 @@ struct SettingsView: View {
             }
         }
 
-        showSaveSuccessToast()
+        showSaveSuccessIndicator()
     }
 
-    private func showSaveSuccessToast() {
+    private func showSaveSuccessIndicator() {
         saveSuccessMessage = selectedCategory.saveSuccessMessage
-        withAnimation(.easeInOut(duration: 0.15)) {
+        withAnimation(UtilityWindowDesign.presentation(reduceMotion: reduceMotion)) {
             showSaveSuccess = true
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            withAnimation(.easeInOut(duration: 0.15)) {
+            withAnimation(UtilityWindowDesign.presentation(reduceMotion: reduceMotion)) {
                 showSaveSuccess = false
             }
         }
@@ -373,38 +369,6 @@ struct SettingsView: View {
     static let codexPromptPath = "~/.codex/AGENTS.md"
 }
 
-// MARK: - Sidebar Item
-
-struct SidebarItem: View {
-    let title: String
-    let icon: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: 14))
-                    .frame(width: 20)
-                Text(title)
-                    .font(.system(size: 13))
-                Spacer()
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
-            )
-            .foregroundColor(isSelected ? .accentColor : .primary)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 // MARK: - General
 
 struct GeneralSettingsView: View {
@@ -422,102 +386,88 @@ struct GeneralSettingsView: View {
     @State private var showUsageDataRebuildSheet = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsRow(
-                title: "Theme",
-                description: "Choose the appearance of the app. System follows your macOS settings."
-            ) {
-                HStack(spacing: 0) {
-                    ForEach(Theme.allCases) { theme in
-                        HStack(spacing: 4) {
-                            Image(systemName: theme.icon)
-                                .font(.system(size: 11))
-                            Text(theme.rawValue)
-                                .font(.system(size: 12))
+        Form {
+            Section {
+                SettingsRow(
+                    title: "Theme",
+                    description: "Choose the appearance of the app. System follows your macOS settings."
+                ) {
+                    Picker("Theme", selection: $draftTheme) {
+                        ForEach(Theme.allCases) { theme in
+                            Label(theme.rawValue, systemImage: theme.icon)
+                                .tag(theme)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 5)
-                                .fill(draftTheme == theme ? Color.accentColor : Color.clear)
-                        )
-                        .foregroundColor(draftTheme == theme ? .white : .secondary)
-                        .contentShape(RoundedRectangle(cornerRadius: 5))
-                        .onTapGesture { draftTheme = theme }
                     }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 240)
                 }
-                .padding(2)
-                .background(
-                    RoundedRectangle(cornerRadius: 7)
-                        .fill(Color(nsColor: .separatorColor).opacity(0.2))
+
+                SettingsRow(
+                    title: "Global Shortcut",
+                    description: "Show or hide the main panel from any app. Requires at least one modifier key."
+                ) {
+                    GlobalShortcutRecorder(shortcut: $draftGlobalShortcut)
+                }
+
+                SettingsRow(
+                    title: "Launch at Login",
+                    description: SyncSettings.shared.canControlLaunchAtLogin
+                        ? "Automatically start MonitorAgent when you log in."
+                        : "Available only when running MonitorAgent from the installed app."
+                ) {
+                    Toggle("", isOn: $draftLaunchAtLogin)
+                        .toggleStyle(.switch)
+                        .disabled(!SyncSettings.shared.canControlLaunchAtLogin)
+                }
+
+                SettingsRow(
+                    title: "Sync Interval",
+                    description: "How often to sync while the panel is open. \"Never\" syncs once when opened."
+                ) {
+                    Picker("", selection: $draftSyncInterval) {
+                        ForEach(SyncInterval.allCases) { interval in
+                            Text(interval.displayName).tag(interval)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 100)
+                }
+            }
+
+            Section(QuotaSettingsCopy.title) {
+                QuotaSettingsGroup(
+                    claudeEnabled: $draftClaudeQuotaEnabled,
+                    codexEnabled: $draftCodexQuotaEnabled,
+                    claudeExpirationDate: $draftClaudeExpirationDate,
+                    codexExpirationDate: $draftCodexExpirationDate,
+                    refreshInterval: $draftQuotaRefreshInterval
                 )
-                .frame(width: 240)
             }
 
-            Divider().padding(.vertical, 4)
-
-            SettingsRow(
-                title: "Global Shortcut",
-                description: "Show or hide the main panel from any app. Requires at least one modifier key."
-            ) {
-                GlobalShortcutRecorder(shortcut: $draftGlobalShortcut)
-            }
-
-            Divider().padding(.vertical, 4)
-
-            SettingsRow(
-                title: "Launch at Login",
-                description: SyncSettings.shared.canControlLaunchAtLogin
-                    ? "Automatically start MonitorAgent when you log in."
-                    : "Available only when running MonitorAgent from the installed app."
-            ) {
-                Toggle("", isOn: $draftLaunchAtLogin)
-                    .toggleStyle(.switch)
-                    .disabled(!SyncSettings.shared.canControlLaunchAtLogin)
-            }
-
-            Divider().padding(.vertical, 4)
-
-            SettingsRow(
-                title: "Sync Interval",
-                description: "How often to sync while the panel is open. \"Never\" syncs once when opened."
-            ) {
-                Picker("", selection: $draftSyncInterval) {
-                    ForEach(SyncInterval.allCases) { interval in
-                        Text(interval.displayName).tag(interval)
+            Section {
+                SettingsRow(
+                    title: "Data",
+                    description: UsageDataRebuildCopy.description
+                ) {
+                    Button {
+                        store.prepareUsageDataRebuild()
+                        showUsageDataRebuildSheet = true
+                    } label: {
+                        Text(UsageDataRebuildCopy.buttonTitle)
+                            .font(.system(size: 12))
+                            .frame(minWidth: 170)
                     }
+                    .disabled(store.isRebuildingUsageData)
                 }
-                .frame(width: 100)
-            }
-
-            Divider().padding(.vertical, 4)
-
-            QuotaSettingsGroup(
-                claudeEnabled: $draftClaudeQuotaEnabled,
-                codexEnabled: $draftCodexQuotaEnabled,
-                claudeExpirationDate: $draftClaudeExpirationDate,
-                codexExpirationDate: $draftCodexExpirationDate,
-                refreshInterval: $draftQuotaRefreshInterval
-            )
-
-            Divider().padding(.vertical, 4)
-
-            SettingsRow(
-                title: "Data",
-                description: UsageDataRebuildCopy.description
-            ) {
-                Button {
-                    store.prepareUsageDataRebuild()
-                    showUsageDataRebuildSheet = true
-                } label: {
-                    Text(UsageDataRebuildCopy.buttonTitle)
-                        .font(.system(size: 12))
-                    .frame(minWidth: 190)
-                }
-                .disabled(store.isRebuildingUsageData)
             }
         }
-        .padding(20)
+        .formStyle(.grouped)
+        .contentMargins(
+            .top,
+            SettingsWindowLayout.groupedFormTopPadding,
+            for: .scrollContent
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(isPresented: $showUsageDataRebuildSheet) {
             UsageDataRebuildSheetView(isPresented: $showUsageDataRebuildSheet)
@@ -551,7 +501,7 @@ struct GlobalShortcutRecorder: View {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(UtilityWindowPressButtonStyle())
                 .help("Clear global shortcut")
                 .accessibilityLabel("Clear global shortcut")
             }
@@ -614,49 +564,37 @@ private struct QuotaSettingsGroup: View {
     @Binding var refreshInterval: QuotaRefreshInterval
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(QuotaSettingsCopy.title)
-                .font(.system(size: 13, weight: .semibold))
-
-            VStack(spacing: 0) {
-                quotaRow(
-                    title: QuotaSettingsCopy.claudeTitle,
-                    description: QuotaSettingsCopy.claudeDescription,
-                    expirationDate: $claudeExpirationDate,
-                    isOn: $claudeEnabled
-                )
-                Divider().padding(.leading, 12)
-                quotaRow(
-                    title: QuotaSettingsCopy.codexTitle,
-                    description: QuotaSettingsCopy.codexDescription,
-                    expirationDate: $codexExpirationDate,
-                    isOn: $codexEnabled
-                )
-                Divider().padding(.leading, 12)
-                HStack(spacing: 16) {
-                    settingLabel(
-                        title: QuotaSettingsCopy.refreshIntervalTitle,
-                        description: QuotaSettingsCopy.refreshIntervalDescription
-                    )
-                    Spacer(minLength: 16)
-                    Picker("", selection: $refreshInterval) {
-                        ForEach(QuotaRefreshInterval.allCases) { interval in
-                            Text(interval.displayName).tag(interval)
-                        }
-                    }
-                    .frame(width: 100)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-            }
-            .background(Color(nsColor: .separatorColor).opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color(nsColor: .separatorColor).opacity(0.35), lineWidth: 0.5)
+        VStack(spacing: 0) {
+            quotaRow(
+                title: QuotaSettingsCopy.claudeTitle,
+                description: QuotaSettingsCopy.claudeDescription,
+                expirationDate: $claudeExpirationDate,
+                isOn: $claudeEnabled
             )
+            Divider()
+            quotaRow(
+                title: QuotaSettingsCopy.codexTitle,
+                description: QuotaSettingsCopy.codexDescription,
+                expirationDate: $codexExpirationDate,
+                isOn: $codexEnabled
+            )
+            Divider()
+            HStack(spacing: 16) {
+                settingLabel(
+                    title: QuotaSettingsCopy.refreshIntervalTitle,
+                    description: QuotaSettingsCopy.refreshIntervalDescription
+                )
+                Spacer(minLength: 16)
+                Picker("Refresh Interval", selection: $refreshInterval) {
+                    ForEach(QuotaRefreshInterval.allCases) { interval in
+                        Text(interval.displayName).tag(interval)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 100)
+            }
+            .padding(.vertical, 8)
         }
-        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -673,8 +611,7 @@ private struct QuotaSettingsGroup: View {
             Toggle("", isOn: isOn)
                 .toggleStyle(.switch)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
     }
 
     private func settingLabel(title: String, description: String) -> some View {
@@ -689,7 +626,6 @@ private struct QuotaSettingsGroup: View {
 }
 
 private struct ExpirationDateControl: View {
-    @EnvironmentObject var theme: ThemeManager
     @Binding var expirationDate: Date?
     @State private var isPickerPresented = false
     @State private var displayedMonth = Calendar.current.startOfDay(for: Date())
@@ -711,13 +647,7 @@ private struct ExpirationDateControl: View {
             .padding(.vertical, 6)
             .frame(width: 120, alignment: .trailing)
         }
-        .buttonStyle(.plain)
-        .background(theme.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(theme.cardBorder, lineWidth: 0.5)
-        )
+        .buttonStyle(.bordered)
         .overlay(alignment: .trailing) {
             Color.clear
                 .frame(width: 1, height: 1)
@@ -745,7 +675,7 @@ private struct ExpirationDateControl: View {
                 }
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
-                .buttonStyle(.plain)
+                .buttonStyle(UtilityWindowPressButtonStyle())
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
@@ -760,7 +690,7 @@ private struct ExpirationDateControl: View {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 11, weight: .semibold))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(UtilityWindowPressButtonStyle())
 
                 Button {
                     displayedMonth = Calendar.current.startOfDay(for: Date())
@@ -770,7 +700,7 @@ private struct ExpirationDateControl: View {
                         .foregroundStyle(.primary)
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(UtilityWindowPressButtonStyle())
 
                 Button {
                     moveDisplayedMonth(by: 1)
@@ -778,7 +708,7 @@ private struct ExpirationDateControl: View {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .semibold))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(UtilityWindowPressButtonStyle())
             }
 
             HStack(spacing: 0) {
@@ -805,10 +735,12 @@ private struct ExpirationDateControl: View {
                                 .foregroundStyle(isSelected(date) ? Color.white : Color.primary)
                                 .frame(maxWidth: .infinity, minHeight: 32)
                                 .background(dayBackground(for: date))
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .clipShape(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                )
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(UtilityWindowPressButtonStyle())
                     } else {
                         Color.clear
                             .frame(maxWidth: .infinity, minHeight: 32)
@@ -888,29 +820,48 @@ struct UsageDataRebuildSheetView: View {
         VStack(alignment: .leading, spacing: 18) {
             header
             content
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .utilityWindowGroupedSurface()
             actions
         }
         .padding(22)
         .frame(width: 430)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    @ViewBuilder
     private var header: some View {
-        if store.isRebuildingUsageData {
-            Label(UsageDataRebuildCopy.runningMessage, systemImage: "arrow.triangle.2.circlepath")
-                .font(.system(size: 15, weight: .semibold))
-        } else if store.usageDataRebuildSummary != nil {
-            Label(UsageDataRebuildCopy.successTitle, systemImage: "checkmark.circle.fill")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.green)
-        } else if store.usageDataRebuildErrorMessage != nil {
-            Label(UsageDataRebuildCopy.failureTitle, systemImage: "exclamationmark.triangle.fill")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.orange)
-        } else {
-            Label(UsageDataRebuildCopy.confirmationTitle, systemImage: "externaldrive.badge.timemachine")
+        HStack(spacing: 12) {
+            Image(systemName: headerIconName)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(headerColor)
+                .frame(width: 34, height: 34)
+                .background(headerColor.opacity(0.12))
+                .clipShape(Circle())
+
+            Text(headerTitle)
                 .font(.system(size: 15, weight: .semibold))
         }
+    }
+
+    private var headerTitle: String {
+        if store.isRebuildingUsageData { return UsageDataRebuildCopy.runningMessage }
+        if store.usageDataRebuildSummary != nil { return UsageDataRebuildCopy.successTitle }
+        if store.usageDataRebuildErrorMessage != nil { return UsageDataRebuildCopy.failureTitle }
+        return UsageDataRebuildCopy.confirmationTitle
+    }
+
+    private var headerIconName: String {
+        if store.isRebuildingUsageData { return "arrow.triangle.2.circlepath" }
+        if store.usageDataRebuildSummary != nil { return "checkmark.circle.fill" }
+        if store.usageDataRebuildErrorMessage != nil { return "exclamationmark.triangle.fill" }
+        return "externaldrive.badge.timemachine"
+    }
+
+    private var headerColor: Color {
+        if store.usageDataRebuildSummary != nil { return .green }
+        if store.usageDataRebuildErrorMessage != nil { return .orange }
+        return .accentColor
     }
 
     @ViewBuilder
@@ -1006,33 +957,18 @@ enum AppSourceTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-/// Full-width segmented tab bar — macOS System Settings style (blue capsule for selected).
 struct AppSourceTabBar: View {
     @Binding var selection: AppSourceTab
 
     var body: some View {
-        HStack(spacing: 2) {
+        Picker("Source", selection: $selection) {
             ForEach(AppSourceTab.allCases) { tab in
-                Text(tab.rawValue)
-                    .font(.system(size: 13, weight: selection == tab ? .medium : .regular))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(selection == tab ? Color.accentColor : Color.clear)
-                    )
-                    .foregroundColor(selection == tab ? .white : .primary)
-                    .contentShape(RoundedRectangle(cornerRadius: 6))
-                    .onTapGesture {
-                        selection = tab
-                    }
+                Text(tab.rawValue).tag(tab)
             }
         }
-        .padding(2)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(nsColor: .separatorColor).opacity(0.15))
-        )
+        .labelsHidden()
+        .pickerStyle(.segmented)
+        .frame(width: 280)
     }
 }
 
@@ -1091,12 +1027,12 @@ struct FileEditorSection: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(8)
                     .background(
-                        RoundedRectangle(cornerRadius: 6)
+                        RoundedRectangle(cornerRadius: UtilityWindowDesign.compactCornerRadius, style: .continuous)
                             .fill(Color(nsColor: .textBackgroundColor))
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: UtilityWindowDesign.compactCornerRadius, style: .continuous)
+                            .stroke(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 0.5)
                     )
             } else {
                 HStack(spacing: 6) {
@@ -1108,10 +1044,7 @@ struct FileEditorSection: View {
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color(nsColor: .controlBackgroundColor))
-                )
+                .utilityWindowGroupedSurface(cornerRadius: UtilityWindowDesign.compactCornerRadius)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1120,27 +1053,24 @@ struct FileEditorSection: View {
 
 // MARK: - Reusable Row
 
-/// macOS Settings style row: title + description on left, control on right.
 struct SettingsRow<Control: View>: View {
     let title: String
     let description: String
     @ViewBuilder let control: () -> Control
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
+        LabeledContent {
+            control()
+        } label: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13, weight: .medium))
                 Text(description)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            control()
-                .frame(alignment: .trailing)
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, 4)
     }
 }

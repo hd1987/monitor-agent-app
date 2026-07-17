@@ -7,6 +7,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 ## [Unreleased]
 
 ### Changed
+- Rebuild Settings with a fixed full-height native macOS sidebar beneath the traffic-light controls, title-free content visually aligned to the first sidebar item including the grouped General form, compact window geometry, standard segmented controls, and quiet inline save feedback; unify About, update-check, and usage-data rebuild surfaces with restrained hierarchy
 - Redesign the main panel with brighter stable popover material, readable inactive-state text, compact aligned header controls with ungrouped date and quieter tool icons, quieter grouped surfaces including Activity detail, immediate press feedback, and reduced-motion/transparency adaptations
 
 ## [0.5.6] - 2026-07-16
