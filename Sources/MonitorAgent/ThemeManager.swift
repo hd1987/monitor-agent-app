@@ -55,16 +55,9 @@ final class ThemeManager: ObservableObject {
 
     // MARK: - Panel Colors (AppKit)
 
-    /// Theme-aware tint layered over the native popover material.
+    /// Opaque semantic window background matching the General detail page.
     var panelBackground: NSColor {
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
-            return isDark
-                ? NSColor(red: 0.11, green: 0.11, blue: 0.118, alpha: 1)
-                : NSColor.white
-        }
-        return isDark
-            ? NSColor(red: 0.08, green: 0.08, blue: 0.09, alpha: 0.82)
-            : NSColor.white.withAlphaComponent(0.88)
+        resolvedSemanticColor(.windowBackgroundColor)
     }
 
     // MARK: - View Colors (SwiftUI)
@@ -83,11 +76,11 @@ final class ThemeManager: ObservableObject {
             : Color.black.opacity(0.12)
     }
 
-    /// Solid grouped content placed on the panel material.
+    /// Theme-aware inset fill matching native General form groups.
     var groupedSurface: Color {
         isDark
-            ? Color.white.opacity(0.075)
-            : Color.black.opacity(0.045)
+            ? Color.white.opacity(MainPanelDesign.darkGroupedSurfaceOpacity)
+            : Color.black.opacity(MainPanelDesign.lightGroupedSurfaceOpacity)
     }
 
     /// Quiet control chrome placed directly on the panel material.
@@ -140,5 +133,14 @@ final class ThemeManager: ObservableObject {
         case .dark: return NSAppearance(named: .darkAqua)
         case .system: return nil
         }
+    }
+
+    private func resolvedSemanticColor(_ color: NSColor) -> NSColor {
+        let appearance = nsAppearance ?? NSApp.effectiveAppearance
+        var resolvedColor = color
+        appearance.performAsCurrentDrawingAppearance {
+            resolvedColor = color.usingColorSpace(.deviceRGB) ?? color
+        }
+        return resolvedColor
     }
 }
