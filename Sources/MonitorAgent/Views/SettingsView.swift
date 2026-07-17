@@ -112,7 +112,6 @@ struct SettingsView: View {
             VStack(spacing: 0) {
                 settingsContent
 
-                Divider()
                 HStack {
                     if showSaveSuccess {
                         Label(
