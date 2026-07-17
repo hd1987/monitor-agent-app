@@ -39,6 +39,7 @@ enum SettingsWindowLayout {
     static let defaultHeight: CGFloat = 600
     static let minimumWidth: CGFloat = 760
     static let minimumHeight: CGFloat = 520
+    static let sidebarVisibility: NavigationSplitViewVisibility = .all
     static let contentTopPadding: CGFloat = 0
     static let groupedFormTopPadding: CGFloat = -20
 }
@@ -99,7 +100,9 @@ struct SettingsView: View {
     @State private var saveSuccessMessage: String = ""
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(
+            columnVisibility: .constant(SettingsWindowLayout.sidebarVisibility)
+        ) {
             List(selection: sidebarSelection) {
                 ForEach(SettingsCategory.allCases) { category in
                     Label(category.rawValue, systemImage: category.icon)
@@ -143,7 +146,6 @@ struct SettingsView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
-        .toolbar(removing: .sidebarToggle)
         .frame(
             minWidth: SettingsWindowLayout.minimumWidth,
             minHeight: SettingsWindowLayout.minimumHeight

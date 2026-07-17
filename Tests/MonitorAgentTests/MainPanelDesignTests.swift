@@ -6,4 +6,8 @@ final class MainPanelDesignTests: XCTestCase {
         XCTAssertEqual(MainPanelDesign.lightGroupedSurfaceOpacity, 0.032)
         XCTAssertEqual(MainPanelDesign.darkGroupedSurfaceOpacity, 0.075)
     }
+
+    func testSelectedHeaderControlsUseProminentActivityBlue() {
+        XCTAssertEqual(MainPanelSelectionPalette.tabBackgroundOpacity, 0.38)
+    }
 }

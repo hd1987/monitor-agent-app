@@ -8,8 +8,13 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         XCTAssertEqual(SettingsWindowLayout.defaultHeight, 600)
         XCTAssertEqual(SettingsWindowLayout.minimumWidth, 760)
         XCTAssertEqual(SettingsWindowLayout.minimumHeight, 520)
+        XCTAssertEqual(SettingsWindowLayout.sidebarVisibility, .all)
         XCTAssertEqual(SettingsWindowLayout.contentTopPadding, 0)
         XCTAssertEqual(SettingsWindowLayout.groupedFormTopPadding, -20)
+        XCTAssertEqual(
+            SettingsWindowToolbar.sidebarToggleIdentifier.rawValue,
+            "com.apple.SwiftUI.navigationSplitView.toggleSidebar"
+        )
     }
 
     func testSaveConfirmationContentMatchesEachSettingsCategory() {

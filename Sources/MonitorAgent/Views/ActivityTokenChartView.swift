@@ -1,6 +1,13 @@
 import Charts
 import SwiftUI
 
+enum ActivityTokenPalette {
+    static let input: Color = .blue
+    static let output: Color = .green
+    static let cacheRead: Color = .orange
+    static let cacheCreation: Color = .purple
+}
+
 struct ActivityTokenChartView: View {
     @EnvironmentObject var theme: ThemeManager
     let date: String
@@ -11,10 +18,10 @@ struct ActivityTokenChartView: View {
 
     private var metricStyles: [TokenMetricStyle] {
         [
-            TokenMetricStyle(name: "Input Tokens", color: .blue),
-            TokenMetricStyle(name: "Output Tokens", color: .green),
-            TokenMetricStyle(name: "Cache Read", color: .orange),
-            TokenMetricStyle(name: "Cache Creation", color: .purple),
+            TokenMetricStyle(name: "Input Tokens", color: ActivityTokenPalette.input),
+            TokenMetricStyle(name: "Output Tokens", color: ActivityTokenPalette.output),
+            TokenMetricStyle(name: "Cache Read", color: ActivityTokenPalette.cacheRead),
+            TokenMetricStyle(name: "Cache Creation", color: ActivityTokenPalette.cacheCreation),
         ]
     }
 
@@ -60,10 +67,10 @@ struct ActivityTokenChartView: View {
                 .foregroundStyle(by: .value("Metric", point.metric))
             }
             .chartForegroundStyleScale([
-                "Input Tokens": Color.blue,
-                "Output Tokens": Color.green,
-                "Cache Read": Color.orange,
-                "Cache Creation": Color.purple,
+                "Input Tokens": ActivityTokenPalette.input,
+                "Output Tokens": ActivityTokenPalette.output,
+                "Cache Read": ActivityTokenPalette.cacheRead,
+                "Cache Creation": ActivityTokenPalette.cacheCreation,
             ])
             .chartXScale(domain: 0...23)
             .chartYScale(domain: 0...maxValue)
@@ -238,10 +245,10 @@ struct ActivityTokenChartView: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(theme.tooltipForeground)
             requestRow(value: item.requestCount)
-            tokenRow(label: "Input", color: .blue, value: item.inputTokens)
-            tokenRow(label: "Output", color: .green, value: item.outputTokens)
-            tokenRow(label: "Cache", color: .orange, value: item.cacheReadTokens)
-            tokenRow(label: "Created", color: .purple, value: item.cacheCreationTokens)
+            tokenRow(label: "Input", color: ActivityTokenPalette.input, value: item.inputTokens)
+            tokenRow(label: "Output", color: ActivityTokenPalette.output, value: item.outputTokens)
+            tokenRow(label: "Cache", color: ActivityTokenPalette.cacheRead, value: item.cacheReadTokens)
+            tokenRow(label: "Created", color: ActivityTokenPalette.cacheCreation, value: item.cacheCreationTokens)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)

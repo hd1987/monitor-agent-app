@@ -8,11 +8,15 @@ enum MainPanelDesign {
     static let headerControlHeight: CGFloat = 28
     static let headerControlItemHeight: CGFloat = 24
     static let headerToolOpacity = 0.62
-    static let highlightedHeaderToolOpacity = 0.48
     static let lightGroupedSurfaceOpacity = 0.032
     static let darkGroupedSurfaceOpacity = 0.075
     static let horizontalPadding: CGFloat = 16
     static let sectionVerticalPadding: CGFloat = 10
+}
+
+enum MainPanelSelectionPalette {
+    static let accent = ActivityTokenPalette.input
+    static let tabBackgroundOpacity = 0.38
 }
 
 enum MainPanelMotion {

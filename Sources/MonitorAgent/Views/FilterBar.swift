@@ -45,13 +45,14 @@ struct FilterBar: View {
                     } label: {
                         Text(filter.rawValue)
                             .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.primary)
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 10)
                             .frame(height: MainPanelDesign.headerControlItemHeight)
                             .background(
                                 store.appFilter == filter
-                                    ? Color.accentColor.opacity(0.18)
+                                    ? theme.selectedControlSurface
                                     : Color.clear
                             )
                             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
@@ -90,9 +91,7 @@ struct FilterBar: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(
                             panelPresentationState.isPinHighlighted
-                                ? Color.accentColor.opacity(
-                                    MainPanelDesign.highlightedHeaderToolOpacity
-                                )
+                                ? theme.selectedControlAccent
                                 : headerToolForeground
                         )
                         .rotationEffect(

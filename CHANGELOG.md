@@ -6,6 +6,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Show quota remaining percentages in orange below 40% and red below 10%, using the same green, orange, and red palette across quota cards and tips
+- Show the selected main-panel app filter with a restrained Activity-blue tint and primary text while preserving the active Pin color
+
+### Fixed
+- Keep the Settings sidebar visible and remove its redundant title-bar toggle button
+
 ## [0.5.8] - 2026-07-17
 
 ### Changed
