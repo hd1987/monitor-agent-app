@@ -241,7 +241,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func applyTheme() {
         panel.backgroundLayer?.backgroundColor = themeManager.panelBackground.cgColor
-        panel.backgroundLayer?.borderColor = themeManager.panelBorder.cgColor
         panel.appearance = themeManager.nsAppearance
 
         // Update already-open windows
@@ -264,7 +263,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let buttonRect = button.convert(button.bounds, to: nil)
         let screenRect = buttonWindow.convertToScreen(buttonRect)
 
-        let panelSize = panel.contentView?.fittingSize ?? NSSize(width: 620, height: 400)
+        let panelSize = panel.contentView?.fittingSize
+            ?? NSSize(width: MainPanelDesign.width, height: 400)
         panel.setContentSize(panelSize)
 
         if panelPresentationState.hasCustomPosition {
@@ -350,20 +350,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             contentRect: NSRect(
                 x: 0,
                 y: 0,
-                width: SettingsWindowLayout.minimumWidth,
-                height: SettingsWindowLayout.minimumHeight
+                width: SettingsWindowLayout.defaultWidth,
+                height: SettingsWindowLayout.defaultHeight
             ),
-            styleMask: [.titled, .closable, .resizable],
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false
         )
         w.title = ""
         w.titlebarAppearsTransparent = true
+        w.titlebarSeparatorStyle = .none
         w.titleVisibility = .hidden
         w.isReleasedWhenClosed = false
         w.level = .normal
         w.hidesOnDeactivate = false
         w.appearance = themeManager.nsAppearance
         w.contentView = hosting
+        w.minSize = NSSize(
+            width: SettingsWindowLayout.minimumWidth,
+            height: SettingsWindowLayout.minimumHeight
+        )
         w.center()
         if keepingMainPanelVisible && panel.isVisible {
             panelPresentationState.suppressNextAutomaticDismissal()
@@ -449,7 +454,7 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
 
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 400),
+            contentRect: NSRect(x: 0, y: 0, width: MainPanelDesign.width, height: 400),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -464,26 +469,44 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         isMovableByWindowBackground = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
-        let bg = NSView(frame: .zero)
+        let bg = NSVisualEffectView(frame: .zero)
+        bg.material = .popover
+        bg.blendingMode = .behindWindow
+        bg.state = .active
         bg.wantsLayer = true
-        bg.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.98).cgColor
-        bg.layer?.cornerRadius = 12
+        bg.layer?.backgroundColor = NSColor.clear.cgColor
+        bg.layer?.cornerRadius = MainPanelDesign.cornerRadius
+        bg.layer?.cornerCurve = .continuous
         bg.layer?.masksToBounds = true
         bg.translatesAutoresizingMaskIntoConstraints = false
-        backgroundLayer = bg.layer
+
+        let tint = NSView(frame: .zero)
+        tint.wantsLayer = true
+        tint.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.88).cgColor
+        tint.layer?.cornerRadius = MainPanelDesign.cornerRadius
+        tint.layer?.cornerCurve = .continuous
+        tint.layer?.masksToBounds = true
+        tint.translatesAutoresizingMaskIntoConstraints = false
+        backgroundLayer = tint.layer
 
         let wrapper = NSView(frame: .zero)
         wrapper.wantsLayer = true
-        wrapper.layer?.cornerRadius = 12
+        wrapper.layer?.cornerRadius = MainPanelDesign.cornerRadius
+        wrapper.layer?.cornerCurve = .continuous
         wrapper.layer?.masksToBounds = true
         wrapper.translatesAutoresizingMaskIntoConstraints = false
 
         wrapper.addSubview(bg)
+        wrapper.addSubview(tint)
         NSLayoutConstraint.activate([
             bg.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
             bg.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
             bg.topAnchor.constraint(equalTo: wrapper.topAnchor),
             bg.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
+            tint.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+            tint.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
+            tint.topAnchor.constraint(equalTo: wrapper.topAnchor),
+            tint.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
         ])
 
         self.contentView = wrapper

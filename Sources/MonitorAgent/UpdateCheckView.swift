@@ -136,12 +136,14 @@ struct UpdateCheckView: View {
     let perform: (UpdateCheckDialogAction) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .center, spacing: 12) {
                 Image(systemName: state.iconName)
-                    .font(.system(size: 24))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(iconColor)
-                    .frame(width: 30)
+                    .frame(width: 38, height: 38)
+                    .background(iconColor.opacity(0.12))
+                    .clipShape(Circle())
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(state.title)
@@ -159,6 +161,10 @@ struct UpdateCheckView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .utilityWindowGroupedSurface()
             }
 
             progressView
@@ -175,13 +181,19 @@ struct UpdateCheckView: View {
                     }
                     .frame(height: 118)
                     .padding(10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color(nsColor: .textBackgroundColor))
+                    .background(Color(nsColor: .textBackgroundColor).opacity(0.72))
+                    .clipShape(
+                        RoundedRectangle(
+                            cornerRadius: UtilityWindowDesign.compactCornerRadius,
+                            style: .continuous
+                        )
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                        RoundedRectangle(
+                            cornerRadius: UtilityWindowDesign.compactCornerRadius,
+                            style: .continuous
+                        )
+                        .stroke(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 0.5)
                     )
                 }
             }
@@ -212,6 +224,7 @@ struct UpdateCheckView: View {
         }
         .padding(22)
         .frame(width: 460)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     @ViewBuilder

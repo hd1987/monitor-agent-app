@@ -4,59 +4,55 @@ struct AboutView: View {
     private let repoURL = "https://github.com/hd1987/monitor-agent-app"
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer().frame(height: 32)
-
-            // App icon — use NSApp icon (reads AppIcon.icns from .app bundle)
+        VStack(spacing: 18) {
             Image(nsImage: NSApplication.shared.applicationIconImage)
                 .resizable()
                 .interpolation(.high)
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 128, height: 128)
+                .frame(width: 96, height: 96)
 
-            Spacer().frame(height: 20)
+            VStack(spacing: 6) {
+                Text("MonitorAgent")
+                    .font(.system(size: 22, weight: .bold))
 
-            Text("MonitorAgent")
-                .font(.system(size: 22, weight: .bold))
-
-            Spacer().frame(height: 6)
-
-            Text("Usage statistics for Claude Code\nand Codex in your menu bar.")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .lineSpacing(2)
-
-            Spacer().frame(height: 24)
+                Text("Usage statistics for Claude Code and Codex in your menu bar.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(2)
+                    .frame(maxWidth: 250)
+            }
 
             VStack(spacing: 6) {
                 Text("Version: \(AppVersion.versionWithCommit)")
-                    .font(.system(size: 13))
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
 
                 if let releaseDate = AppVersion.releaseDate {
                     Text("Released \(releaseDate)")
-                        .font(.system(size: 12))
+                        .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .utilityWindowGroupedSurface()
 
-            Spacer().frame(height: 24)
-
-            // GitHub button
             Button {
                 if let url = URL(string: repoURL) {
                     NSWorkspace.shared.open(url)
                 }
             } label: {
-                Text("GitHub")
+                Label("GitHub", systemImage: "arrow.up.right")
                     .font(.system(size: 13, weight: .medium))
-                    .frame(width: 80, height: 30)
+                    .frame(minWidth: 90, minHeight: 28)
             }
             .buttonStyle(.bordered)
-
-            Spacer().frame(height: 28)
         }
-        .frame(width: 300)
+        .padding(.horizontal, 28)
+        .padding(.vertical, 26)
+        .frame(width: 320)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 

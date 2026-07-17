@@ -4,6 +4,7 @@ struct FilterBar: View {
     @EnvironmentObject var store: AppStore
     @EnvironmentObject var panelPresentationState: PanelPresentationState
     @EnvironmentObject var theme: ThemeManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let onOpenGeneralSettings: () -> Void
     let onResetPanelPosition: () -> Void
     let onAppFilterFrameChange: (CGRect) -> Void
@@ -20,12 +21,12 @@ struct FilterBar: View {
 
             HStack(spacing: 0) {
                 PanelDragArea()
-                    .frame(width: 16, height: 28)
+                    .frame(width: 16, height: MainPanelDesign.headerControlHeight)
 
                 headerContent
 
                 PanelDragArea()
-                    .frame(width: 16, height: 28)
+                    .frame(width: 16, height: MainPanelDesign.headerControlHeight)
             }
 
             PanelDragArea()
@@ -43,27 +44,29 @@ struct FilterBar: View {
                         store.appFilter = filter
                     } label: {
                         Text(filter.rawValue)
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.system(size: 11, weight: .semibold))
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
+                            .frame(height: MainPanelDesign.headerControlItemHeight)
                             .background(
                                 store.appFilter == filter
-                                    ? Color.accentColor.opacity(0.25)
+                                    ? Color.accentColor.opacity(0.18)
                                     : Color.clear
                             )
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(MainPanelPressButtonStyle())
                 }
             }
             .padding(2)
-            .background(theme.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(theme.cardBorder, lineWidth: 0.5)
+            .frame(height: MainPanelDesign.headerControlHeight)
+            .background(theme.controlSurface)
+            .clipShape(
+                RoundedRectangle(
+                    cornerRadius: MainPanelDesign.controlCornerRadius,
+                    style: .continuous
+                )
             )
             .overlay(
                 WindowFrameReader { frame in
@@ -74,9 +77,12 @@ struct FilterBar: View {
             .layoutPriority(1)
 
             PanelDragArea()
-                .frame(maxWidth: .infinity, maxHeight: 28)
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: MainPanelDesign.headerControlHeight
+                )
 
-            HStack(spacing: 4) {
+            HStack(spacing: 0) {
                 Button {
                     panelPresentationState.togglePin()
                 } label: {
@@ -84,14 +90,23 @@ struct FilterBar: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(
                             panelPresentationState.isPinHighlighted
-                                ? Color.accentColor
-                                : Color.secondary.opacity(0.35)
+                                ? Color.accentColor.opacity(
+                                    MainPanelDesign.highlightedHeaderToolOpacity
+                                )
+                                : headerToolForeground
                         )
-                        .rotationEffect(panelPresentationState.isPinned ? .zero : .degrees(45))
-                        .frame(width: 28, height: 28)
+                        .rotationEffect(
+                            panelPresentationState.isPinned || reduceMotion
+                                ? .zero
+                                : .degrees(45)
+                        )
+                        .frame(
+                            width: MainPanelDesign.headerControlItemHeight,
+                            height: MainPanelDesign.headerControlItemHeight
+                        )
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(MainPanelPressButtonStyle())
                 .help(panelPresentationState.isPinned ? "Unpin Panel" : "Keep Panel Open")
                 .accessibilityLabel(panelPresentationState.isPinned ? "Unpin panel" : "Keep panel open")
 
@@ -100,11 +115,14 @@ struct FilterBar: View {
                 } label: {
                     Image(systemName: "scope")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color.secondary.opacity(0.35))
-                        .frame(width: 28, height: 28)
+                        .foregroundStyle(headerToolForeground)
+                        .frame(
+                            width: MainPanelDesign.headerControlItemHeight,
+                            height: MainPanelDesign.headerControlItemHeight
+                        )
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(MainPanelPressButtonStyle())
                 .help("Reset Panel Position")
                 .accessibilityLabel("Reset panel position")
 
@@ -113,14 +131,19 @@ struct FilterBar: View {
                 } label: {
                     Image(systemName: "gearshape")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color.secondary.opacity(0.35))
-                        .frame(width: 28, height: 28)
+                        .foregroundStyle(headerToolForeground)
+                        .frame(
+                            width: MainPanelDesign.headerControlItemHeight,
+                            height: MainPanelDesign.headerControlItemHeight
+                        )
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(MainPanelPressButtonStyle())
                 .help("Open General Settings")
                 .accessibilityLabel("Open General settings")
             }
+            .padding(2)
+            .frame(height: MainPanelDesign.headerControlHeight)
 
             Button {
                 syncCalendarSelection(from: store.timeRange)
@@ -135,12 +158,13 @@ struct FilterBar: View {
                 }
                 .foregroundStyle(.primary)
                 .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .frame(width: 120, alignment: .trailing)
+                .frame(
+                    width: 120,
+                    height: MainPanelDesign.headerControlHeight,
+                    alignment: .trailing
+                )
             }
-            .buttonStyle(.plain)
-            .background(theme.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .buttonStyle(MainPanelPressButtonStyle())
             .overlay(alignment: .trailing) {
                 Color.clear
                     .frame(width: 1, height: 1)
@@ -154,6 +178,10 @@ struct FilterBar: View {
                     }
             }
         }
+    }
+
+    private var headerToolForeground: Color {
+        theme.panelTertiaryForeground.opacity(MainPanelDesign.headerToolOpacity)
     }
 
     private var timeRangePopover: some View {
@@ -187,15 +215,11 @@ struct FilterBar: View {
                 .background(
                     store.timeRange == range
                         ? Color.accentColor
-                        : theme.cardBackground
+                        : theme.controlSurface
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(theme.cardBorder, lineWidth: 0.5)
-                )
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(MainPanelPressButtonStyle())
     }
 
     private var calendarPicker: some View {
@@ -207,7 +231,7 @@ struct FilterBar: View {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 11, weight: .semibold))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(MainPanelPressButtonStyle())
 
                 Button {
                     displayedMonth = Calendar.current.startOfDay(for: Date())
@@ -217,7 +241,7 @@ struct FilterBar: View {
                         .foregroundStyle(.primary)
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(MainPanelPressButtonStyle())
 
                 Button {
                     moveDisplayedMonth(by: 1)
@@ -225,14 +249,14 @@ struct FilterBar: View {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .semibold))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(MainPanelPressButtonStyle())
             }
 
             HStack(spacing: 0) {
                 ForEach(shortWeekdaySymbols, id: \.self) { symbol in
                     Text(symbol)
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.panelSecondaryForeground)
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -248,10 +272,10 @@ struct FilterBar: View {
                                 .foregroundStyle(dayTextColor(for: date))
                                 .frame(maxWidth: .infinity, minHeight: 32)
                                 .background(dayBackground(for: date))
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(MainPanelPressButtonStyle())
                     } else {
                         Color.clear
                             .frame(maxWidth: .infinity, minHeight: 32)

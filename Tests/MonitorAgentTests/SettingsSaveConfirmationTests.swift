@@ -3,9 +3,13 @@ import SwiftUI
 @testable import MonitorAgent
 
 final class SettingsSaveConfirmationTests: XCTestCase {
-    func testSettingsWindowUsesExpandedMinimumSize() {
-        XCTAssertEqual(SettingsWindowLayout.minimumWidth, 960)
-        XCTAssertEqual(SettingsWindowLayout.minimumHeight, 680)
+    func testSettingsWindowUsesCompactNativeSize() {
+        XCTAssertEqual(SettingsWindowLayout.defaultWidth, 820)
+        XCTAssertEqual(SettingsWindowLayout.defaultHeight, 600)
+        XCTAssertEqual(SettingsWindowLayout.minimumWidth, 760)
+        XCTAssertEqual(SettingsWindowLayout.minimumHeight, 520)
+        XCTAssertEqual(SettingsWindowLayout.contentTopPadding, 0)
+        XCTAssertEqual(SettingsWindowLayout.groupedFormTopPadding, -20)
     }
 
     func testSaveConfirmationContentMatchesEachSettingsCategory() {
@@ -24,12 +28,8 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         XCTAssertEqual(SettingsCategory.prompt.saveSuccessMessage, "Prompt settings saved.")
     }
 
-    func testSaveSuccessToastUsesTopPlacement() {
-        XCTAssertEqual(SaveSuccessToastPlacement.edge, .top)
-    }
-
-    func testSaveSuccessToastUsesGreenBackground() {
-        XCTAssertEqual(SaveSuccessToastStyle.backgroundColorName, "green")
+    func testSaveSuccessUsesInlineCheckmarkIndicator() {
+        XCTAssertEqual(SaveSuccessIndicatorStyle.systemImage, "checkmark.circle.fill")
     }
 
     func testSyncIntervalOptionsMatchGeneralSettingsMenu() {

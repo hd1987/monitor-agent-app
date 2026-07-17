@@ -65,6 +65,7 @@ enum ModelColorResolver {
 
 struct ModelDistributionView: View {
     @EnvironmentObject var store: AppStore
+    @EnvironmentObject private var theme: ThemeManager
 
     private var totalRequests: Int {
         store.modelDistribution.reduce(0) { $0 + $1.requests }
@@ -100,8 +101,7 @@ struct ModelDistributionView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Models")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
+                .mainPanelSectionTitle()
 
             // Stacked bar
             if totalRequests > 0 {
@@ -135,7 +135,7 @@ struct ModelDistributionView: View {
                             .frame(width: 6, height: 6)
                         Text(shortName(model.model))
                             .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.panelSecondaryForeground)
                         Text(formatCount(model.requests))
                             .font(.system(size: 10, weight: .medium, design: .rounded))
                             .lineLimit(1)
@@ -145,7 +145,7 @@ struct ModelDistributionView: View {
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, MainPanelDesign.horizontalPadding)
+        .padding(.vertical, MainPanelDesign.sectionVerticalPadding)
     }
 }

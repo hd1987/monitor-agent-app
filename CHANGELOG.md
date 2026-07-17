@@ -6,6 +6,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-07-17
+
+### Changed
+- Remove the footer separator from the General, Config, and Prompt settings pages
+- Rebuild Settings with a fixed full-height native macOS sidebar beneath the traffic-light controls, title-free content visually aligned to the first sidebar item including the grouped General form, compact window geometry, standard segmented controls, and quiet inline save feedback; unify About, update-check, and usage-data rebuild surfaces with restrained hierarchy
+- Redesign the main panel with General-aligned opaque window and darker grouped backgrounds including Activity detail, readable inactive-state text, compact aligned header controls with ungrouped date and quieter tool icons, immediate press feedback, and reduced-motion adaptations
+
 ## [0.5.6] - 2026-07-16
 
 ### Changed

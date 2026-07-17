@@ -55,17 +55,9 @@ final class ThemeManager: ObservableObject {
 
     // MARK: - Panel Colors (AppKit)
 
-    /// Dark: #1c1c1e (macOS native dark background)
+    /// Opaque semantic window background matching the General detail page.
     var panelBackground: NSColor {
-        isDark
-            ? NSColor(red: 0.11, green: 0.11, blue: 0.118, alpha: 0.98)
-            : NSColor.white.withAlphaComponent(0.98)
-    }
-
-    var panelBorder: NSColor {
-        isDark
-            ? NSColor.white.withAlphaComponent(0.08)
-            : NSColor.black.withAlphaComponent(0.20)
+        resolvedSemanticColor(.windowBackgroundColor)
     }
 
     // MARK: - View Colors (SwiftUI)
@@ -82,6 +74,34 @@ final class ThemeManager: ObservableObject {
         isDark
             ? Color.white.opacity(0.1)
             : Color.black.opacity(0.12)
+    }
+
+    /// Theme-aware inset fill matching native General form groups.
+    var groupedSurface: Color {
+        isDark
+            ? Color.white.opacity(MainPanelDesign.darkGroupedSurfaceOpacity)
+            : Color.black.opacity(MainPanelDesign.lightGroupedSurfaceOpacity)
+    }
+
+    /// Quiet control chrome placed directly on the panel material.
+    var controlSurface: Color {
+        isDark
+            ? Color.white.opacity(0.09)
+            : Color.black.opacity(0.035)
+    }
+
+    /// Stable label contrast that does not fade when the panel loses focus.
+    var panelSecondaryForeground: Color {
+        isDark
+            ? Color.white.opacity(0.72)
+            : Color.black.opacity(0.62)
+    }
+
+    /// Lower-emphasis panel text that remains legible over material.
+    var panelTertiaryForeground: Color {
+        isDark
+            ? Color.white.opacity(0.54)
+            : Color.black.opacity(0.48)
     }
 
     /// Dark: subtle light squares on dark grid
@@ -106,10 +126,6 @@ final class ThemeManager: ObservableObject {
         isDark ? .white.opacity(0.9) : .white
     }
 
-    var dividerOpacity: Double {
-        isDark ? 0.1 : 0.2
-    }
-
     /// NSAppearance matching the current theme — use on NSWindow.appearance
     var nsAppearance: NSAppearance? {
         switch theme {
@@ -117,5 +133,14 @@ final class ThemeManager: ObservableObject {
         case .dark: return NSAppearance(named: .darkAqua)
         case .system: return nil
         }
+    }
+
+    private func resolvedSemanticColor(_ color: NSColor) -> NSColor {
+        let appearance = nsAppearance ?? NSApp.effectiveAppearance
+        var resolvedColor = color
+        appearance.performAsCurrentDrawingAppearance {
+            resolvedColor = color.usingColorSpace(.deviceRGB) ?? color
+        }
+        return resolvedColor
     }
 }

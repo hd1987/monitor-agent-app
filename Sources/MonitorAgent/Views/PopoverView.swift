@@ -17,17 +17,19 @@ struct PopoverView: View {
                     appFilterFrameInWindow = frame
                 }
             )
-            Divider().opacity(theme.dividerOpacity)
             StatCardsView(isTokenBreakdownPresented: $isTokenBreakdownPresented)
-            Divider().opacity(theme.dividerOpacity).padding(.horizontal, 16)
             HeatmapView(appFilterFrameInWindow: appFilterFrameInWindow)
                 .allowsHitTesting(!isTokenBreakdownPresented)
-            Divider().opacity(theme.dividerOpacity).padding(.horizontal, 16)
             ModelDistributionView()
             SubscriptionQuotaView()
         }
-        .frame(width: 620)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .frame(width: MainPanelDesign.width)
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: MainPanelDesign.cornerRadius,
+                style: .continuous
+            )
+        )
         .preferredColorScheme(theme.colorScheme)
     }
 }
