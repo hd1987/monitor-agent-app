@@ -32,14 +32,15 @@ Triggered by push to `main`. The workflow (`.github/workflows/release.yml`):
 
 1. Finds the latest tag reachable from `main`
 2. Skips if no tag is reachable or the GitHub Release already exists
-3. Selects Xcode 16.4 on the macOS 15 runner
-4. Runs `swift build -c release`
-5. Packages `MonitorAgent.app` with `Info.plist` values derived from the tag and changelog (`CFBundleShortVersionString`, `CFBundleVersion`, `MonitorAgentGitCommit`, `MonitorAgentReleaseDate`, `LSUIElement=true`)
-6. Copies `AppIcon.icns` into the app bundle
-7. Ad-hoc code signs the app (`codesign -s -`)
-8. Compresses to `MonitorAgent.zip` via `ditto`
-9. Extracts release notes from `CHANGELOG.md`
-10. Creates a GitHub Release with `MonitorAgent.zip` attached
+3. Selects Xcode 26.6 on the macOS 26 runner
+4. Verifies the selected macOS SDK is 26.5, matching local development builds
+5. Runs `swift build -c release`
+6. Packages `MonitorAgent.app` with `Info.plist` values derived from the tag and changelog (`CFBundleShortVersionString`, `CFBundleVersion`, `MonitorAgentGitCommit`, `MonitorAgentReleaseDate`, `LSUIElement=true`)
+7. Copies `AppIcon.icns` into the app bundle
+8. Ad-hoc code signs the app (`codesign -s -`)
+9. Compresses to `MonitorAgent.zip` via `ditto`
+10. Extracts release notes from `CHANGELOG.md`
+11. Creates a GitHub Release with `MonitorAgent.zip` attached
 
 ### Result
 
@@ -83,3 +84,5 @@ swift build
 swift build -c release
 git diff --check
 ```
+
+The release workflow additionally asserts Xcode 26.6 and macOS SDK 26.5 so native SwiftUI controls use the same linked SDK behavior as local development.
