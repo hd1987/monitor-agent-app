@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.5.9] - 2026-07-18
+
 ### Changed
 - Match the About and update-check window colors to General across the full transparent title-bar area
 - Show quota remaining percentages in orange below 40% and red below 10%, using the same green, orange, and red palette across quota cards and tips
