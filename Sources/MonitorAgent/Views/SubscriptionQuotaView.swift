@@ -262,17 +262,15 @@ private struct SubscriptionQuotaCard: View {
     }
 
     private func quotaColor(_ percent: Double) -> Color {
-        if percent < 20 { return .red }
-        if percent < 50 { return .orange }
-        return .green
+        QuotaStatusPalette.color(for: QuotaRemainingUrgency.level(for: percent))
     }
 
     private var planColor: Color {
         guard let expirationDate else { return theme.panelSecondaryForeground }
         switch SubscriptionExpiration.urgency(for: expirationDate) {
         case .standard: return theme.panelSecondaryForeground
-        case .warning: return .orange
-        case .critical: return .red
+        case .warning: return QuotaStatusPalette.warning
+        case .critical: return QuotaStatusPalette.critical
         }
     }
 
@@ -281,11 +279,9 @@ private struct SubscriptionQuotaCard: View {
     }
 
     private func resetCreditCountColor(expirations: [Date]) -> Color {
-        switch ResetCreditExpiration.urgency(in: expirations) {
-        case nil, .standard: return .green
-        case .warning: return .orange
-        case .critical: return .red
-        }
+        QuotaStatusPalette.color(
+            for: ResetCreditExpiration.urgency(in: expirations) ?? .standard
+        )
     }
 
 }
@@ -337,11 +333,7 @@ private struct SubscriptionExpirationTip: View {
     }
 
     private var statusColor: Color {
-        switch SubscriptionExpiration.urgency(for: expirationDate) {
-        case .standard: return .green
-        case .warning: return .orange
-        case .critical: return .red
-        }
+        QuotaStatusPalette.color(for: SubscriptionExpiration.urgency(for: expirationDate))
     }
 }
 
@@ -403,12 +395,10 @@ private struct ResetCreditsTip: View {
     }
 
     private func expirationColor(at index: Int) -> Color {
-        guard expirations.indices.contains(index) else { return .green }
-        switch ResetCreditExpiration.urgency(for: expirations[index]) {
-        case .standard: return .green
-        case .warning: return .orange
-        case .critical: return .red
-        }
+        guard expirations.indices.contains(index) else { return QuotaStatusPalette.healthy }
+        return QuotaStatusPalette.color(
+            for: ResetCreditExpiration.urgency(for: expirations[index])
+        )
     }
 }
 
@@ -483,6 +473,40 @@ enum ResetCreditExpirationUrgency: Equatable {
     case standard
     case warning
     case critical
+}
+
+enum QuotaRemainingUrgency: Equatable {
+    case standard
+    case warning
+    case critical
+
+    static func level(for percent: Double) -> QuotaRemainingUrgency {
+        if percent < 10 { return .critical }
+        if percent < 40 { return .warning }
+        return .standard
+    }
+}
+
+enum QuotaStatusPalette {
+    static let healthy: Color = .green
+    static let warning: Color = .orange
+    static let critical: Color = .red
+
+    static func color(for urgency: QuotaRemainingUrgency) -> Color {
+        switch urgency {
+        case .standard: return healthy
+        case .warning: return warning
+        case .critical: return critical
+        }
+    }
+
+    static func color(for urgency: ResetCreditExpirationUrgency) -> Color {
+        switch urgency {
+        case .standard: return healthy
+        case .warning: return warning
+        case .critical: return critical
+        }
+    }
 }
 
 enum ResetCreditExpiration {

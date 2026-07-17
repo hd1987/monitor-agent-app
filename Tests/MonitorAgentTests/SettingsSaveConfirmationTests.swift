@@ -8,8 +8,13 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         XCTAssertEqual(SettingsWindowLayout.defaultHeight, 600)
         XCTAssertEqual(SettingsWindowLayout.minimumWidth, 760)
         XCTAssertEqual(SettingsWindowLayout.minimumHeight, 520)
+        XCTAssertEqual(SettingsWindowLayout.sidebarVisibility, .all)
         XCTAssertEqual(SettingsWindowLayout.contentTopPadding, 0)
         XCTAssertEqual(SettingsWindowLayout.groupedFormTopPadding, -20)
+        XCTAssertEqual(
+            SettingsWindowToolbar.sidebarToggleIdentifier.rawValue,
+            "com.apple.SwiftUI.navigationSplitView.toggleSidebar"
+        )
     }
 
     func testSaveConfirmationContentMatchesEachSettingsCategory() {
@@ -44,10 +49,26 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         XCTAssertEqual(QuotaSettingsCopy.codexDescription, "Show Codex subscription quota in the main panel.")
         XCTAssertEqual(QuotaSettingsCopy.expirationNotSet, "Not set")
         XCTAssertEqual(QuotaSettingsCopy.expirationPickerTitle, "Subscription Expiration")
+        XCTAssertEqual(QuotaSettingsCopy.today, "Today")
         XCTAssertEqual(QuotaSettingsCopy.clearExpiration, "Clear")
         XCTAssertEqual(QuotaSettingsCopy.refreshIntervalTitle, "Refresh Interval")
         XCTAssertEqual(QuotaSettingsCopy.refreshIntervalDescription, "Refresh while the panel is open. \"Never\" refreshes once when opened.")
         XCTAssertEqual(QuotaRefreshInterval.allCases.map(\.displayName), ["1 min", "2 min", "5 min", "Never"])
+    }
+
+    func testExpirationDateControlUsesCompactInputGeometry() {
+        XCTAssertEqual(ExpirationDateControlStyle.width, 120)
+        XCTAssertEqual(ExpirationDateControlStyle.height, 28)
+        XCTAssertEqual(ExpirationDateControlStyle.cornerRadius, 7)
+        XCTAssertEqual(ExpirationDateControlStyle.borderWidth, 0.5)
+    }
+
+    func testAppSourceTabsAlignWithEditorContent() {
+        XCTAssertEqual(AppSourceTabBarLayout.horizontalPadding, 20)
+        XCTAssertEqual(AppSourceTabBarLayout.height, 28)
+        XCTAssertEqual(AppSourceTabBarLayout.segmentSpacing, 2)
+        XCTAssertEqual(AppSourceTabBarLayout.containerInset, 2)
+        XCTAssertEqual(AppSourceTabBarLayout.cornerRadius, 7)
     }
 
     func testUsageDataRebuildCopyMatchesSettingsDataSection() {

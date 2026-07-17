@@ -90,6 +90,16 @@ final class ThemeManager: ObservableObject {
             : Color.black.opacity(0.035)
     }
 
+    /// Activity Input Tokens blue used by selected main-panel header controls.
+    var selectedControlAccent: Color {
+        MainPanelSelectionPalette.accent
+    }
+
+    /// Solid selected fill for the main-panel app filter.
+    var selectedControlSurface: Color {
+        selectedControlAccent.opacity(MainPanelSelectionPalette.tabBackgroundOpacity)
+    }
+
     /// Stable label contrast that does not fade when the panel loses focus.
     var panelSecondaryForeground: Color {
         isDark

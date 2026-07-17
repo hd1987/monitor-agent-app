@@ -376,6 +376,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         settingsPanel = w
+        DispatchQueue.main.async { [weak w] in
+            SettingsWindowToolbar.removeSidebarToggle(from: w)
+        }
     }
 
     @objc private func openAbout(_ sender: AnyObject?) {
@@ -395,6 +398,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         w.title = "About MonitorAgent"
         w.titlebarAppearsTransparent = true
+        w.titlebarSeparatorStyle = .none
         w.titleVisibility = .hidden
         w.isReleasedWhenClosed = false
         w.level = .normal
@@ -437,6 +441,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         image.size = NSSize(width: 18, height: 18)
         image.isTemplate = true
         return image
+    }
+}
+
+enum SettingsWindowToolbar {
+    static let sidebarToggleIdentifier = NSToolbarItem.Identifier(
+        "com.apple.SwiftUI.navigationSplitView.toggleSidebar"
+    )
+
+    static func removeSidebarToggle(from window: NSWindow?) {
+        guard
+            let toolbar = window?.toolbar,
+            let index = toolbar.items.firstIndex(where: {
+                $0.itemIdentifier == sidebarToggleIdentifier
+            })
+        else { return }
+
+        toolbar.removeItem(at: index)
     }
 }
 

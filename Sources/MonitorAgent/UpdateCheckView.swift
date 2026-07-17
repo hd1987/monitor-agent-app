@@ -224,7 +224,7 @@ struct UpdateCheckView: View {
         }
         .padding(22)
         .frame(width: 460)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .utilityWindowBackground()
     }
 
     @ViewBuilder

@@ -25,6 +25,13 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(QuotaCardLayout.resetTipItemSpacing, 8)
     }
 
+    func testQuotaRemainingUrgencyThresholds() {
+        XCTAssertEqual(QuotaRemainingUrgency.level(for: 40), .standard)
+        XCTAssertEqual(QuotaRemainingUrgency.level(for: 39.99), .warning)
+        XCTAssertEqual(QuotaRemainingUrgency.level(for: 10), .warning)
+        XCTAssertEqual(QuotaRemainingUrgency.level(for: 9.99), .critical)
+    }
+
     func testResetCreditsCopyUsesExpirationColumnHeading() {
         XCTAssertEqual(ResetCreditsCopy.expiresTitle, "Expires")
     }
