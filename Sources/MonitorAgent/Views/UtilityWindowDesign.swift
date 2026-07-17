@@ -47,7 +47,20 @@ struct UtilityWindowGroupedSurface: ViewModifier {
     }
 }
 
+struct UtilityWindowBackground: ViewModifier {
+    func body(content: Content) -> some View {
+        content.background(
+            Color(nsColor: .windowBackgroundColor)
+                .ignoresSafeArea()
+        )
+    }
+}
+
 extension View {
+    func utilityWindowBackground() -> some View {
+        modifier(UtilityWindowBackground())
+    }
+
     func utilityWindowGroupedSurface(
         cornerRadius: CGFloat = UtilityWindowDesign.cornerRadius
     ) -> some View {

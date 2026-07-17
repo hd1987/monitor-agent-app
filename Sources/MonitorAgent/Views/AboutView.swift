@@ -52,7 +52,7 @@ struct AboutView: View {
         .padding(.horizontal, 28)
         .padding(.vertical, 26)
         .frame(width: 320)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .utilityWindowBackground()
     }
 }
 

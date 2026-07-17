@@ -147,11 +147,12 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
     private func createWindow() {
         let win = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 460, height: 260),
-            styleMask: [.titled, .closable],
+            styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered, defer: false
         )
         win.title = ""
         win.titlebarAppearsTransparent = true
+        win.titlebarSeparatorStyle = .none
         win.titleVisibility = .hidden
         win.isReleasedWhenClosed = false
         win.level = .normal

@@ -398,6 +398,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         w.title = "About MonitorAgent"
         w.titlebarAppearsTransparent = true
+        w.titlebarSeparatorStyle = .none
         w.titleVisibility = .hidden
         w.isReleasedWhenClosed = false
         w.level = .normal
