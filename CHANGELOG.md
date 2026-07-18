@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-19
+
 ### Added
 - Add a combined read-only Extensions settings page for Claude Code and Codex, with source-labeled Skills and MCP Servers sections
 - Add Extensions to the menu bar icon's right-click settings shortcuts
