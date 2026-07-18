@@ -25,7 +25,7 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         )
         XCTAssertEqual(
             UtilityWindowDesign.nestedSurfaceComponent,
-            229.0 / 255.0,
+            236.0 / 255.0,
             accuracy: 0.000_001
         )
     }

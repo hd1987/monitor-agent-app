@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-07-19
+
+### Changed
+- Lighten Extensions item cards to RGB 236
+
 ## [0.6.0] - 2026-07-19
 
 ### Added

@@ -4,7 +4,7 @@ enum UtilityWindowDesign {
     static let cornerRadius: CGFloat = 10
     static let compactCornerRadius: CGFloat = 7
     static let groupedSurfaceComponent = 247.0 / 255.0
-    static let nestedSurfaceComponent = 229.0 / 255.0
+    static let nestedSurfaceComponent = 236.0 / 255.0
     static let groupedSurfaceFill = Color(
         red: groupedSurfaceComponent,
         green: groupedSurfaceComponent,
