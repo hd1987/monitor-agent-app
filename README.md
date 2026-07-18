@@ -31,6 +31,7 @@
 - **Hourly token drill-down** — click an active Activity day to inspect Input Tokens, Output Tokens, and Cache Read by hour
 - **Model distribution** — stacked bar showing usage across the top models
 - **Settings editor** — update app preferences, Claude Code / Codex config files, and prompt files from one window
+- **Extension inventory** — inspect User Skill names and configured MCP servers for Claude Code and Codex
 - **Local data rebuild** — rebuild Monitor Agent's derived usage database from source logs without changing original logs or settings
 - **Auto-update** — built-in update checker with release notes, download progress, and one-click install
 
@@ -70,8 +71,9 @@ Open settings from the right-click menu or `Cmd+,`.
 | General | Theme, usage sync interval (`10s`, `30s`, `60s`, `Never`), global shortcut for toggling the main panel, subscription quota visibility and refresh interval (`1 min`, `2 min`, `5 min`, `Never`), Launch at Login, local usage data rebuild |
 | Config | `~/.claude/settings.json` and `~/.codex/config.toml` |
 | Prompt | `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` |
+| Extensions | Read-only User Skill names and configured MCP server states from `~/.claude.json` and `~/.codex/config.toml`, with each section's data source shown in its header |
 
-Saving asks for confirmation, applies only the current page, keeps the window open, and shows a success toast.
+Saving an editable page asks for confirmation, applies only the current page, keeps the window open, and shows a success toast. Extensions is read-only and can be refreshed from disk.
 
 ## How It Works
 
@@ -117,6 +119,7 @@ MIT
 - **小时级 Token 图表** — 点击 Activity 中有数据的日期，查看输入、输出、缓存读取的小时分布
 - **模型分布** — 堆叠比例条展示各模型使用占比
 - **设置编辑器** — 在同一个窗口管理应用设置、Claude Code / Codex 配置和提示词文件
+- **扩展清单** — 查看 Claude Code 和 Codex 的 User Skill 名称与 MCP Servers
 - **本地数据重建** — 从源日志重建 Monitor Agent 的派生使用数据库，不修改原始日志或设置
 - **自动更新** — 内置更新检查，显示发布说明、下载进度，并支持一键下载安装
 
@@ -135,8 +138,9 @@ MIT
 | General | 主题、用量同步间隔（`10s`、`30s`、`60s`、`Never`）、用于切换主面板的全局快捷键、订阅额度显示和刷新间隔（`1 min`、`2 min`、`5 min`、`Never`）、后台保留、登录启动、本地使用数据重建 |
 | Config | `~/.claude/settings.json` 和 `~/.codex/config.toml` |
 | Prompt | `~/.claude/CLAUDE.md` 和 `~/.codex/AGENTS.md` |
+| Extensions | 只读查看 Claude Code 和 Codex 的 User Skill 名称，以及来自 `~/.claude.json` 和 `~/.codex/config.toml` 的 MCP Server 状态，并在各分组标题中显示数据来源 |
 
-保存前会二次确认，只应用当前页面，保存后窗口保持打开并显示成功提示。
+可编辑页面保存前会二次确认，只应用当前页面，保存后窗口保持打开并显示成功提示。Extensions 为只读页面，可从磁盘刷新。
 
 ### 工作原理
 

@@ -4,6 +4,7 @@ import SwiftUI
 
 enum SettingsCategory: String, CaseIterable, Identifiable {
     case general = "General"
+    case extensions = "Extensions"
     case config = "Config"
     case prompt = "Prompt"
 
@@ -12,9 +13,14 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: return "gearshape"
+        case .extensions: return "puzzlepiece.extension"
         case .config: return "doc.text"
         case .prompt: return "text.bubble"
         }
+    }
+
+    var isReadOnly: Bool {
+        self == .extensions
     }
 
     var saveConfirmationTitle: String {
@@ -88,9 +94,16 @@ struct SettingsView: View {
     @State private var claudePromptExists: Bool = false
     @State private var codexPromptExists: Bool = false
 
-    // Tab selection for Config / Prompt
+    // Tab selection for Extensions, Config, and Prompt
+    @State private var extensionsTab: AppSourceTab = .claude
     @State private var configTab: AppSourceTab = .claude
     @State private var promptTab: AppSourceTab = .claude
+
+    // Extension inventory
+    @State private var claudeExtensionInventory: ExtensionInventory = .empty
+    @State private var codexExtensionInventory: ExtensionInventory = .empty
+    @State private var isLoadingExtensionInventories = false
+    @State private var extensionInventoryLoadID = UUID()
 
     // Save alerts / toast
     @State private var showSaveError: Bool = false
@@ -126,20 +139,37 @@ struct SettingsView: View {
                         .transition(.opacity)
                     }
                     Spacer()
-                    Button {
-                        NSApp.keyWindow?.close()
-                    } label: {
-                        Text("Cancel").frame(minWidth: 48)
-                    }
-                    .keyboardShortcut(.cancelAction)
+                    if selectedCategory.isReadOnly {
+                        Button {
+                            NSApp.keyWindow?.close()
+                        } label: {
+                            Text("Close").frame(minWidth: 48)
+                        }
+                        .keyboardShortcut(.cancelAction)
 
-                    Button {
-                        showSaveConfirmation = true
-                    } label: {
-                        Text("Save").frame(minWidth: 48)
+                        Button {
+                            loadExtensionInventories()
+                        } label: {
+                            Text("Refresh").frame(minWidth: 58)
+                        }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(isLoadingExtensionInventories)
+                    } else {
+                        Button {
+                            NSApp.keyWindow?.close()
+                        } label: {
+                            Text("Cancel").frame(minWidth: 48)
+                        }
+                        .keyboardShortcut(.cancelAction)
+
+                        Button {
+                            showSaveConfirmation = true
+                        } label: {
+                            Text("Save").frame(minWidth: 48)
+                        }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
                     }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
@@ -199,6 +229,14 @@ struct SettingsView: View {
                 draftCodexExpirationDate: $draftCodexExpirationDate,
                 draftQuotaRefreshInterval: $draftQuotaRefreshInterval
             )
+        case .extensions:
+            ExtensionsSettingsView(
+                selectedTab: $extensionsTab,
+                inventory: extensionsTab == .claude
+                    ? claudeExtensionInventory
+                    : codexExtensionInventory,
+                isLoading: isLoadingExtensionInventories
+            )
         case .config:
             VStack(spacing: 0) {
                 AppSourceTabBar(selection: $configTab)
@@ -246,6 +284,9 @@ struct SettingsView: View {
             draftClaudeExpirationDate = QuotaSettings.shared.claudeExpirationDate
             draftCodexExpirationDate = QuotaSettings.shared.codexExpirationDate
             draftQuotaRefreshInterval = QuotaSettings.shared.refreshInterval
+        case .extensions:
+            extensionsTab = .claude
+            loadExtensionInventories()
         case .config:
             configTab = .claude
             loadFileContent(
@@ -293,6 +334,9 @@ struct SettingsView: View {
             QuotaSettings.shared.refreshInterval = draftQuotaRefreshInterval
             store.quotaSettingsDidChange()
 
+        case .extensions:
+            return
+
         case .config:
             // Validate JSON before saving Claude settings
             if claudeConfigExists || !claudeConfigText.isEmpty {
@@ -331,6 +375,24 @@ struct SettingsView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             withAnimation(UtilityWindowDesign.presentation(reduceMotion: reduceMotion)) {
                 showSaveSuccess = false
+            }
+        }
+    }
+
+    private func loadExtensionInventories() {
+        let loadID = UUID()
+        extensionInventoryLoadID = loadID
+        isLoadingExtensionInventories = true
+        let homeDirectory = FileManager.default.homeDirectoryForCurrentUser
+        Task.detached(priority: .userInitiated) {
+            let loader = ExtensionInventoryLoader()
+            let claudeInventory = loader.load(source: .claude, homeDirectory: homeDirectory)
+            let codexInventory = loader.load(source: .codex, homeDirectory: homeDirectory)
+            await MainActor.run {
+                guard extensionInventoryLoadID == loadID else { return }
+                claudeExtensionInventory = claudeInventory
+                codexExtensionInventory = codexInventory
+                isLoadingExtensionInventories = false
             }
         }
     }
@@ -890,7 +952,7 @@ struct UsageDataRebuildProgressView: View {
 
 // MARK: - App Source Tab
 
-/// Tab selector for Claude Code / Codex within Config and Prompt categories.
+/// Tab selector for Claude Code / Codex within Extensions, Config, and Prompt categories.
 enum AppSourceTab: String, CaseIterable, Identifiable {
     case claude = "Claude Code"
     case codex = "Codex"
@@ -939,7 +1001,7 @@ struct AppSourceTabBar: View {
         .padding(AppSourceTabBarLayout.containerInset)
         .frame(maxWidth: .infinity)
         .frame(height: AppSourceTabBarLayout.height)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(UtilityWindowDesign.groupedSurfaceFill)
         .clipShape(
             RoundedRectangle(
                 cornerRadius: AppSourceTabBarLayout.cornerRadius,
@@ -1008,7 +1070,7 @@ struct FileEditorSection: View {
                     .padding(8)
                     .background(
                         RoundedRectangle(cornerRadius: UtilityWindowDesign.compactCornerRadius, style: .continuous)
-                            .fill(Color(nsColor: .textBackgroundColor))
+                            .fill(UtilityWindowDesign.groupedSurfaceFill)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: UtilityWindowDesign.compactCornerRadius, style: .continuous)

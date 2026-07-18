@@ -6,6 +6,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Added
+- Add a combined read-only Extensions settings page for Claude Code and Codex, with source-labeled Skills and MCP Servers sections
+- Add Extensions to the menu bar icon's right-click settings shortcuts
+
+### Changed
+- Present Extensions as System Settings-inspired grouped panels with counts, top-right selectable sources, adaptive wrapping cards, and accessible MCP status dots
+- Restrict the Claude MCP inventory source to `~/.claude.json` and stop reading `~/.claude/settings.json`
+- Apply RGB 247 to shared utility grouped surfaces, source tabs, and Config/Prompt editors, with RGB 229 Extensions item cards
+
+### Fixed
+- Keep Skills and MCP Servers navigation responsive by loading local inventories in the background
+
 ## [0.5.9] - 2026-07-18
 
 ### Changed

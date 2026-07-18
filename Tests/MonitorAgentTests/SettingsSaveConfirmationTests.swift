@@ -17,6 +17,19 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         )
     }
 
+    func testUtilityGroupedSurfacesUseSpecifiedRGBValues() {
+        XCTAssertEqual(
+            UtilityWindowDesign.groupedSurfaceComponent,
+            247.0 / 255.0,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            UtilityWindowDesign.nestedSurfaceComponent,
+            229.0 / 255.0,
+            accuracy: 0.000_001
+        )
+    }
+
     func testSaveConfirmationContentMatchesEachSettingsCategory() {
         XCTAssertEqual(SettingsCategory.general.saveConfirmationTitle, "Save General settings?")
         XCTAssertEqual(SettingsCategory.config.saveConfirmationTitle, "Save Config settings?")
@@ -35,6 +48,17 @@ final class SettingsSaveConfirmationTests: XCTestCase {
 
     func testSaveSuccessUsesInlineCheckmarkIndicator() {
         XCTAssertEqual(SaveSuccessIndicatorStyle.systemImage, "checkmark.circle.fill")
+    }
+
+    func testExtensionsIsACombinedReadOnlyCategory() {
+        XCTAssertEqual(
+            SettingsCategory.allCases.map(\.rawValue),
+            ["General", "Extensions", "Config", "Prompt"]
+        )
+        XCTAssertTrue(SettingsCategory.extensions.isReadOnly)
+        XCTAssertFalse(SettingsCategory.general.isReadOnly)
+        XCTAssertFalse(SettingsCategory.config.isReadOnly)
+        XCTAssertFalse(SettingsCategory.prompt.isReadOnly)
     }
 
     func testSyncIntervalOptionsMatchGeneralSettingsMenu() {
