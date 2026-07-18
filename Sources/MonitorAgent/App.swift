@@ -144,6 +144,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let generalItem = NSMenuItem(title: "General", action: #selector(openSettingsGeneral(_:)), keyEquivalent: ",")
         generalItem.target = self
+        let extensionsItem = NSMenuItem(title: "Extensions", action: #selector(openSettingsExtensions(_:)), keyEquivalent: "")
+        extensionsItem.target = self
         let configItem = NSMenuItem(title: "Config", action: #selector(openSettingsConfig(_:)), keyEquivalent: "")
         configItem.target = self
         let promptItem = NSMenuItem(title: "Prompt", action: #selector(openSettingsPrompt(_:)), keyEquivalent: "")
@@ -156,6 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(aboutItem)
         menu.addItem(.separator())
         menu.addItem(generalItem)
+        menu.addItem(extensionsItem)
         menu.addItem(configItem)
         menu.addItem(promptItem)
         menu.addItem(.separator())
@@ -322,6 +325,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettingsGeneral(_ sender: AnyObject?) {
         openSettings(category: .general)
+    }
+
+    @objc private func openSettingsExtensions(_ sender: AnyObject?) {
+        openSettings(category: .extensions)
     }
 
     @objc private func openSettingsConfig(_ sender: AnyObject?) {

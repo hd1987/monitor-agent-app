@@ -3,6 +3,18 @@ import SwiftUI
 enum UtilityWindowDesign {
     static let cornerRadius: CGFloat = 10
     static let compactCornerRadius: CGFloat = 7
+    static let groupedSurfaceComponent = 247.0 / 255.0
+    static let nestedSurfaceComponent = 229.0 / 255.0
+    static let groupedSurfaceFill = Color(
+        red: groupedSurfaceComponent,
+        green: groupedSurfaceComponent,
+        blue: groupedSurfaceComponent
+    )
+    static let nestedSurfaceFill = Color(
+        red: nestedSurfaceComponent,
+        green: nestedSurfaceComponent,
+        blue: nestedSurfaceComponent
+    )
 
     static func feedback(reduceMotion: Bool) -> Animation {
         reduceMotion
@@ -36,7 +48,7 @@ struct UtilityWindowGroupedSurface: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.72))
+            .background(UtilityWindowDesign.groupedSurfaceFill)
             .clipShape(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             )
