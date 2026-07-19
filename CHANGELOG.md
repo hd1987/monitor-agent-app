@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Fixed
+- Show the full subscription expiration date in General settings
+
 ## [0.6.3] - 2026-07-19
 
 ### Changed
