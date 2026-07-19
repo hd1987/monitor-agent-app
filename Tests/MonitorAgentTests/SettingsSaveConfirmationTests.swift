@@ -43,11 +43,14 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         let darkAppearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
         let grouped = UtilityWindowDesign.groupedSurfaceColor(for: darkAppearance)
         let nested = UtilityWindowDesign.nestedSurfaceColor(for: darkAppearance)
+        let dateControl = UtilityWindowDesign.dateControlSurfaceColor(for: darkAppearance)
 
         XCTAssertEqual(grouped.whiteComponent, 1, accuracy: 0.000_001)
         XCTAssertEqual(grouped.alphaComponent, 0.08, accuracy: 0.000_001)
         XCTAssertEqual(nested.whiteComponent, 0, accuracy: 0.000_001)
         XCTAssertEqual(nested.alphaComponent, 0.12, accuracy: 0.000_001)
+        XCTAssertEqual(dateControl.whiteComponent, 0, accuracy: 0.000_001)
+        XCTAssertEqual(dateControl.alphaComponent, 0.12, accuracy: 0.000_001)
     }
 
     func testSaveConfirmationContentMatchesEachSettingsCategory() {

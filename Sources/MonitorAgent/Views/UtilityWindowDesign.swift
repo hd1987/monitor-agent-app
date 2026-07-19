@@ -15,6 +15,9 @@ enum UtilityWindowDesign {
     static let nestedSurfaceFill = Color(nsColor: NSColor(name: nil) { appearance in
         nestedSurfaceColor(for: appearance)
     })
+    static let dateControlSurfaceFill = Color(nsColor: NSColor(name: nil) { appearance in
+        dateControlSurfaceColor(for: appearance)
+    })
 
     static func groupedSurfaceColor(for appearance: NSAppearance) -> NSColor {
         adaptiveSurfaceColor(
@@ -32,6 +35,13 @@ enum UtilityWindowDesign {
             darkColor: .black,
             darkOpacity: darkNestedSurfaceOpacity
         )
+    }
+
+    static func dateControlSurfaceColor(for appearance: NSAppearance) -> NSColor {
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return isDark
+            ? NSColor.black.withAlphaComponent(darkNestedSurfaceOpacity)
+            : .controlBackgroundColor
     }
 
     private static func adaptiveSurfaceColor(
