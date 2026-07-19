@@ -104,7 +104,7 @@ final class SettingsSaveConfirmationTests: XCTestCase {
     }
 
     func testExpirationDateControlUsesCompactInputGeometry() {
-        XCTAssertEqual(ExpirationDateControlStyle.width, 120)
+        XCTAssertEqual(ExpirationDateControlStyle.width, 140)
         XCTAssertEqual(ExpirationDateControlStyle.height, 28)
         XCTAssertEqual(ExpirationDateControlStyle.cornerRadius, 7)
         XCTAssertEqual(ExpirationDateControlStyle.borderWidth, 0.5)

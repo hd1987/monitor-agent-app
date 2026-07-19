@@ -621,7 +621,7 @@ enum QuotaSettingsCopy {
 }
 
 enum ExpirationDateControlStyle {
-    static let width: CGFloat = 120
+    static let width: CGFloat = 140
     static let height: CGFloat = 28
     static let cornerRadius: CGFloat = 7
     static let borderWidth: CGFloat = 0.5
