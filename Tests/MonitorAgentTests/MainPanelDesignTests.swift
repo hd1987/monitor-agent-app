@@ -15,4 +15,12 @@ final class MainPanelDesignTests: XCTestCase {
         XCTAssertEqual(MainPanelDesign.headerToolOpacity, 0.46)
         XCTAssertEqual(MainPanelDesign.headerToolSpacing, 4)
     }
+
+    func testTooltipsShareOneSurfaceStyle() {
+        XCTAssertEqual(MainPanelTooltipDesign.cornerRadius, 6)
+        XCTAssertEqual(MainPanelTooltipDesign.borderOpacity, 0.12)
+        XCTAssertEqual(MainPanelTooltipDesign.shadowOpacity, 0.10)
+        XCTAssertEqual(MainPanelTooltipDesign.shadowRadius, 5)
+        XCTAssertEqual(MainPanelTooltipDesign.shadowYOffset, 2)
+    }
 }

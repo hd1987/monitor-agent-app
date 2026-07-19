@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 import SwiftUI
 @testable import MonitorAgent
 
@@ -17,7 +18,7 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         )
     }
 
-    func testUtilityGroupedSurfacesUseSpecifiedRGBValues() {
+    func testUtilityGroupedSurfacesPreserveSpecifiedLightRGBValues() throws {
         XCTAssertEqual(
             UtilityWindowDesign.groupedSurfaceComponent,
             247.0 / 255.0,
@@ -28,6 +29,25 @@ final class SettingsSaveConfirmationTests: XCTestCase {
             236.0 / 255.0,
             accuracy: 0.000_001
         )
+
+        let lightAppearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        let grouped = UtilityWindowDesign.groupedSurfaceColor(for: lightAppearance)
+        let nested = UtilityWindowDesign.nestedSurfaceColor(for: lightAppearance)
+        XCTAssertEqual(grouped.redComponent, 247.0 / 255.0, accuracy: 0.000_001)
+        XCTAssertEqual(nested.redComponent, 236.0 / 255.0, accuracy: 0.000_001)
+        XCTAssertEqual(grouped.alphaComponent, 1, accuracy: 0.000_001)
+        XCTAssertEqual(nested.alphaComponent, 1, accuracy: 0.000_001)
+    }
+
+    func testUtilityGroupedSurfacesUseDarkHierarchy() throws {
+        let darkAppearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        let grouped = UtilityWindowDesign.groupedSurfaceColor(for: darkAppearance)
+        let nested = UtilityWindowDesign.nestedSurfaceColor(for: darkAppearance)
+
+        XCTAssertEqual(grouped.whiteComponent, 1, accuracy: 0.000_001)
+        XCTAssertEqual(grouped.alphaComponent, 0.08, accuracy: 0.000_001)
+        XCTAssertEqual(nested.whiteComponent, 0, accuracy: 0.000_001)
+        XCTAssertEqual(nested.alphaComponent, 0.12, accuracy: 0.000_001)
     }
 
     func testSaveConfirmationContentMatchesEachSettingsCategory() {

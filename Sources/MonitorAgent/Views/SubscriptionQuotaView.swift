@@ -323,13 +323,7 @@ private struct SubscriptionExpirationTip: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
         .frame(width: QuotaCardLayout.expirationTipWidth)
-        .background(theme.tooltipBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
-        )
-        .shadow(color: .black.opacity(0.10), radius: 5, x: 0, y: 2)
+        .mainPanelTooltipSurface()
     }
 
     private var statusColor: Color {
@@ -373,13 +367,7 @@ private struct ResetCreditsTip: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
         .frame(width: QuotaCardLayout.resetTipWidth)
-        .background(theme.tooltipBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
-        )
-        .shadow(color: .black.opacity(0.10), radius: 5, x: 0, y: 2)
+        .mainPanelTooltipSurface()
         .contentShape(Rectangle())
         .onHover { _ in }
     }
@@ -488,9 +476,9 @@ enum QuotaRemainingUrgency: Equatable {
 }
 
 enum QuotaStatusPalette {
-    static let healthy: Color = .green
-    static let warning: Color = .orange
-    static let critical: Color = .red
+    static let healthy = StatusPalette.success
+    static let warning = StatusPalette.warning
+    static let critical = StatusPalette.error
 
     static func color(for urgency: QuotaRemainingUrgency) -> Color {
         switch urgency {

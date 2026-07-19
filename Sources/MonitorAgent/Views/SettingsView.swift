@@ -862,8 +862,8 @@ struct UsageDataRebuildSheetView: View {
     }
 
     private var headerColor: Color {
-        if store.usageDataRebuildSummary != nil { return .green }
-        if store.usageDataRebuildErrorMessage != nil { return .orange }
+        if store.usageDataRebuildSummary != nil { return StatusPalette.success }
+        if store.usageDataRebuildErrorMessage != nil { return StatusPalette.warning }
         return .accentColor
     }
 
@@ -979,7 +979,11 @@ struct AppSourceTabBar: View {
                 } label: {
                     Text(tab.rawValue)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(selection == tab ? Color.white : Color.primary)
+                        .foregroundStyle(
+                            selection == tab
+                                ? UtilityWindowDesign.selectedControlText
+                                : Color.primary
+                        )
                         .frame(maxWidth: .infinity)
                         .frame(
                             height: AppSourceTabBarLayout.height

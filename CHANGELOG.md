@@ -6,6 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-07-19
+
+### Added
+- Add a folder button beside the Extensions Skills source path to open its directory
+
+### Changed
+- Adapt shared Settings surfaces to Dark mode while preserving their existing Light colors
+- Reuse shared token, tooltip, status, and selected-control color definitions across the app
+- Remove unused legacy card colors
+
 ## [0.6.1] - 2026-07-19
 
 ### Changed

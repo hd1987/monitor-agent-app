@@ -18,6 +18,12 @@ enum Theme: String, CaseIterable, Identifiable {
     }
 }
 
+enum StatusPalette {
+    static let success: Color = .green
+    static let warning: Color = .orange
+    static let error: Color = .red
+}
+
 /// Manages app-wide theme, persisted to UserDefaults.
 final class ThemeManager: ObservableObject {
     static let shared = ThemeManager()
@@ -61,20 +67,6 @@ final class ThemeManager: ObservableObject {
     }
 
     // MARK: - View Colors (SwiftUI)
-
-    /// Dark: #2c2c2e — slightly lighter than panel background
-    var cardBackground: Color {
-        isDark
-            ? Color(red: 0.17, green: 0.17, blue: 0.18)
-            : .white
-    }
-
-    /// Light: thin gray border for cards; Dark: subtle edge
-    var cardBorder: Color {
-        isDark
-            ? Color.white.opacity(0.1)
-            : Color.black.opacity(0.12)
-    }
 
     /// Theme-aware inset fill matching native General form groups.
     var groupedSurface: Color {

@@ -128,22 +128,16 @@ private struct TokenBreakdownTip: View {
             }
 
             VStack(alignment: .leading, spacing: TokenBreakdownTipLayout.itemSpacing) {
-                tokenRow(label: "Input", color: .blue, value: stats.inputTokens)
-                tokenRow(label: "Output", color: .green, value: stats.outputTokens)
-                tokenRow(label: "Cache Read", color: .orange, value: stats.cacheReadTokens)
-                tokenRow(label: "Cache Creation", color: .purple, value: stats.cacheCreationTokens)
+                tokenRow(label: "Input", color: ActivityTokenPalette.input, value: stats.inputTokens)
+                tokenRow(label: "Output", color: ActivityTokenPalette.output, value: stats.outputTokens)
+                tokenRow(label: "Cache Read", color: ActivityTokenPalette.cacheRead, value: stats.cacheReadTokens)
+                tokenRow(label: "Cache Creation", color: ActivityTokenPalette.cacheCreation, value: stats.cacheCreationTokens)
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
         .frame(maxWidth: .infinity)
-        .background(theme.tooltipBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
-        )
-        .shadow(color: .black.opacity(0.10), radius: 5, x: 0, y: 2)
+        .mainPanelTooltipSurface()
         .contentShape(Rectangle())
     }
 
