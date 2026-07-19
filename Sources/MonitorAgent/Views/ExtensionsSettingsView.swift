@@ -219,7 +219,7 @@ private struct MCPServerCard: View {
     var body: some View {
         ExtensionItemCard {
             Circle()
-                .fill(server.isEnabled ? Color.green : Color.secondary)
+                .fill(server.isEnabled ? StatusPalette.success : Color.secondary)
                 .frame(width: 7, height: 7)
                 .accessibilityHidden(true)
 

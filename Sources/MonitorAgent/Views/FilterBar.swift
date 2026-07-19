@@ -206,7 +206,11 @@ struct FilterBar: View {
         } label: {
             Text(range.title)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(store.timeRange == range ? .white : .primary)
+                .foregroundStyle(
+                    store.timeRange == range
+                        ? UtilityWindowDesign.selectedControlText
+                        : Color.primary
+                )
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .frame(maxWidth: .infinity)

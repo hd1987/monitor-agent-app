@@ -244,9 +244,9 @@ struct UpdateCheckView: View {
     private var iconColor: Color {
         switch state.iconName {
         case "checkmark.circle":
-            return .green
+            return StatusPalette.success
         case "exclamationmark.triangle":
-            return .orange
+            return StatusPalette.warning
         case "sparkles":
             return .accentColor
         default:

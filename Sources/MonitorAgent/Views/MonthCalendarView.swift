@@ -146,7 +146,11 @@ struct MonthCalendarView: View {
         } label: {
             Text(String(Calendar.current.component(.day, from: date)))
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(dayAppearance == .selected ? Color.white : Color.primary)
+                .foregroundStyle(
+                    dayAppearance == .selected
+                        ? UtilityWindowDesign.selectedControlText
+                        : Color.primary
+                )
                 .frame(maxWidth: .infinity, minHeight: MonthCalendarLayout.dayHeight)
                 .background { background(for: dayAppearance) }
                 .overlay { todayOutline(for: dayAppearance) }

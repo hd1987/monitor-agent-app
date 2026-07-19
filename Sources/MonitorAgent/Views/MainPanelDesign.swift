@@ -20,6 +20,14 @@ enum MainPanelSelectionPalette {
     static let tabBackgroundOpacity = 0.38
 }
 
+enum MainPanelTooltipDesign {
+    static let cornerRadius: CGFloat = 6
+    static let borderOpacity = 0.12
+    static let shadowOpacity = 0.10
+    static let shadowRadius: CGFloat = 5
+    static let shadowYOffset: CGFloat = 2
+}
+
 enum MainPanelMotion {
     static func feedback(reduceMotion: Bool) -> Animation {
         reduceMotion
@@ -64,11 +72,46 @@ struct MainPanelGroupedSurface: ViewModifier {
     }
 }
 
+struct MainPanelTooltipSurface: ViewModifier {
+    @EnvironmentObject private var theme: ThemeManager
+
+    func body(content: Content) -> some View {
+        content
+            .background(theme.tooltipBackground)
+            .clipShape(
+                RoundedRectangle(
+                    cornerRadius: MainPanelTooltipDesign.cornerRadius,
+                    style: .continuous
+                )
+            )
+            .overlay(
+                RoundedRectangle(
+                    cornerRadius: MainPanelTooltipDesign.cornerRadius,
+                    style: .continuous
+                )
+                .stroke(
+                    Color.white.opacity(MainPanelTooltipDesign.borderOpacity),
+                    lineWidth: 0.5
+                )
+            )
+            .shadow(
+                color: Color.black.opacity(MainPanelTooltipDesign.shadowOpacity),
+                radius: MainPanelTooltipDesign.shadowRadius,
+                x: 0,
+                y: MainPanelTooltipDesign.shadowYOffset
+            )
+    }
+}
+
 extension View {
     func mainPanelGroupedSurface(
         cornerRadius: CGFloat = MainPanelDesign.groupedCornerRadius
     ) -> some View {
         modifier(MainPanelGroupedSurface(cornerRadius: cornerRadius))
+    }
+
+    func mainPanelTooltipSurface() -> some View {
+        modifier(MainPanelTooltipSurface())
     }
 
     func mainPanelSectionTitle() -> some View {

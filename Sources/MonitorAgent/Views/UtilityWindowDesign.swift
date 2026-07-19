@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum UtilityWindowDesign {
@@ -5,16 +6,45 @@ enum UtilityWindowDesign {
     static let compactCornerRadius: CGFloat = 7
     static let groupedSurfaceComponent = 247.0 / 255.0
     static let nestedSurfaceComponent = 236.0 / 255.0
-    static let groupedSurfaceFill = Color(
-        red: groupedSurfaceComponent,
-        green: groupedSurfaceComponent,
-        blue: groupedSurfaceComponent
-    )
-    static let nestedSurfaceFill = Color(
-        red: nestedSurfaceComponent,
-        green: nestedSurfaceComponent,
-        blue: nestedSurfaceComponent
-    )
+    static let darkGroupedSurfaceOpacity = 0.08
+    static let darkNestedSurfaceOpacity = 0.12
+    static let selectedControlText = Color(nsColor: .alternateSelectedControlTextColor)
+    static let groupedSurfaceFill = Color(nsColor: NSColor(name: nil) { appearance in
+        groupedSurfaceColor(for: appearance)
+    })
+    static let nestedSurfaceFill = Color(nsColor: NSColor(name: nil) { appearance in
+        nestedSurfaceColor(for: appearance)
+    })
+
+    static func groupedSurfaceColor(for appearance: NSAppearance) -> NSColor {
+        adaptiveSurfaceColor(
+            appearance: appearance,
+            lightComponent: groupedSurfaceComponent,
+            darkColor: .white,
+            darkOpacity: darkGroupedSurfaceOpacity
+        )
+    }
+
+    static func nestedSurfaceColor(for appearance: NSAppearance) -> NSColor {
+        adaptiveSurfaceColor(
+            appearance: appearance,
+            lightComponent: nestedSurfaceComponent,
+            darkColor: .black,
+            darkOpacity: darkNestedSurfaceOpacity
+        )
+    }
+
+    private static func adaptiveSurfaceColor(
+        appearance: NSAppearance,
+        lightComponent: CGFloat,
+        darkColor: NSColor,
+        darkOpacity: CGFloat
+    ) -> NSColor {
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return isDark
+            ? darkColor.withAlphaComponent(darkOpacity)
+            : NSColor(srgbRed: lightComponent, green: lightComponent, blue: lightComponent, alpha: 1)
+    }
 
     static func feedback(reduceMotion: Bool) -> Animation {
         reduceMotion
