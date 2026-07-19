@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct ExtensionsSettingsView: View {
@@ -11,7 +12,8 @@ struct ExtensionsSettingsView: View {
                 title: "Skills",
                 source: skillsSource,
                 count: inventory.skills.count,
-                emptyMessage: "No user skills found."
+                emptyMessage: "No user skills found.",
+                openSourceDirectory: openSkillsDirectory
             ) {
                 ExtensionCardGrid {
                     ForEach(inventory.skills) { skill in
@@ -50,6 +52,12 @@ struct ExtensionsSettingsView: View {
 
     private var inventorySource: ExtensionInventorySource {
         selectedTab == .claude ? .claude : .codex
+    }
+
+    private func openSkillsDirectory() {
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(inventorySource.skillsRelativePath, isDirectory: true)
+        NSWorkspace.shared.open(url)
     }
 }
 
@@ -97,6 +105,7 @@ private struct ExtensionGroup<Content: View>: View {
     let source: String
     let count: Int
     let emptyMessage: String
+    var openSourceDirectory: (() -> Void)? = nil
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -118,12 +127,25 @@ private struct ExtensionGroup<Content: View>: View {
 
                 Spacer(minLength: 12)
 
-                Text(source)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.trailing)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(source)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+
+                    if let openSourceDirectory {
+                        Button(action: openSourceDirectory) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 11))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("Open Skills directory")
+                        .accessibilityLabel("Open Skills directory")
+                    }
+                }
             }
 
             if count == 0 {

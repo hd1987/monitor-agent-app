@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Added
+- Add a folder button beside the Extensions Skills source path to open its directory
+
 ## [0.6.1] - 2026-07-19
 
 ### Changed
