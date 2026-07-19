@@ -724,7 +724,7 @@ private struct ExpirationDateControl: View {
                 width: ExpirationDateControlStyle.width,
                 height: ExpirationDateControlStyle.height
             )
-            .background(Color(nsColor: .controlBackgroundColor))
+            .background(UtilityWindowDesign.dateControlSurfaceFill)
             .clipShape(
                 RoundedRectangle(
                     cornerRadius: ExpirationDateControlStyle.cornerRadius,
