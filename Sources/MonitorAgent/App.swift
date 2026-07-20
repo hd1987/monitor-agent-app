@@ -58,7 +58,6 @@ final class PanelPresentationState: ObservableObject {
     @Published private(set) var isPinned = false
     @Published private(set) var isPanelFocused = false
     private(set) var hasCustomPosition = false
-    private var suppressesNextAutomaticDismissal = false
 
     var isPinHighlighted: Bool {
         isPinned && isPanelFocused
@@ -76,15 +75,7 @@ final class PanelPresentationState: ObservableObject {
         if reason == .explicit {
             return true
         }
-        if suppressesNextAutomaticDismissal {
-            suppressesNextAutomaticDismissal = false
-            return false
-        }
         return !isPinned
-    }
-
-    func suppressNextAutomaticDismissal() {
-        suppressesNextAutomaticDismissal = true
     }
 
     func recordCustomPosition() {
@@ -169,7 +160,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hostingView = NSHostingView(
             rootView: PopoverView { [weak self] in
-                self?.openSettings(category: .general, keepingMainPanelVisible: true)
+                self?.openSettings(category: .general)
             } onResetPanelPosition: { [weak self] in
                 self?.resetPanelPosition()
             }
@@ -339,10 +330,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openSettings(category: .prompt)
     }
 
-    private func openSettings(
-        category: SettingsCategory,
-        keepingMainPanelVisible: Bool = false
-    ) {
+    private func openSettings(category: SettingsCategory) {
         // Always recreate so @State drafts reset to saved values
         settingsPanel?.close()
         settingsPanel = nil
@@ -378,9 +366,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         SettingsWindowToolbar.prepareForPresentation(w)
         w.center()
-        if keepingMainPanelVisible && panel.isVisible {
-            panelPresentationState.suppressNextAutomaticDismissal()
-        }
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         settingsPanel = w
