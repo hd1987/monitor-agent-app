@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-07-21
+
 ### Changed
 - Revert broad development runtime isolation and restore the previous shared runtime behavior
 - Isolate bare development executables from the installed app's active and temporary usage databases
