@@ -90,6 +90,40 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         XCTAssertEqual(SettingsCategory.prompt.saveConfirmationMessage, "Apply changes to Prompt settings.")
     }
 
+    func testOnlyExtensionsCategoryIsReadOnly() {
+        XCTAssertFalse(SettingsCategory.general.isReadOnly)
+        XCTAssertTrue(SettingsCategory.extensions.isReadOnly)
+    }
+
+    func testDevelopmentPolicyDisablesOnlyExternalConfigSaving() {
+        XCTAssertTrue(SettingsSavePolicy.isEnabled(
+            for: .general,
+            allowsExternalConfigSaving: false
+        ))
+        XCTAssertFalse(SettingsSavePolicy.isEnabled(
+            for: .extensions,
+            allowsExternalConfigSaving: false
+        ))
+        XCTAssertFalse(SettingsSavePolicy.isEnabled(
+            for: .config,
+            allowsExternalConfigSaving: false
+        ))
+        XCTAssertFalse(SettingsSavePolicy.isEnabled(
+            for: .prompt,
+            allowsExternalConfigSaving: false
+        ))
+        XCTAssertTrue(SettingsSavePolicy.isEnabled(
+            for: .config,
+            allowsExternalConfigSaving: true
+        ))
+        XCTAssertTrue(SettingsSavePolicy.isEnabled(
+            for: .prompt,
+            allowsExternalConfigSaving: true
+        ))
+        XCTAssertFalse(SettingsCategory.config.isReadOnly)
+        XCTAssertFalse(SettingsCategory.prompt.isReadOnly)
+    }
+
     func testSaveSuccessMessageMatchesEachSettingsCategory() {
         XCTAssertEqual(SettingsCategory.general.saveSuccessMessage, "General settings saved.")
         XCTAssertEqual(SettingsCategory.config.saveSuccessMessage, "Config settings saved.")
@@ -98,6 +132,13 @@ final class SettingsSaveConfirmationTests: XCTestCase {
 
     func testSaveSuccessUsesInlineCheckmarkIndicator() {
         XCTAssertEqual(SaveSuccessIndicatorStyle.systemImage, "checkmark.circle.fill")
+    }
+
+    func testDevelopmentGlobalShortcutCopyExplainsInstalledAppRequirement() {
+        XCTAssertEqual(
+            GlobalShortcutSettingsCopy.developmentDisabledDescription,
+            "Available only when running MonitorAgent from the installed app."
+        )
     }
 
     func testExtensionsIsACombinedReadOnlyCategory() {

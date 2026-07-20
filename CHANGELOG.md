@@ -6,7 +6,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Fixed
+- Disable the Global Shortcut recorder in development mode to match its system registration policy
+
 ### Changed
+- Isolate `swift run` instances from production data and side effects with per-process in-memory databases and settings, fail-closed rebuild ownership, production single-instance locking, deterministic quota fixtures, and an explicit opt-in for live quota
+- Keep Config and Prompt editable in development mode while disabling their Save button; Extensions remains read-only
 - Share source headers across Extensions, Config, and Prompt settings, with names on the left and paths plus Finder actions on the right
 - Rebuild local usage data from bounded streaming snapshots while Claude Code and Codex remain active, with pre-copy event filtering, accelerated line scanning, durable per-file transactions, a catch-up pass, byte-level phase progress, cancellation, strict source validation, and an immediate final sync
 

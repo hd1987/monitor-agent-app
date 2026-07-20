@@ -94,6 +94,10 @@ protocol GlobalShortcutRegistering: AnyObject {
     func replaceShortcut(_ shortcut: GlobalShortcut?, handler: @escaping () -> Void) throws
 }
 
+final class DisabledGlobalShortcutRegistrar: GlobalShortcutRegistering {
+    func replaceShortcut(_ shortcut: GlobalShortcut?, handler: @escaping () -> Void) throws {}
+}
+
 final class CarbonGlobalShortcutRegistrar: GlobalShortcutRegistering {
     private var eventHandlerRef: EventHandlerRef?
     private var hotKeyRef: EventHotKeyRef?
@@ -167,17 +171,22 @@ final class CarbonGlobalShortcutRegistrar: GlobalShortcutRegistering {
 }
 
 final class GlobalShortcutController: ObservableObject {
-    static let shared = GlobalShortcutController()
+    static let shared = GlobalShortcutController(
+        defaults: RuntimeEnvironment.current.preferences,
+        registrar: RuntimeEnvironment.current.featurePolicy.allowsGlobalShortcutRegistration
+            ? CarbonGlobalShortcutRegistrar()
+            : DisabledGlobalShortcutRegistrar()
+    )
     static let defaultsKey = "globalPanelShortcut"
 
     @Published private(set) var shortcut: GlobalShortcut?
 
-    private let defaults: UserDefaults
+    private let defaults: PreferencesStoring
     private let registrar: GlobalShortcutRegistering
     private var handler: () -> Void = {}
 
     init(
-        defaults: UserDefaults = .standard,
+        defaults: PreferencesStoring = UserDefaults.standard,
         registrar: GlobalShortcutRegistering = CarbonGlobalShortcutRegistrar()
     ) {
         self.defaults = defaults

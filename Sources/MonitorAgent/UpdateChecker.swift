@@ -35,10 +35,14 @@ enum RestartLauncher {
 
 /// Checks GitHub Releases for new versions, downloads and installs updates.
 final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
-    static let shared = UpdateChecker()
+    static let shared = UpdateChecker(
+        allowsUpdateChecks: RuntimeEnvironment.current.featurePolicy.allowsUpdateChecks
+    )
 
     private let repo = "hd1987/monitor-agent-app"
     private let lastCheckKey = "lastUpdateCheck"
+    private let allowsUpdateChecks: Bool
+    private var defaults: PreferencesStoring { RuntimeEnvironment.current.preferences }
     private var isChecking = false
 
     private var window: NSPanel?
@@ -47,11 +51,20 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
     private var downloadTask: URLSessionDownloadTask?
     private var pendingRelease: Release?
 
-    private override init() { super.init() }
+    private init(allowsUpdateChecks: Bool) {
+        self.allowsUpdateChecks = allowsUpdateChecks
+        super.init()
+    }
 
     // MARK: - Public
 
     func checkForUpdates(silent: Bool) {
+        guard allowsUpdateChecks else {
+            if !silent {
+                configureWindow(state: .unavailable())
+            }
+            return
+        }
         guard currentVersion != nil else {
             if !silent {
                 configureWindow(state: .unavailable())
@@ -61,7 +74,7 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
 
         if silent {
             guard !isChecking else { return }
-            let last = UserDefaults.standard.object(forKey: lastCheckKey) as? Date
+            let last = defaults.object(forKey: lastCheckKey) as? Date
             if let last, Date().timeIntervalSince(last) < 86400 { return }
         }
 
@@ -84,7 +97,7 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
 
     private func handleResult(_ result: Result<Release?, Error>, silent: Bool) {
         isChecking = false
-        UserDefaults.standard.set(Date(), forKey: lastCheckKey)
+        defaults.set(Date(), forKey: lastCheckKey)
 
         switch result {
         case .success(let release) where release != nil && isNewer(release!.version):

@@ -28,6 +28,8 @@ final class AppStore: ObservableObject {
     private let quotaService: QuotaRefreshing
     private let quotaSettings: QuotaSettings
     private let quotaRefreshScheduler: QuotaRefreshScheduler
+    private let allowsLiveQuotaRefresh: Bool
+    private let quotaFixture: QuotaFixtureSet?
     private var activeDay: Date
     private var cancellables = Set<AnyCancellable>()
     private var usageDataRebuildCancellation: UsageDataRebuildCancellation?
@@ -42,6 +44,8 @@ final class AppStore: ObservableObject {
         quotaService: QuotaRefreshing = QuotaService.shared,
         quotaSettings: QuotaSettings = .shared,
         quotaRefreshScheduler: QuotaRefreshScheduler = QuotaRefreshScheduler(),
+        allowsLiveQuotaRefresh: Bool = true,
+        quotaFixture: QuotaFixtureSet? = nil,
         observeSyncIntervalChanges: Bool = true,
         currentDateProvider: @escaping () -> Date = Date.init
     ) {
@@ -52,9 +56,14 @@ final class AppStore: ObservableObject {
         self.quotaService = quotaService
         self.quotaSettings = quotaSettings
         self.quotaRefreshScheduler = quotaRefreshScheduler
+        self.allowsLiveQuotaRefresh = allowsLiveQuotaRefresh
+        self.quotaFixture = quotaFixture
         self.activeDay = Calendar.current.startOfDay(for: currentDateProvider())
+        self.quotaSnapshots = quotaFixture?.snapshots ?? [:]
 
-        DatabaseManager.cleanUpTemporaryRebuildDatabase()
+        if database.isPersistent {
+            database.cleanUpTemporaryRebuildDatabase()
+        }
 
         // React to filter changes
         Publishers.CombineLatest3($appFilter, $timeRange, $heatmapMode)
@@ -92,7 +101,7 @@ final class AppStore: ObservableObject {
 
     /// Apply the quota refresh interval while the panel is visible.
     private func applyQuotaRefreshInterval(_ interval: QuotaRefreshInterval) {
-        guard isPanelVisible else {
+        guard isPanelVisible, allowsLiveQuotaRefresh else {
             quotaRefreshScheduler.stop()
             return
         }
@@ -135,6 +144,7 @@ final class AppStore: ObservableObject {
     }
 
     func refreshEnabledQuotaProviders(force: Bool = false) {
+        guard allowsLiveQuotaRefresh else { return }
         let minimumInterval = quotaSettings.refreshInterval.minimumRequestInterval
         for provider in QuotaProviderID.allCases where quotaSettings.isEnabled(provider) {
             quotaService.refresh(
@@ -150,7 +160,16 @@ final class AppStore: ObservableObject {
 
     func quotaSettingsDidChange() {
         quotaSnapshots = quotaSnapshots.filter { quotaSettings.isEnabled($0.key) }
+        if let quotaFixture {
+            for provider in QuotaProviderID.allCases where quotaSettings.isEnabled(provider) {
+                quotaSnapshots[provider] = quotaFixture.snapshots[provider]
+            }
+        }
         applyQuotaRefreshInterval(quotaSettings.refreshInterval)
+    }
+
+    func quotaExpirationDate(for provider: QuotaProviderID) -> Date? {
+        quotaSettings.expirationDate(for: provider) ?? quotaFixture?.expirationDates[provider]
     }
 
     var visibleQuotaProviders: [QuotaProviderID] {

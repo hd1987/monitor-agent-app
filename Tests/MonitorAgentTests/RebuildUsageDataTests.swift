@@ -95,7 +95,7 @@ final class RebuildUsageDataTests: XCTestCase {
     }
 
     func testExclusiveSyncOperationsRunSerially() {
-        let database = DatabaseManager(inMemory: true)
+        let database = DatabaseManager()
         let syncManager = SessionSyncManager(database: database)
         let firstEntered = expectation(description: "first operation entered")
         let secondEntered = DispatchSemaphore(value: 0)
@@ -283,6 +283,37 @@ final class RebuildUsageDataTests: XCTestCase {
         XCTAssertEqual(summary.totalRequests, 1)
         XCTAssertEqual(summary.totalSessions, 1)
         XCTAssertEqual(activeDatabase.fetchStats(app: .all, range: .allTime).inputTokens, 120)
+    }
+
+    func testUsageDataRebuilderKeepsInMemoryDatabaseAndCreatesNoTemporaryFile() throws {
+        let directory = try makeTemporaryDirectory()
+        let temporaryPath = directory.appendingPathComponent("monitor-rebuild.tmp.db").path
+        let claudeRoot = directory.appendingPathComponent("claude-projects")
+        let codexRoot = directory.appendingPathComponent("codex-sessions")
+        let codexArchiveRoot = directory.appendingPathComponent("codex-archive")
+        try FileManager.default.createDirectory(at: claudeRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexArchiveRoot, withIntermediateDirectories: true)
+        try claudeAssistantLine().write(
+            to: claudeRoot.appendingPathComponent("session.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let activeDatabase = DatabaseManager()
+        activeDatabase.insertRecords([record(id: "old", input: 10)])
+        let rebuilder = UsageDataRebuilder(
+            activeDatabase: activeDatabase,
+            temporaryDatabasePath: temporaryPath,
+            claudeProjectsPath: claudeRoot.path,
+            codexSessionsPath: codexRoot.path,
+            codexArchivedSessionsPath: codexArchiveRoot.path
+        )
+
+        let summary = try rebuilder.rebuild()
+
+        XCTAssertEqual(summary.totalRequests, 1)
+        XCTAssertEqual(activeDatabase.fetchStats(app: .all, range: .allTime).inputTokens, 120)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temporaryPath))
     }
 
     func testUsageDataRebuilderForwardsProgressEvents() throws {
