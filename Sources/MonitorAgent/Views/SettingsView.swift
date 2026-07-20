@@ -1065,9 +1065,10 @@ struct FileEditorSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(subtitle)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+            SourcePathHeader(path: subtitle, finderKind: .file) {
+                Text(SourcePathPresentation.fileName(for: subtitle))
+                    .font(.system(size: 13, weight: .semibold))
+            }
 
             if fileExists {
                 TextEditor(text: $text)

@@ -111,6 +111,37 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         XCTAssertFalse(SettingsCategory.prompt.isReadOnly)
     }
 
+    func testFinderPathResolverOpensDirectoriesAndRevealsFiles() {
+        XCTAssertEqual(
+            FinderPathResolver.action(for: "/tmp", kind: .directory),
+            .open(URL(fileURLWithPath: "/tmp", isDirectory: true))
+        )
+        XCTAssertEqual(
+            FinderPathResolver.action(for: #filePath, kind: .file),
+            .reveal(URL(fileURLWithPath: #filePath))
+        )
+    }
+
+    func testFinderPathResolverFallsBackToNearestExistingDirectory() {
+        let missingPath = "/tmp/monitor-agent-missing-\(UUID().uuidString)/config.toml"
+
+        XCTAssertEqual(
+            FinderPathResolver.action(for: missingPath, kind: .file),
+            .open(URL(fileURLWithPath: "/tmp", isDirectory: true))
+        )
+    }
+
+    func testSourcePathPresentationExtractsSettingsFileNames() {
+        XCTAssertEqual(
+            SourcePathPresentation.fileName(for: "~/.claude/settings.json"),
+            "settings.json"
+        )
+        XCTAssertEqual(
+            SourcePathPresentation.fileName(for: "~/.codex/AGENTS.md"),
+            "AGENTS.md"
+        )
+    }
+
     func testSyncIntervalOptionsMatchGeneralSettingsMenu() {
         XCTAssertEqual(SyncInterval.allCases.map(\.displayName), ["10s", "30s", "60s", "Never"])
     }

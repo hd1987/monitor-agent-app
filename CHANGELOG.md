@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Share source headers across Extensions, Config, and Prompt settings, with names on the left and paths plus Finder actions on the right
+
 ## [0.6.4] - 2026-07-19
 
 ### Fixed
