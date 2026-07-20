@@ -18,6 +18,33 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         )
     }
 
+    func testSettingsWindowRevealsOnlyAfterRemovingPresentedSidebarToggle() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 820, height: 600),
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = NSHostingView(rootView: SettingsToolbarProbe())
+
+        SettingsWindowToolbar.prepareForPresentation(window)
+        XCTAssertEqual(window.alphaValue, 0)
+        window.makeKeyAndOrderFront(nil)
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
+        XCTAssertFalse(window.firstResponder is NSTextView)
+
+        SettingsWindowToolbar.revealAfterPresentation(window)
+
+        let toolbar = try XCTUnwrap(window.toolbar)
+        XCTAssertFalse(
+            toolbar.items.contains(where: {
+                $0.itemIdentifier == SettingsWindowToolbar.sidebarToggleIdentifier
+            })
+        )
+        XCTAssertEqual(window.alphaValue, 1)
+        window.orderOut(nil)
+    }
+
     func testUtilityGroupedSurfacesPreserveSpecifiedLightRGBValues() throws {
         XCTAssertEqual(
             UtilityWindowDesign.groupedSurfaceComponent,
@@ -124,5 +151,27 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         XCTAssertEqual(UsageDataRebuildCopy.runningMessage, "Rebuilding local usage data...")
         XCTAssertEqual(UsageDataRebuildCopy.successTitle, "Local usage data rebuilt successfully.")
         XCTAssertEqual(UsageDataRebuildCopy.failureTitle, "Rebuild failed. Your existing usage data was not changed.")
+    }
+}
+
+private struct SettingsToolbarProbe: View {
+    @FocusState private var isSidebarFocused: Bool
+    @State private var text = "Editable content"
+
+    var body: some View {
+        NavigationSplitView(columnVisibility: .constant(.all)) {
+            List {
+                Text("General")
+            }
+            .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 190)
+            .focused($isSidebarFocused)
+        } detail: {
+            TextEditor(text: $text)
+        }
+        .navigationSplitViewStyle(.balanced)
+        .frame(minWidth: 760, minHeight: 520)
+        .onAppear {
+            isSidebarFocused = true
+        }
     }
 }

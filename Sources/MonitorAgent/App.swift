@@ -376,6 +376,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             width: SettingsWindowLayout.minimumWidth,
             height: SettingsWindowLayout.minimumHeight
         )
+        SettingsWindowToolbar.prepareForPresentation(w)
         w.center()
         if keepingMainPanelVisible && panel.isVisible {
             panelPresentationState.suppressNextAutomaticDismissal()
@@ -384,7 +385,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         settingsPanel = w
         DispatchQueue.main.async { [weak w] in
-            SettingsWindowToolbar.removeSidebarToggle(from: w)
+            SettingsWindowToolbar.revealAfterPresentation(w)
         }
     }
 
@@ -456,9 +457,22 @@ enum SettingsWindowToolbar {
         "com.apple.SwiftUI.navigationSplitView.toggleSidebar"
     )
 
-    static func removeSidebarToggle(from window: NSWindow?) {
+    static func prepareForPresentation(_ window: NSWindow) {
+        window.alphaValue = 0
+        window.contentView?.layoutSubtreeIfNeeded()
+    }
+
+    static func revealAfterPresentation(_ window: NSWindow?) {
+        guard let window else { return }
+        removeSidebarToggle(from: window)
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        window.alphaValue = 1
+    }
+
+    private static func removeSidebarToggle(from window: NSWindow) {
         guard
-            let toolbar = window?.toolbar,
+            let toolbar = window.toolbar,
             let index = toolbar.items.firstIndex(where: {
                 $0.itemIdentifier == sidebarToggleIdentifier
             })

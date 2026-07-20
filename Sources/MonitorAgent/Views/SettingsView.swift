@@ -66,10 +66,9 @@ struct SettingsView: View {
     @EnvironmentObject var themeManager: ThemeManager
     @EnvironmentObject var store: AppStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var isSidebarFocused: Bool
 
-    var initialCategory: SettingsCategory = .general
-
-    @State private var selectedCategory: SettingsCategory = .general
+    @State private var selectedCategory: SettingsCategory
 
     // General drafts
     @State private var draftTheme: Theme = .system
@@ -112,6 +111,10 @@ struct SettingsView: View {
     @State private var showSaveSuccess: Bool = false
     @State private var saveSuccessMessage: String = ""
 
+    init(initialCategory: SettingsCategory = .general) {
+        _selectedCategory = State(initialValue: initialCategory)
+    }
+
     var body: some View {
         NavigationSplitView(
             columnVisibility: .constant(SettingsWindowLayout.sidebarVisibility)
@@ -124,6 +127,7 @@ struct SettingsView: View {
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 190)
+            .focused($isSidebarFocused)
         } detail: {
             VStack(spacing: 0) {
                 settingsContent
@@ -181,8 +185,8 @@ struct SettingsView: View {
             minHeight: SettingsWindowLayout.minimumHeight
         )
         .onAppear {
-            selectedCategory = initialCategory
-            loadCategory(initialCategory)
+            loadCategory(selectedCategory)
+            isSidebarFocused = true
         }
         .onChange(of: selectedCategory) {
             showSaveSuccess = false
