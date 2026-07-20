@@ -474,8 +474,8 @@ enum QuotaStatus: Equatable {
 
 enum QuotaRemaining {
     static func status(for percent: Double) -> QuotaStatus {
-        if percent < 10 { return .critical }
-        if percent < 40 { return .warning }
+        if percent <= 10 { return .critical }
+        if percent <= 40 { return .warning }
         return .healthy
     }
 }
