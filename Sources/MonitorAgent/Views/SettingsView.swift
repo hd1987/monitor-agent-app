@@ -40,27 +40,6 @@ enum SaveSuccessIndicatorStyle {
     static let systemImage = "checkmark.circle.fill"
 }
 
-enum SettingsSavePolicy {
-    static func isEnabled(
-        for category: SettingsCategory,
-        allowsExternalConfigSaving: Bool
-    ) -> Bool {
-        switch category {
-        case .general:
-            return true
-        case .extensions:
-            return false
-        case .config, .prompt:
-            return allowsExternalConfigSaving
-        }
-    }
-}
-
-enum GlobalShortcutSettingsCopy {
-    static let enabledDescription = "Show or hide the main panel from any app. Requires at least one modifier key."
-    static let developmentDisabledDescription = "Available only when running MonitorAgent from the installed app."
-}
-
 enum SettingsWindowLayout {
     static let defaultWidth: CGFloat = 820
     static let defaultHeight: CGFloat = 600
@@ -89,8 +68,6 @@ struct SettingsView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var isSidebarFocused: Bool
-    private let allowsGlobalShortcutRegistration = RuntimeEnvironment.current.featurePolicy.allowsGlobalShortcutRegistration
-    private let allowsExternalConfigSaving = RuntimeEnvironment.current.featurePolicy.allowsExternalConfigSaving
 
     @State private var selectedCategory: SettingsCategory
 
@@ -197,7 +174,6 @@ struct SettingsView: View {
                         }
                         .keyboardShortcut(.defaultAction)
                         .buttonStyle(.borderedProminent)
-                        .disabled(!isCurrentCategorySaveEnabled)
                     }
                 }
                 .padding(.horizontal, 20)
@@ -243,13 +219,6 @@ struct SettingsView: View {
         )
     }
 
-    private var isCurrentCategorySaveEnabled: Bool {
-        SettingsSavePolicy.isEnabled(
-            for: selectedCategory,
-            allowsExternalConfigSaving: allowsExternalConfigSaving
-        )
-    }
-
     @ViewBuilder
     private var settingsContent: some View {
         switch selectedCategory {
@@ -263,8 +232,7 @@ struct SettingsView: View {
                 draftCodexQuotaEnabled: $draftCodexQuotaEnabled,
                 draftClaudeExpirationDate: $draftClaudeExpirationDate,
                 draftCodexExpirationDate: $draftCodexExpirationDate,
-                draftQuotaRefreshInterval: $draftQuotaRefreshInterval,
-                allowsGlobalShortcutRegistration: allowsGlobalShortcutRegistration
+                draftQuotaRefreshInterval: $draftQuotaRefreshInterval
             )
         case .extensions:
             ExtensionsSettingsView(
@@ -354,14 +322,12 @@ struct SettingsView: View {
     private func saveCurrentCategory() {
         switch selectedCategory {
         case .general:
-            if allowsGlobalShortcutRegistration {
-                do {
-                    try GlobalShortcutController.shared.updateShortcut(draftGlobalShortcut)
-                } catch {
-                    saveErrorMessage = error.localizedDescription
-                    showSaveError = true
-                    return
-                }
+            do {
+                try GlobalShortcutController.shared.updateShortcut(draftGlobalShortcut)
+            } catch {
+                saveErrorMessage = error.localizedDescription
+                showSaveError = true
+                return
             }
             themeManager.theme = draftTheme
             SyncSettings.shared.interval = draftSyncInterval
@@ -485,7 +451,6 @@ struct GeneralSettingsView: View {
     @Binding var draftClaudeExpirationDate: Date?
     @Binding var draftCodexExpirationDate: Date?
     @Binding var draftQuotaRefreshInterval: QuotaRefreshInterval
-    let allowsGlobalShortcutRegistration: Bool
     @State private var showUsageDataRebuildSheet = false
 
     var body: some View {
@@ -508,12 +473,9 @@ struct GeneralSettingsView: View {
 
                 SettingsRow(
                     title: "Global Shortcut",
-                    description: allowsGlobalShortcutRegistration
-                        ? GlobalShortcutSettingsCopy.enabledDescription
-                        : GlobalShortcutSettingsCopy.developmentDisabledDescription
+                    description: "Show or hide the main panel from any app. Requires at least one modifier key."
                 ) {
                     GlobalShortcutRecorder(shortcut: $draftGlobalShortcut)
-                        .disabled(!allowsGlobalShortcutRegistration)
                 }
 
                 SettingsRow(

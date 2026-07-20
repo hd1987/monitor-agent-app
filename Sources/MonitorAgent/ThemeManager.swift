@@ -26,18 +26,16 @@ enum StatusPalette {
 
 /// Manages app-wide theme, persisted to UserDefaults.
 final class ThemeManager: ObservableObject {
-    static let shared = ThemeManager(defaults: RuntimeEnvironment.current.preferences)
+    static let shared = ThemeManager()
 
     @Published var theme: Theme {
-        didSet { defaults.set(theme.rawValue, forKey: "appTheme") }
+        didSet { UserDefaults.standard.set(theme.rawValue, forKey: "appTheme") }
     }
 
-    private let defaults: PreferencesStoring
     private var cancellables = Set<AnyCancellable>()
 
-    init(defaults: PreferencesStoring = UserDefaults.standard) {
-        self.defaults = defaults
-        let raw = defaults.string(forKey: "appTheme") ?? "system"
+    private init() {
+        let raw = UserDefaults.standard.string(forKey: "appTheme") ?? "system"
         self.theme = Theme(rawValue: raw) ?? .system
     }
 

@@ -111,24 +111,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var aboutPanel: NSWindow?
     private var statusMenu: NSMenu!
     private var rightClickHandled = false
-    private let runtimeEnvironment = RuntimeEnvironment.current
-    private lazy var database = DatabaseManager.openForRuntime(runtimeEnvironment)
-    private lazy var store = AppStore(
-        database: database,
-        allowsLiveQuotaRefresh: runtimeEnvironment.featurePolicy.allowsLiveQuotaRefresh,
-        quotaFixture: runtimeEnvironment.mode == .development
-            && !runtimeEnvironment.featurePolicy.allowsLiveQuotaRefresh
-            ? DevelopmentQuotaFixtures.make()
-            : nil
-    )
-    private var instanceLock: ProcessInstanceLock?
+    private let store = AppStore()
     private let panelPresentationState = PanelPresentationState()
     private let themeManager = ThemeManager.shared
     private let globalShortcutController = GlobalShortcutController.shared
     private var themeCancellable: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        guard acquireProductionInstanceLock() else { return }
+        DatabaseManager.cleanUpTemporaryRebuildDatabase()
         NSApp.setActivationPolicy(.accessory)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
@@ -235,26 +225,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Auto-check for updates on launch (silent, 24h throttle)
         UpdateChecker.shared.checkOnLaunch()
-    }
-
-    private func acquireProductionInstanceLock() -> Bool {
-        guard runtimeEnvironment.isProduction else { return true }
-        do {
-            instanceLock = try ProcessInstanceLock(path: runtimeEnvironment.instanceLockPath)
-            return true
-        } catch ProcessInstanceLockError.alreadyLocked {
-            let currentProcessIdentifier = ProcessInfo.processInfo.processIdentifier
-            NSRunningApplication.runningApplications(
-                withBundleIdentifier: RuntimeEnvironment.productionBundleIdentifier
-            )
-            .first { $0.processIdentifier != currentProcessIdentifier }?
-            .activate(options: [])
-        } catch {
-            print("Failed to acquire production instance lock: \(error)")
-        }
-        NSApp.terminate(nil)
-        ForceTermination.scheduleFallbackExit()
-        return false
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {

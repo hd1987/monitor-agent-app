@@ -21,12 +21,8 @@ enum SyncInterval: Int, CaseIterable, Identifiable {
 
 /// Persists sync interval to UserDefaults and publishes changes.
 final class SyncSettings: ObservableObject {
-    static let shared = SyncSettings(
-        defaults: RuntimeEnvironment.current.preferences,
-        allowsLaunchAtLogin: RuntimeEnvironment.current.featurePolicy.allowsLaunchAtLogin
-    )
-    private let defaults: PreferencesStoring
-    private let allowsLaunchAtLogin: Bool
+    static let shared = SyncSettings()
+    private let defaults: UserDefaults
 
     @Published var interval: SyncInterval {
         didSet { defaults.set(interval.rawValue, forKey: "syncInterval") }
@@ -48,26 +44,17 @@ final class SyncSettings: ObservableObject {
     /// Whether the app is running as a proper .app bundle (SMAppService requires it)
     var canControlLaunchAtLogin: Bool {
         Self.canRegisterLaunchAtLogin(
-            allowedByRuntime: allowsLaunchAtLogin,
             bundlePath: Bundle.main.bundlePath,
             bundleIdentifier: Bundle.main.bundleIdentifier
         )
     }
 
-    static func canRegisterLaunchAtLogin(
-        allowedByRuntime: Bool = true,
-        bundlePath: String,
-        bundleIdentifier: String?
-    ) -> Bool {
-        allowedByRuntime && bundleIdentifier != nil && bundlePath.hasSuffix(".app")
+    static func canRegisterLaunchAtLogin(bundlePath: String, bundleIdentifier: String?) -> Bool {
+        bundleIdentifier != nil && bundlePath.hasSuffix(".app")
     }
 
-    init(
-        defaults: PreferencesStoring = UserDefaults.standard,
-        allowsLaunchAtLogin: Bool = true
-    ) {
+    init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        self.allowsLaunchAtLogin = allowsLaunchAtLogin
         let raw = defaults.integer(forKey: "syncInterval")
         // Default to 30s if no saved value (0 is valid for "never", but fresh install has no key)
         if defaults.object(forKey: "syncInterval") == nil {

@@ -27,7 +27,7 @@ final class UsageDataRebuilder {
 
     init(
         activeDatabase: DatabaseManager = .shared,
-        temporaryDatabasePath: String? = nil,
+        temporaryDatabasePath: String = DatabaseManager.rebuildDatabasePath,
         claudeProjectsPath: String = NSHomeDirectory() + "/.claude/projects",
         codexSessionsPath: String = NSHomeDirectory() + "/.codex/sessions",
         codexArchivedSessionsPath: String = NSHomeDirectory() + "/.codex/archived_sessions",
@@ -35,8 +35,6 @@ final class UsageDataRebuilder {
     ) {
         self.activeDatabase = activeDatabase
         self.temporaryDatabasePath = temporaryDatabasePath
-            ?? activeDatabase.ownedRebuildDatabasePath
-            ?? ""
         self.claudeProjectsPath = claudeProjectsPath
         self.codexSessionsPath = codexSessionsPath
         self.codexArchivedSessionsPath = codexArchivedSessionsPath
@@ -49,15 +47,10 @@ final class UsageDataRebuilder {
     ) throws -> UsageDataRebuildSummary {
         let startedAt = Date()
         var temporaryDatabase: DatabaseManager?
-        let usesPersistentTemporaryDatabase = activeDatabase.isPersistent
 
         do {
-            if usesPersistentTemporaryDatabase {
-                cleanUpTemporaryDatabase()
-            }
-            let rebuildDatabase = try usesPersistentTemporaryDatabase
-                ? DatabaseManager(path: temporaryDatabasePath)
-                : DatabaseManager()
+            cleanUpTemporaryDatabase()
+            let rebuildDatabase = try DatabaseManager(path: temporaryDatabasePath)
             temporaryDatabase = rebuildDatabase
 
             let syncManager = SessionSyncManager(
@@ -109,15 +102,9 @@ final class UsageDataRebuilder {
             }
 
             onProgress?(phaseProgress(.replacing, recordsSynced: syncResult.recordsSynced))
-            if usesPersistentTemporaryDatabase {
-                rebuildDatabase.close()
-                temporaryDatabase = nil
-                try activeDatabase.replaceDatabase(with: temporaryDatabasePath)
-            } else {
-                try activeDatabase.replaceDatabase(with: rebuildDatabase)
-                rebuildDatabase.close()
-                temporaryDatabase = nil
-            }
+            rebuildDatabase.close()
+            temporaryDatabase = nil
+            try activeDatabase.replaceDatabase(with: temporaryDatabasePath)
 
             onProgress?(phaseProgress(.syncingLatest, recordsSynced: syncResult.recordsSynced))
             let latestSyncManager = SessionSyncManager(
@@ -154,9 +141,7 @@ final class UsageDataRebuilder {
             )
         } catch {
             temporaryDatabase?.close()
-            if usesPersistentTemporaryDatabase {
-                cleanUpTemporaryDatabase()
-            }
+            cleanUpTemporaryDatabase()
             throw error
         }
     }

@@ -17,7 +17,7 @@ final class DatabaseRecoveryTests: XCTestCase {
     }
 
     func testCommitSyncPersistsRecordsAndStateTogether() throws {
-        let database = DatabaseManager()
+        let database = DatabaseManager(inMemory: true)
         let state = SyncState(
             filePath: "/tmp/session.jsonl",
             byteOffset: 128,
@@ -35,7 +35,7 @@ final class DatabaseRecoveryTests: XCTestCase {
     }
 
     func testCommitSyncReportsUnavailableDatabase() {
-        let database = DatabaseManager()
+        let database = DatabaseManager(inMemory: true)
         database.close()
         let state = SyncState(
             filePath: "/tmp/session.jsonl",
