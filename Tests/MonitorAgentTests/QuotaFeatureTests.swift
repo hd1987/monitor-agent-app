@@ -25,11 +25,11 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(QuotaCardLayout.resetTipItemSpacing, 8)
     }
 
-    func testQuotaRemainingUrgencyThresholds() {
-        XCTAssertEqual(QuotaRemainingUrgency.level(for: 40), .standard)
-        XCTAssertEqual(QuotaRemainingUrgency.level(for: 39.99), .warning)
-        XCTAssertEqual(QuotaRemainingUrgency.level(for: 10), .warning)
-        XCTAssertEqual(QuotaRemainingUrgency.level(for: 9.99), .critical)
+    func testQuotaRemainingStatusThresholds() {
+        XCTAssertEqual(QuotaRemaining.status(for: 40), .healthy)
+        XCTAssertEqual(QuotaRemaining.status(for: 39.99), .warning)
+        XCTAssertEqual(QuotaRemaining.status(for: 10), .warning)
+        XCTAssertEqual(QuotaRemaining.status(for: 9.99), .critical)
     }
 
     func testResetCreditsCopyUsesExpirationColumnHeading() {
@@ -54,43 +54,88 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertNil(ResetCreditExpiration.next(in: [expired], after: now))
     }
 
-    func testResetCreditExpirationUrgencyThresholds() {
+    func testResetCreditExpirationStatusUsesCalendarDayThresholds() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = Date(timeIntervalSince1970: 1_000_000)
 
         XCTAssertEqual(
-            ResetCreditExpiration.urgency(
-                for: now.addingTimeInterval(7 * 24 * 60 * 60),
-                now: now
+            ResetCreditExpiration.status(
+                for: now.addingTimeInterval(8 * 24 * 60 * 60),
+                now: now,
+                calendar: calendar
             ),
-            .standard
+            .healthy
         )
         XCTAssertEqual(
-            ResetCreditExpiration.urgency(
-                for: now.addingTimeInterval(6 * 24 * 60 * 60),
-                now: now
+            ResetCreditExpiration.status(
+                for: now.addingTimeInterval(7 * 24 * 60 * 60),
+                now: now,
+                calendar: calendar
             ),
             .warning
         )
         XCTAssertEqual(
-            ResetCreditExpiration.urgency(
-                for: now.addingTimeInterval(2 * 24 * 60 * 60),
-                now: now
+            ResetCreditExpiration.status(
+                for: now.addingTimeInterval(6 * 24 * 60 * 60),
+                now: now,
+                calendar: calendar
+            ),
+            .warning
+        )
+        XCTAssertEqual(
+            ResetCreditExpiration.status(
+                for: now.addingTimeInterval(4 * 24 * 60 * 60),
+                now: now,
+                calendar: calendar
+            ),
+            .warning
+        )
+        XCTAssertEqual(
+            ResetCreditExpiration.status(
+                for: now.addingTimeInterval(3 * 24 * 60 * 60),
+                now: now,
+                calendar: calendar
             ),
             .critical
         )
     }
 
-    func testResetCreditCountUrgencyUsesNearestFutureExpiration() {
+    func testResetCreditExpirationStatusIgnoresTimeOfDay() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 7,
+            day: 20,
+            hour: 0,
+            minute: 1
+        )))
+        let expiration = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 7,
+            day: 23,
+            hour: 23,
+            minute: 59
+        )))
+
+        XCTAssertEqual(
+            ResetCreditExpiration.status(for: expiration, now: now, calendar: calendar),
+            .critical
+        )
+    }
+
+    func testResetCreditCountStatusUsesNearestFutureExpiration() {
         let now = Date(timeIntervalSince1970: 1_000_000)
         let expired = now.addingTimeInterval(-60)
         let warning = now.addingTimeInterval(6 * 24 * 60 * 60)
         let standard = now.addingTimeInterval(8 * 24 * 60 * 60)
 
         XCTAssertEqual(
-            ResetCreditExpiration.urgency(in: [standard, warning, expired], after: now),
+            ResetCreditExpiration.status(in: [standard, warning, expired], after: now),
             .warning
         )
-        XCTAssertNil(ResetCreditExpiration.urgency(in: [expired], after: now))
+        XCTAssertEqual(ResetCreditExpiration.status(in: [expired], after: now), .unknown)
     }
 
     func testCodexDetectionIncludesBundledMacAppExecutables() {
@@ -162,15 +207,23 @@ final class QuotaFeatureTests: XCTestCase {
             calendar: calendar
         ))
         XCTAssertEqual(
-            SubscriptionExpiration.urgency(
+            SubscriptionExpiration.status(
+                for: now.addingTimeInterval(8 * 24 * 60 * 60),
+                now: now,
+                calendar: calendar
+            ),
+            .healthy
+        )
+        XCTAssertEqual(
+            SubscriptionExpiration.status(
                 for: now.addingTimeInterval(7 * 24 * 60 * 60),
                 now: now,
                 calendar: calendar
             ),
-            .standard
+            .warning
         )
         XCTAssertEqual(
-            SubscriptionExpiration.urgency(
+            SubscriptionExpiration.status(
                 for: now.addingTimeInterval(6 * 24 * 60 * 60),
                 now: now,
                 calendar: calendar
@@ -178,8 +231,16 @@ final class QuotaFeatureTests: XCTestCase {
             .warning
         )
         XCTAssertEqual(
-            SubscriptionExpiration.urgency(
-                for: now.addingTimeInterval(2 * 24 * 60 * 60),
+            SubscriptionExpiration.status(
+                for: now.addingTimeInterval(4 * 24 * 60 * 60),
+                now: now,
+                calendar: calendar
+            ),
+            .warning
+        )
+        XCTAssertEqual(
+            SubscriptionExpiration.status(
+                for: now.addingTimeInterval(3 * 24 * 60 * 60),
                 now: now,
                 calendar: calendar
             ),

@@ -262,13 +262,16 @@ private struct SubscriptionQuotaCard: View {
     }
 
     private func quotaColor(_ percent: Double) -> Color {
-        QuotaStatusPalette.color(for: QuotaRemainingUrgency.level(for: percent))
+        QuotaStatusPalette.color(
+            for: QuotaRemaining.status(for: percent),
+            unknown: theme.panelSecondaryForeground
+        )
     }
 
     private var planColor: Color {
         guard let expirationDate else { return theme.panelSecondaryForeground }
-        switch SubscriptionExpiration.urgency(for: expirationDate) {
-        case .standard: return theme.panelSecondaryForeground
+        switch SubscriptionExpiration.status(for: expirationDate) {
+        case .healthy, .unknown: return theme.panelSecondaryForeground
         case .warning: return QuotaStatusPalette.warning
         case .critical: return QuotaStatusPalette.critical
         }
@@ -280,7 +283,8 @@ private struct SubscriptionQuotaCard: View {
 
     private func resetCreditCountColor(expirations: [Date]) -> Color {
         QuotaStatusPalette.color(
-            for: ResetCreditExpiration.urgency(in: expirations) ?? .standard
+            for: ResetCreditExpiration.status(in: expirations),
+            unknown: theme.panelSecondaryForeground
         )
     }
 
@@ -327,7 +331,10 @@ private struct SubscriptionExpirationTip: View {
     }
 
     private var statusColor: Color {
-        QuotaStatusPalette.color(for: SubscriptionExpiration.urgency(for: expirationDate))
+        QuotaStatusPalette.color(
+            for: SubscriptionExpiration.status(for: expirationDate),
+            unknown: theme.tooltipForeground.opacity(0.72)
+        )
     }
 }
 
@@ -383,9 +390,15 @@ private struct ResetCreditsTip: View {
     }
 
     private func expirationColor(at index: Int) -> Color {
-        guard expirations.indices.contains(index) else { return QuotaStatusPalette.healthy }
+        guard expirations.indices.contains(index) else {
+            return QuotaStatusPalette.color(
+                for: .unknown,
+                unknown: theme.tooltipForeground.opacity(0.72)
+            )
+        }
         return QuotaStatusPalette.color(
-            for: ResetCreditExpiration.urgency(for: expirations[index])
+            for: ResetCreditExpiration.status(for: expirations[index]),
+            unknown: theme.tooltipForeground.opacity(0.72)
         )
     }
 }
@@ -436,17 +449,12 @@ enum SubscriptionExpiration {
         calendar.startOfDay(for: expirationDate) < calendar.startOfDay(for: now)
     }
 
-    static func urgency(
+    static func status(
         for expirationDate: Date,
         now: Date = Date(),
         calendar: Calendar = .current
-    ) -> ResetCreditExpirationUrgency {
-        let today = calendar.startOfDay(for: now)
-        let expirationDay = calendar.startOfDay(for: expirationDate)
-        let days = calendar.dateComponents([.day], from: today, to: expirationDay).day ?? 0
-        if days < 3 { return .critical }
-        if days < 7 { return .warning }
-        return .standard
+    ) -> QuotaStatus {
+        QuotaExpiration.status(for: expirationDate, now: now, calendar: calendar)
     }
 
     private static let dateFormatter: DateFormatter = {
@@ -457,21 +465,33 @@ enum SubscriptionExpiration {
     }()
 }
 
-enum ResetCreditExpirationUrgency: Equatable {
-    case standard
+enum QuotaStatus: Equatable {
+    case healthy
     case warning
     case critical
+    case unknown
 }
 
-enum QuotaRemainingUrgency: Equatable {
-    case standard
-    case warning
-    case critical
-
-    static func level(for percent: Double) -> QuotaRemainingUrgency {
+enum QuotaRemaining {
+    static func status(for percent: Double) -> QuotaStatus {
         if percent < 10 { return .critical }
         if percent < 40 { return .warning }
-        return .standard
+        return .healthy
+    }
+}
+
+enum QuotaExpiration {
+    static func status(
+        for expiration: Date,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> QuotaStatus {
+        let today = calendar.startOfDay(for: now)
+        let expirationDay = calendar.startOfDay(for: expiration)
+        let days = calendar.dateComponents([.day], from: today, to: expirationDay).day ?? 0
+        if days <= 3 { return .critical }
+        if days <= 7 { return .warning }
+        return .healthy
     }
 }
 
@@ -480,44 +500,36 @@ enum QuotaStatusPalette {
     static let warning = StatusPalette.warning
     static let critical = StatusPalette.error
 
-    static func color(for urgency: QuotaRemainingUrgency) -> Color {
-        switch urgency {
-        case .standard: return healthy
+    static func color(for status: QuotaStatus, unknown: Color) -> Color {
+        switch status {
+        case .healthy: return healthy
         case .warning: return warning
         case .critical: return critical
-        }
-    }
-
-    static func color(for urgency: ResetCreditExpirationUrgency) -> Color {
-        switch urgency {
-        case .standard: return healthy
-        case .warning: return warning
-        case .critical: return critical
+        case .unknown: return unknown
         }
     }
 }
 
 enum ResetCreditExpiration {
-    static let warningInterval: TimeInterval = 7 * 24 * 60 * 60
-    static let criticalInterval: TimeInterval = 3 * 24 * 60 * 60
-
     static func next(in expirations: [Date], after now: Date = Date()) -> Date? {
         expirations.filter { $0 > now }.min()
     }
 
-    static func urgency(
+    static func status(
         in expirations: [Date],
-        after now: Date = Date()
-    ) -> ResetCreditExpirationUrgency? {
-        guard let expiration = next(in: expirations, after: now) else { return nil }
-        return urgency(for: expiration, now: now)
+        after now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> QuotaStatus {
+        guard let expiration = next(in: expirations, after: now) else { return .unknown }
+        return status(for: expiration, now: now, calendar: calendar)
     }
 
-    static func urgency(for expiration: Date, now: Date = Date()) -> ResetCreditExpirationUrgency {
-        let remaining = expiration.timeIntervalSince(now)
-        if remaining < criticalInterval { return .critical }
-        if remaining < warningInterval { return .warning }
-        return .standard
+    static func status(
+        for expiration: Date,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> QuotaStatus {
+        QuotaExpiration.status(for: expiration, now: now, calendar: calendar)
     }
 }
 
