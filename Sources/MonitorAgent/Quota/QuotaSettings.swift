@@ -24,7 +24,7 @@ enum QuotaRefreshInterval: Int, CaseIterable, Identifiable {
 }
 
 final class QuotaSettings: ObservableObject {
-    static let shared = QuotaSettings(defaults: RuntimeEnvironment.current.preferences)
+    static let shared = QuotaSettings()
 
     @Published var claudeEnabled: Bool {
         didSet { defaults.set(claudeEnabled, forKey: Keys.claudeEnabled) }
@@ -46,9 +46,9 @@ final class QuotaSettings: ObservableObject {
         didSet { defaults.set(refreshInterval.rawValue, forKey: Keys.refreshInterval) }
     }
 
-    private let defaults: PreferencesStoring
+    private let defaults: UserDefaults
 
-    init(defaults: PreferencesStoring = UserDefaults.standard) {
+    init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         claudeEnabled = defaults.object(forKey: Keys.claudeEnabled) as? Bool ?? true
         codexEnabled = defaults.object(forKey: Keys.codexEnabled) as? Bool ?? true

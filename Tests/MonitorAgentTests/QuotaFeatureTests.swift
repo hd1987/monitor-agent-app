@@ -25,25 +25,6 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(QuotaCardLayout.resetTipItemSpacing, 8)
     }
 
-    func testDevelopmentQuotaFixturesExerciseCompleteCardStates() throws {
-        let now = Date(timeIntervalSince1970: 1_800_000_000)
-        let fixture = DevelopmentQuotaFixtures.make(now: now)
-        let claude = try XCTUnwrap(fixture.snapshots[.claude])
-        let codex = try XCTUnwrap(fixture.snapshots[.codex])
-
-        XCTAssertEqual(claude.status, .available)
-        XCTAssertEqual(claude.plan, "MAX")
-        XCTAssertEqual(claude.fiveHour?.remainingPercent, 72)
-        XCTAssertEqual(claude.weekly?.remainingPercent, 34)
-        XCTAssertEqual(claude.opusWeekly?.remainingPercent, 8)
-        XCTAssertEqual(codex.status, .available)
-        XCTAssertEqual(codex.plan, "PLUS")
-        XCTAssertEqual(codex.resetCredits, 3)
-        XCTAssertEqual(codex.resetCreditExpirations.count, 3)
-        XCTAssertNotNil(fixture.expirationDates[.claude])
-        XCTAssertNotNil(fixture.expirationDates[.codex])
-    }
-
     func testQuotaRemainingStatusThresholds() {
         XCTAssertEqual(QuotaRemaining.status(for: 40), .healthy)
         XCTAssertEqual(QuotaRemaining.status(for: 39.99), .warning)

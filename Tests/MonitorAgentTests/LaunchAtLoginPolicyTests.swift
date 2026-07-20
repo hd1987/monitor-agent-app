@@ -12,14 +12,6 @@ final class LaunchAtLoginPolicyTests: XCTestCase {
 
         XCTAssertFalse(
             SyncSettings.canRegisterLaunchAtLogin(
-                allowedByRuntime: false,
-                bundlePath: "/Applications/MonitorAgent.app",
-                bundleIdentifier: "com.hd1987.monitor-agent"
-            )
-        )
-
-        XCTAssertFalse(
-            SyncSettings.canRegisterLaunchAtLogin(
                 bundlePath: "/Users/adi/Work/monitor-agent-app/.build/arm64-apple-macosx/debug/MonitorAgent",
                 bundleIdentifier: nil
             )

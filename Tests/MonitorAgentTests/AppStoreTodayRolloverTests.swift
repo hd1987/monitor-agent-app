@@ -9,7 +9,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         defaults.set(SyncInterval.ten.rawValue, forKey: "syncInterval")
         let syncSettings = SyncSettings(defaults: defaults)
         let syncManager = SessionSyncManager(
-            database: DatabaseManager(),
+            database: DatabaseManager(inMemory: true),
             claudeProjectsPath: "/nonexistent/claude",
             codexSessionsPath: "/nonexistent/codex",
             codexArchivedSessionsPath: "/nonexistent/codex-archive"
@@ -19,7 +19,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         let quotaSettings = QuotaSettings(defaults: quotaDefaults)
         let quotaService = RecordingQuotaService()
         let store = AppStore(
-            database: DatabaseManager(),
+            database: DatabaseManager(inMemory: true),
             syncManager: syncManager,
             syncSettings: syncSettings,
             quotaService: quotaService,
@@ -49,7 +49,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
     func testAppFilterDoesNotTriggerQuotaRefresh() {
         let quotaService = RecordingQuotaService()
         let store = AppStore(
-            database: DatabaseManager(),
+            database: DatabaseManager(inMemory: true),
             quotaService: quotaService,
             observeSyncIntervalChanges: false
         )
@@ -63,7 +63,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
     func testPanelOpenRefreshesAllEnabledQuotaProvidersRegardlessOfFilter() {
         let quotaService = RecordingQuotaService()
         let store = AppStore(
-            database: DatabaseManager(),
+            database: DatabaseManager(inMemory: true),
             quotaService: quotaService,
             observeSyncIntervalChanges: false
         )
@@ -75,30 +75,6 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         store.panelDidClose()
     }
 
-    func testPanelOpenSkipsQuotaRefreshWhenRuntimePolicyDisablesLiveRequests() {
-        let now = Date(timeIntervalSince1970: 1_800_000_000)
-        let quotaService = RecordingQuotaService()
-        let quotaFixture = DevelopmentQuotaFixtures.make(now: now)
-        let store = AppStore(
-            database: DatabaseManager(),
-            quotaService: quotaService,
-            allowsLiveQuotaRefresh: false,
-            quotaFixture: quotaFixture,
-            observeSyncIntervalChanges: false
-        )
-
-        store.panelDidOpen()
-
-        XCTAssertTrue(quotaService.providers.isEmpty)
-        XCTAssertFalse(store.isPeriodicQuotaRefreshActive)
-        XCTAssertEqual(store.quotaSnapshots, quotaFixture.snapshots)
-        XCTAssertEqual(
-            store.quotaExpirationDate(for: .codex),
-            quotaFixture.expirationDates[.codex]
-        )
-        store.panelDidClose()
-    }
-
     func testQuotaSettingsChangeRestartsVisiblePanelWithNewInterval() {
         let suiteName = "AppStoreTodayRolloverTests.quotaInterval"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -106,7 +82,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         let quotaSettings = QuotaSettings(defaults: defaults)
         let quotaService = RecordingQuotaService()
         let store = AppStore(
-            database: DatabaseManager(),
+            database: DatabaseManager(inMemory: true),
             quotaService: quotaService,
             quotaSettings: quotaSettings,
             observeSyncIntervalChanges: false
@@ -130,7 +106,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         quotaSettings.refreshInterval = .never
         let quotaService = RecordingQuotaService()
         let store = AppStore(
-            database: DatabaseManager(),
+            database: DatabaseManager(inMemory: true),
             quotaService: quotaService,
             quotaSettings: quotaSettings,
             observeSyncIntervalChanges: false
@@ -148,7 +124,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
     func testSelectActivityDateForTodayUsesDynamicTodayPreset() {
         let now = date(year: 2026, month: 7, day: 9, hour: 10)
         let store = AppStore(
-            database: DatabaseManager(),
+            database: DatabaseManager(inMemory: true),
             observeSyncIntervalChanges: false,
             currentDateProvider: { now }
         )
@@ -162,7 +138,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
     func testSelectZeroActivityDateKeepsSelectionAndLoadsZeroHourlyUsage() {
         let now = date(year: 2026, month: 7, day: 9, hour: 10)
         let store = AppStore(
-            database: DatabaseManager(),
+            database: DatabaseManager(inMemory: true),
             observeSyncIntervalChanges: false,
             currentDateProvider: { now }
         )
@@ -198,7 +174,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
     func testReloadAfterDayRolloverResetsAnySelectionToToday() {
         var now = date(year: 2026, month: 7, day: 9, hour: 23)
         let store = AppStore(
-            database: DatabaseManager(),
+            database: DatabaseManager(inMemory: true),
             observeSyncIntervalChanges: false,
             currentDateProvider: { now }
         )
@@ -233,7 +209,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
 
     func testReloadClearsUnavailableYearsAndResetsYearMode() {
         let store = AppStore(
-            database: DatabaseManager(),
+            database: DatabaseManager(inMemory: true),
             observeSyncIntervalChanges: false
         )
         store.availableYears = [2025]

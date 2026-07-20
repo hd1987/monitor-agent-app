@@ -14,7 +14,7 @@ struct SubscriptionQuotaView: View {
                     SubscriptionQuotaCard(
                         provider: provider,
                         snapshot: store.quotaSnapshots[provider],
-                        expirationDate: store.quotaExpirationDate(for: provider)
+                        expirationDate: QuotaSettings.shared.expirationDate(for: provider)
                     )
                 }
             }
