@@ -26,9 +26,10 @@ final class QuotaFeatureTests: XCTestCase {
     }
 
     func testQuotaRemainingStatusThresholds() {
-        XCTAssertEqual(QuotaRemaining.status(for: 40), .healthy)
-        XCTAssertEqual(QuotaRemaining.status(for: 39.99), .warning)
-        XCTAssertEqual(QuotaRemaining.status(for: 10), .warning)
+        XCTAssertEqual(QuotaRemaining.status(for: 40.01), .healthy)
+        XCTAssertEqual(QuotaRemaining.status(for: 40), .warning)
+        XCTAssertEqual(QuotaRemaining.status(for: 10.01), .warning)
+        XCTAssertEqual(QuotaRemaining.status(for: 10), .critical)
         XCTAssertEqual(QuotaRemaining.status(for: 9.99), .critical)
     }
 
