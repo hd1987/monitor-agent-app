@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-07-20
+
 ### Fixed
 - Disable the Global Shortcut recorder in development mode to match its system registration policy
 
