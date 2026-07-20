@@ -18,6 +18,33 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         )
     }
 
+    func testSettingsWindowRevealsOnlyAfterRemovingPresentedSidebarToggle() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 820, height: 600),
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = NSHostingView(rootView: SettingsToolbarProbe())
+
+        SettingsWindowToolbar.prepareForPresentation(window)
+        XCTAssertEqual(window.alphaValue, 0)
+        window.makeKeyAndOrderFront(nil)
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
+        XCTAssertFalse(window.firstResponder is NSTextView)
+
+        SettingsWindowToolbar.revealAfterPresentation(window)
+
+        let toolbar = try XCTUnwrap(window.toolbar)
+        XCTAssertFalse(
+            toolbar.items.contains(where: {
+                $0.itemIdentifier == SettingsWindowToolbar.sidebarToggleIdentifier
+            })
+        )
+        XCTAssertEqual(window.alphaValue, 1)
+        window.orderOut(nil)
+    }
+
     func testUtilityGroupedSurfacesPreserveSpecifiedLightRGBValues() throws {
         XCTAssertEqual(
             UtilityWindowDesign.groupedSurfaceComponent,
@@ -63,6 +90,40 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         XCTAssertEqual(SettingsCategory.prompt.saveConfirmationMessage, "Apply changes to Prompt settings.")
     }
 
+    func testOnlyExtensionsCategoryIsReadOnly() {
+        XCTAssertFalse(SettingsCategory.general.isReadOnly)
+        XCTAssertTrue(SettingsCategory.extensions.isReadOnly)
+    }
+
+    func testDevelopmentPolicyDisablesOnlyExternalConfigSaving() {
+        XCTAssertTrue(SettingsSavePolicy.isEnabled(
+            for: .general,
+            allowsExternalConfigSaving: false
+        ))
+        XCTAssertFalse(SettingsSavePolicy.isEnabled(
+            for: .extensions,
+            allowsExternalConfigSaving: false
+        ))
+        XCTAssertFalse(SettingsSavePolicy.isEnabled(
+            for: .config,
+            allowsExternalConfigSaving: false
+        ))
+        XCTAssertFalse(SettingsSavePolicy.isEnabled(
+            for: .prompt,
+            allowsExternalConfigSaving: false
+        ))
+        XCTAssertTrue(SettingsSavePolicy.isEnabled(
+            for: .config,
+            allowsExternalConfigSaving: true
+        ))
+        XCTAssertTrue(SettingsSavePolicy.isEnabled(
+            for: .prompt,
+            allowsExternalConfigSaving: true
+        ))
+        XCTAssertFalse(SettingsCategory.config.isReadOnly)
+        XCTAssertFalse(SettingsCategory.prompt.isReadOnly)
+    }
+
     func testSaveSuccessMessageMatchesEachSettingsCategory() {
         XCTAssertEqual(SettingsCategory.general.saveSuccessMessage, "General settings saved.")
         XCTAssertEqual(SettingsCategory.config.saveSuccessMessage, "Config settings saved.")
@@ -71,6 +132,13 @@ final class SettingsSaveConfirmationTests: XCTestCase {
 
     func testSaveSuccessUsesInlineCheckmarkIndicator() {
         XCTAssertEqual(SaveSuccessIndicatorStyle.systemImage, "checkmark.circle.fill")
+    }
+
+    func testDevelopmentGlobalShortcutCopyExplainsInstalledAppRequirement() {
+        XCTAssertEqual(
+            GlobalShortcutSettingsCopy.developmentDisabledDescription,
+            "Available only when running MonitorAgent from the installed app."
+        )
     }
 
     func testExtensionsIsACombinedReadOnlyCategory() {
@@ -82,6 +150,37 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         XCTAssertFalse(SettingsCategory.general.isReadOnly)
         XCTAssertFalse(SettingsCategory.config.isReadOnly)
         XCTAssertFalse(SettingsCategory.prompt.isReadOnly)
+    }
+
+    func testFinderPathResolverOpensDirectoriesAndRevealsFiles() {
+        XCTAssertEqual(
+            FinderPathResolver.action(for: "/tmp", kind: .directory),
+            .open(URL(fileURLWithPath: "/tmp", isDirectory: true))
+        )
+        XCTAssertEqual(
+            FinderPathResolver.action(for: #filePath, kind: .file),
+            .reveal(URL(fileURLWithPath: #filePath))
+        )
+    }
+
+    func testFinderPathResolverFallsBackToNearestExistingDirectory() {
+        let missingPath = "/tmp/monitor-agent-missing-\(UUID().uuidString)/config.toml"
+
+        XCTAssertEqual(
+            FinderPathResolver.action(for: missingPath, kind: .file),
+            .open(URL(fileURLWithPath: "/tmp", isDirectory: true))
+        )
+    }
+
+    func testSourcePathPresentationExtractsSettingsFileNames() {
+        XCTAssertEqual(
+            SourcePathPresentation.fileName(for: "~/.claude/settings.json"),
+            "settings.json"
+        )
+        XCTAssertEqual(
+            SourcePathPresentation.fileName(for: "~/.codex/AGENTS.md"),
+            "AGENTS.md"
+        )
     }
 
     func testSyncIntervalOptionsMatchGeneralSettingsMenu() {
@@ -124,5 +223,28 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         XCTAssertEqual(UsageDataRebuildCopy.runningMessage, "Rebuilding local usage data...")
         XCTAssertEqual(UsageDataRebuildCopy.successTitle, "Local usage data rebuilt successfully.")
         XCTAssertEqual(UsageDataRebuildCopy.failureTitle, "Rebuild failed. Your existing usage data was not changed.")
+        XCTAssertEqual(UsageDataRebuildCopy.canceledTitle, "Rebuild canceled.")
+    }
+}
+
+private struct SettingsToolbarProbe: View {
+    @FocusState private var isSidebarFocused: Bool
+    @State private var text = "Editable content"
+
+    var body: some View {
+        NavigationSplitView(columnVisibility: .constant(.all)) {
+            List {
+                Text("General")
+            }
+            .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 190)
+            .focused($isSidebarFocused)
+        } detail: {
+            TextEditor(text: $text)
+        }
+        .navigationSplitViewStyle(.balanced)
+        .frame(minWidth: 760, minHeight: 520)
+        .onAppear {
+            isSidebarFocused = true
+        }
     }
 }

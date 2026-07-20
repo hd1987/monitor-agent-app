@@ -3,7 +3,7 @@ import XCTest
 
 final class DatabaseManagerHourlyActivityTests: XCTestCase {
     func testFetchHourlyTokenUsageAggregatesSelectedDayAndFillsMissingHours() {
-        let database = DatabaseManager(inMemory: true)
+        let database = DatabaseManager()
         let day = localDate(year: 2026, month: 6, day: 20)
 
         database.insertRecords([

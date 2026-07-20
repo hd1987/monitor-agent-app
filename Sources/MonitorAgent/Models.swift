@@ -269,13 +269,86 @@ struct SessionSyncResult: Equatable {
     }
 }
 
+enum UsageDataRebuildPhase: Equatable {
+    case scanning
+    case rebuildingClaude
+    case rebuildingCodex
+    case catchingUp
+    case validating
+    case replacing
+    case syncingLatest
+
+    var displayName: String {
+        switch self {
+        case .scanning: return "Scanning session logs..."
+        case .rebuildingClaude: return "Rebuilding Claude Code data..."
+        case .rebuildingCodex: return "Rebuilding Codex data..."
+        case .catchingUp: return "Catching up new activity..."
+        case .validating: return "Validating rebuilt database..."
+        case .replacing: return "Replacing local database..."
+        case .syncingLatest: return "Syncing latest activity..."
+        }
+    }
+
+    var isCancellable: Bool {
+        switch self {
+        case .scanning, .rebuildingClaude, .rebuildingCodex, .catchingUp:
+            return true
+        case .validating, .replacing, .syncingLatest:
+            return false
+        }
+    }
+}
+
+final class UsageDataRebuildCancellation {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
+    }
+}
+
 struct SessionSyncProgress: Equatable {
     let completedFiles: Int
     let totalFiles: Int
     let recordsSynced: Int
+    let processedBytes: Int64
+    let totalBytes: Int64
+    let phase: UsageDataRebuildPhase?
+    let currentSource: String?
+
+    init(
+        completedFiles: Int,
+        totalFiles: Int,
+        recordsSynced: Int,
+        processedBytes: Int64 = 0,
+        totalBytes: Int64 = 0,
+        phase: UsageDataRebuildPhase? = nil,
+        currentSource: String? = nil
+    ) {
+        self.completedFiles = completedFiles
+        self.totalFiles = totalFiles
+        self.recordsSynced = recordsSynced
+        self.processedBytes = processedBytes
+        self.totalBytes = totalBytes
+        self.phase = phase
+        self.currentSource = currentSource
+    }
 
     var fractionCompleted: Double {
-        guard totalFiles > 0 else { return 0 }
+        if totalBytes > 0 {
+            return min(Double(processedBytes) / Double(totalBytes), 1)
+        }
+        guard totalFiles > 0 else { return 1 }
         return Double(completedFiles) / Double(totalFiles)
     }
 }
@@ -285,13 +358,57 @@ struct UsageDataRebuildSummary: Equatable {
     let recordsSynced: Int
     let totalRequests: Int
     let totalSessions: Int
+    let claudeRequests: Int
+    let codexRequests: Int
+    let duration: TimeInterval
+    let latestActivityPending: Bool
+
+    init(
+        filesSynced: Int,
+        recordsSynced: Int,
+        totalRequests: Int,
+        totalSessions: Int,
+        claudeRequests: Int = 0,
+        codexRequests: Int = 0,
+        duration: TimeInterval = 0,
+        latestActivityPending: Bool = false
+    ) {
+        self.filesSynced = filesSynced
+        self.recordsSynced = recordsSynced
+        self.totalRequests = totalRequests
+        self.totalSessions = totalSessions
+        self.claudeRequests = claudeRequests
+        self.codexRequests = codexRequests
+        self.duration = duration
+        self.latestActivityPending = latestActivityPending
+    }
 
     var displayText: String {
         let requestLabel = totalRequests == 1 ? "request" : "requests"
         let sessionLabel = totalSessions == 1 ? "session" : "sessions"
         let fileLabel = filesSynced == 1 ? "file" : "files"
-        return "Rebuilt \(totalRequests) \(requestLabel) across \(totalSessions) \(sessionLabel) from \(filesSynced) \(fileLabel)."
+        var lines = [
+            "Rebuilt \(totalRequests) \(requestLabel) across \(totalSessions) \(sessionLabel) from \(filesSynced) \(fileLabel)."
+        ]
+        if claudeRequests > 0 || codexRequests > 0 {
+            lines.append("Claude Code: \(claudeRequests) requests · Codex: \(codexRequests) requests")
+        }
+        if duration > 0 {
+            lines.append("Completed in \(Self.durationFormatter.string(from: duration) ?? "under 1 second").")
+        }
+        if latestActivityPending {
+            lines.append("Latest activity will be added during the next sync.")
+        }
+        return lines.joined(separator: "\n")
     }
+
+    private static let durationFormatter: DateComponentsFormatter = {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.minute, .second]
+        formatter.unitsStyle = .full
+        formatter.maximumUnitCount = 2
+        return formatter
+    }()
 }
 
 // MARK: - Utilities

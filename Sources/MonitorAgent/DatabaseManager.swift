@@ -10,14 +10,24 @@ enum DatabaseManagerError: LocalizedError {
 }
 
 final class DatabaseManager {
-    static let shared = openOrUnavailable(path: defaultDatabasePath)
-    static let defaultDirectory = NSHomeDirectory() + "/.monitor-agent"
-    static let defaultDatabasePath = defaultDirectory + "/monitor.db"
-    static let rebuildDatabasePath = defaultDirectory + "/monitor-rebuild.tmp.db"
+    private enum Storage {
+        case memory
+        case persistent(path: String)
+    }
 
+    static let shared: DatabaseManager = {
+        let runtime = RuntimeEnvironment.current
+        precondition(!runtime.isProduction, "Production database access requires the application instance lock.")
+        return openForRuntime(runtime)
+    }()
     private var dbQueue: DatabaseQueue?
-    private let databasePath: String?
+    private let storage: Storage
     private let lifecycleLock = NSRecursiveLock()
+
+    private var databasePath: String? {
+        guard case .persistent(let path) = storage else { return nil }
+        return path
+    }
 
     var isAvailable: Bool {
         withLifecycleLock { dbQueue != nil }
@@ -27,16 +37,49 @@ final class DatabaseManager {
             databasePath.map { FileManager.default.fileExists(atPath: $0) } ?? false
         }
     }
+    var isPersistent: Bool {
+        if case .persistent = storage { return true }
+        return false
+    }
+    var ownedRebuildDatabasePath: String? {
+        guard let databasePath else { return nil }
+        return (databasePath as NSString).deletingLastPathComponent + "/monitor-rebuild.tmp.db"
+    }
 
-    init(inMemory: Bool) {
-        databasePath = nil
-        do {
-            if inMemory {
-                dbQueue = try DatabaseQueue()
-            } else {
-                try FileManager.default.createDirectory(atPath: Self.defaultDirectory, withIntermediateDirectories: true)
-                dbQueue = try DatabaseQueue(path: Self.defaultDatabasePath)
+    init(runtime: RuntimeEnvironment) throws {
+        switch runtime.mode {
+        case .production:
+            storage = .persistent(path: runtime.productionDatabasePath)
+            try FileManager.default.createDirectory(
+                atPath: runtime.productionDataDirectory,
+                withIntermediateDirectories: true
+            )
+            dbQueue = try DatabaseQueue(path: runtime.productionDatabasePath)
+        case .development:
+            storage = .memory
+            let memoryQueue = try DatabaseQueue()
+            dbQueue = memoryQueue
+            if FileManager.default.fileExists(atPath: runtime.productionDatabasePath) {
+                do {
+                    var configuration = Configuration()
+                    configuration.readonly = true
+                    let productionQueue = try DatabaseQueue(
+                        path: runtime.productionDatabasePath,
+                        configuration: configuration
+                    )
+                    try productionQueue.backup(to: memoryQueue)
+                } catch {
+                    print("Failed to seed development database: \(error)")
+                }
             }
+        }
+        try setupSchema()
+    }
+
+    init() {
+        storage = .memory
+        do {
+            dbQueue = try DatabaseQueue()
             try setupSchema()
         } catch {
             print("Failed to open db: \(error)")
@@ -44,15 +87,15 @@ final class DatabaseManager {
     }
 
     init(path: String) throws {
-        databasePath = path
+        storage = .persistent(path: path)
         let directory = (path as NSString).deletingLastPathComponent
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
         dbQueue = try DatabaseQueue(path: path)
         try setupSchema()
     }
 
-    private init(unavailablePath: String) {
-        databasePath = unavailablePath
+    private init(unavailableStorage: Storage) {
+        storage = unavailableStorage
         dbQueue = nil
     }
 
@@ -64,7 +107,25 @@ final class DatabaseManager {
             return try DatabaseManager(path: path)
         } catch {
             logError("Failed to open database at \(path): \(error)")
-            return DatabaseManager(unavailablePath: path)
+            return DatabaseManager(unavailableStorage: .persistent(path: path))
+        }
+    }
+
+    static func openForRuntime(
+        _ runtime: RuntimeEnvironment,
+        opener: (RuntimeEnvironment) throws -> DatabaseManager = { try DatabaseManager(runtime: $0) },
+        logError: (String) -> Void = { print($0) }
+    ) -> DatabaseManager {
+        do {
+            return try opener(runtime)
+        } catch {
+            logError("Failed to open \(runtime.mode) database: \(error)")
+            if runtime.isProduction {
+                return DatabaseManager(
+                    unavailableStorage: .persistent(path: runtime.productionDatabasePath)
+                )
+            }
+            return DatabaseManager()
         }
     }
 
@@ -161,7 +222,9 @@ final class DatabaseManager {
     func replaceDatabase(with temporaryPath: String) throws {
         lifecycleLock.lock()
         defer { lifecycleLock.unlock() }
-        guard let destinationPath = databasePath else { return }
+        guard let destinationPath = databasePath else {
+            throw DatabaseManagerError.unavailable
+        }
         let fm = FileManager.default
 
         guard fm.fileExists(atPath: temporaryPath) else {
@@ -189,8 +252,22 @@ final class DatabaseManager {
         }
     }
 
-    static func cleanUpTemporaryRebuildDatabase() {
-        try? removeDatabaseFiles(at: rebuildDatabasePath)
+    func replaceDatabase(with sourceDatabase: DatabaseManager) throws {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        sourceDatabase.lifecycleLock.lock()
+        defer { sourceDatabase.lifecycleLock.unlock() }
+        guard let destinationQueue = dbQueue,
+              let sourceQueue = sourceDatabase.dbQueue else {
+            throw DatabaseManagerError.unavailable
+        }
+        try sourceQueue.backup(to: destinationQueue)
+        try setupSchema()
+    }
+
+    func cleanUpTemporaryRebuildDatabase() {
+        guard let rebuildDatabasePath = ownedRebuildDatabasePath else { return }
+        try? Self.removeDatabaseFiles(at: rebuildDatabasePath)
     }
 
     private static func removeDatabaseFiles(at path: String) throws {
@@ -232,6 +309,16 @@ final class DatabaseManager {
         defer { lifecycleLock.unlock() }
         guard let db = dbQueue, !records.isEmpty else { return }
         try? db.write { db in
+            try insertRecords(records, in: db)
+        }
+    }
+
+    func insertRecordsThrowing(_ records: [ParsedRecord]) throws {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard let db = dbQueue else { throw DatabaseManagerError.unavailable }
+        guard !records.isEmpty else { return }
+        try db.write { db in
             try insertRecords(records, in: db)
         }
     }

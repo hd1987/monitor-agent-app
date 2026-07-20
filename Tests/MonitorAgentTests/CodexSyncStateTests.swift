@@ -3,7 +3,7 @@ import XCTest
 
 final class CodexSyncStateTests: XCTestCase {
     func testSyncStatePersistsCodexLastTokenTotals() {
-        let database = DatabaseManager(inMemory: true)
+        let database = DatabaseManager()
         let state = SyncState(
             filePath: "/tmp/codex-session.jsonl",
             byteOffset: 128,

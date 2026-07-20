@@ -18,6 +18,7 @@ final class AppStore: ObservableObject {
     @Published var usageDataRebuildProgress: SessionSyncProgress?
     @Published var usageDataRebuildSummary: UsageDataRebuildSummary?
     @Published var usageDataRebuildErrorMessage: String?
+    @Published var usageDataRebuildWasCancelled = false
     @Published var quotaSnapshots: [QuotaProviderID: QuotaSnapshot] = [:]
 
     private let db: DatabaseManager
@@ -27,8 +28,11 @@ final class AppStore: ObservableObject {
     private let quotaService: QuotaRefreshing
     private let quotaSettings: QuotaSettings
     private let quotaRefreshScheduler: QuotaRefreshScheduler
+    private let allowsLiveQuotaRefresh: Bool
+    private let quotaFixture: QuotaFixtureSet?
     private var activeDay: Date
     private var cancellables = Set<AnyCancellable>()
+    private var usageDataRebuildCancellation: UsageDataRebuildCancellation?
     private(set) var isPanelVisible = false
     var isPeriodicSyncActive: Bool { syncManager.isRunning }
     var isPeriodicQuotaRefreshActive: Bool { quotaRefreshScheduler.isRunning }
@@ -40,6 +44,8 @@ final class AppStore: ObservableObject {
         quotaService: QuotaRefreshing = QuotaService.shared,
         quotaSettings: QuotaSettings = .shared,
         quotaRefreshScheduler: QuotaRefreshScheduler = QuotaRefreshScheduler(),
+        allowsLiveQuotaRefresh: Bool = true,
+        quotaFixture: QuotaFixtureSet? = nil,
         observeSyncIntervalChanges: Bool = true,
         currentDateProvider: @escaping () -> Date = Date.init
     ) {
@@ -50,9 +56,14 @@ final class AppStore: ObservableObject {
         self.quotaService = quotaService
         self.quotaSettings = quotaSettings
         self.quotaRefreshScheduler = quotaRefreshScheduler
+        self.allowsLiveQuotaRefresh = allowsLiveQuotaRefresh
+        self.quotaFixture = quotaFixture
         self.activeDay = Calendar.current.startOfDay(for: currentDateProvider())
+        self.quotaSnapshots = quotaFixture?.snapshots ?? [:]
 
-        DatabaseManager.cleanUpTemporaryRebuildDatabase()
+        if database.isPersistent {
+            database.cleanUpTemporaryRebuildDatabase()
+        }
 
         // React to filter changes
         Publishers.CombineLatest3($appFilter, $timeRange, $heatmapMode)
@@ -90,7 +101,7 @@ final class AppStore: ObservableObject {
 
     /// Apply the quota refresh interval while the panel is visible.
     private func applyQuotaRefreshInterval(_ interval: QuotaRefreshInterval) {
-        guard isPanelVisible else {
+        guard isPanelVisible, allowsLiveQuotaRefresh else {
             quotaRefreshScheduler.stop()
             return
         }
@@ -133,6 +144,7 @@ final class AppStore: ObservableObject {
     }
 
     func refreshEnabledQuotaProviders(force: Bool = false) {
+        guard allowsLiveQuotaRefresh else { return }
         let minimumInterval = quotaSettings.refreshInterval.minimumRequestInterval
         for provider in QuotaProviderID.allCases where quotaSettings.isEnabled(provider) {
             quotaService.refresh(
@@ -148,7 +160,16 @@ final class AppStore: ObservableObject {
 
     func quotaSettingsDidChange() {
         quotaSnapshots = quotaSnapshots.filter { quotaSettings.isEnabled($0.key) }
+        if let quotaFixture {
+            for provider in QuotaProviderID.allCases where quotaSettings.isEnabled(provider) {
+                quotaSnapshots[provider] = quotaFixture.snapshots[provider]
+            }
+        }
         applyQuotaRefreshInterval(quotaSettings.refreshInterval)
+    }
+
+    func quotaExpirationDate(for provider: QuotaProviderID) -> Date? {
+        quotaSettings.expirationDate(for: provider) ?? quotaFixture?.expirationDates[provider]
     }
 
     var visibleQuotaProviders: [QuotaProviderID] {
@@ -166,6 +187,9 @@ final class AppStore: ObservableObject {
         usageDataRebuildProgress = nil
         usageDataRebuildSummary = nil
         usageDataRebuildErrorMessage = nil
+        usageDataRebuildWasCancelled = false
+        let cancellation = UsageDataRebuildCancellation()
+        usageDataRebuildCancellation = cancellation
         syncManager.stop()
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -173,7 +197,9 @@ final class AppStore: ObservableObject {
 
             do {
                 let summary = try syncManager.performExclusive {
-                    try UsageDataRebuilder(activeDatabase: self.db).rebuild { [weak self] progress in
+                    try UsageDataRebuilder(activeDatabase: self.db).rebuild(
+                        cancellation: cancellation
+                    ) { [weak self] progress in
                         DispatchQueue.main.async {
                             self?.usageDataRebuildProgress = progress
                         }
@@ -182,17 +208,28 @@ final class AppStore: ObservableObject {
                 DispatchQueue.main.async {
                     self.usageDataRebuildSummary = summary
                     self.isRebuildingUsageData = false
+                    self.usageDataRebuildCancellation = nil
                     self.applySyncInterval(self.syncSettings.interval)
                     self.reload()
                 }
             } catch {
                 DispatchQueue.main.async {
-                    self.usageDataRebuildErrorMessage = error.localizedDescription
+                    if (error as? StrictSessionSyncError) == .cancelled {
+                        self.usageDataRebuildWasCancelled = true
+                    } else {
+                        self.usageDataRebuildErrorMessage = error.localizedDescription
+                    }
                     self.isRebuildingUsageData = false
+                    self.usageDataRebuildCancellation = nil
                     self.applySyncInterval(self.syncSettings.interval)
                 }
             }
         }
+    }
+
+    func cancelUsageDataRebuild() {
+        guard usageDataRebuildProgress?.phase?.isCancellable != false else { return }
+        usageDataRebuildCancellation?.cancel()
     }
 
     func prepareUsageDataRebuild() {
@@ -200,6 +237,7 @@ final class AppStore: ObservableObject {
         usageDataRebuildProgress = nil
         usageDataRebuildSummary = nil
         usageDataRebuildErrorMessage = nil
+        usageDataRebuildWasCancelled = false
     }
 
     func reload() {

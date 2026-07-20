@@ -40,6 +40,27 @@ enum SaveSuccessIndicatorStyle {
     static let systemImage = "checkmark.circle.fill"
 }
 
+enum SettingsSavePolicy {
+    static func isEnabled(
+        for category: SettingsCategory,
+        allowsExternalConfigSaving: Bool
+    ) -> Bool {
+        switch category {
+        case .general:
+            return true
+        case .extensions:
+            return false
+        case .config, .prompt:
+            return allowsExternalConfigSaving
+        }
+    }
+}
+
+enum GlobalShortcutSettingsCopy {
+    static let enabledDescription = "Show or hide the main panel from any app. Requires at least one modifier key."
+    static let developmentDisabledDescription = "Available only when running MonitorAgent from the installed app."
+}
+
 enum SettingsWindowLayout {
     static let defaultWidth: CGFloat = 820
     static let defaultHeight: CGFloat = 600
@@ -54,10 +75,11 @@ enum UsageDataRebuildCopy {
     static let buttonTitle = "Rebuild Local Usage Data"
     static let description = "Rebuilds Monitor Agent's local usage database from Claude Code and Codex session logs. Original session logs and settings will not be changed."
     static let confirmationTitle = "Rebuild Local Usage Data?"
-    static let confirmationMessage = "Monitor Agent will rebuild its local usage database from your Claude Code and Codex session logs. Your original logs and settings will not be changed.\n\nThe current database will remain in use unless the rebuild completes successfully."
+    static let confirmationMessage = "Monitor Agent will rebuild its local usage database from your Claude Code and Codex session logs. Your original logs and settings will not be changed.\n\nClaude Code and Codex can continue running during the rebuild. New activity will be synchronized before completion.\n\nThe current database will remain in use unless the rebuild completes successfully."
     static let runningMessage = "Rebuilding local usage data..."
     static let successTitle = "Local usage data rebuilt successfully."
     static let failureTitle = "Rebuild failed. Your existing usage data was not changed."
+    static let canceledTitle = "Rebuild canceled."
 }
 
 // MARK: - Settings View
@@ -66,10 +88,11 @@ struct SettingsView: View {
     @EnvironmentObject var themeManager: ThemeManager
     @EnvironmentObject var store: AppStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var isSidebarFocused: Bool
+    private let allowsGlobalShortcutRegistration = RuntimeEnvironment.current.featurePolicy.allowsGlobalShortcutRegistration
+    private let allowsExternalConfigSaving = RuntimeEnvironment.current.featurePolicy.allowsExternalConfigSaving
 
-    var initialCategory: SettingsCategory = .general
-
-    @State private var selectedCategory: SettingsCategory = .general
+    @State private var selectedCategory: SettingsCategory
 
     // General drafts
     @State private var draftTheme: Theme = .system
@@ -112,6 +135,10 @@ struct SettingsView: View {
     @State private var showSaveSuccess: Bool = false
     @State private var saveSuccessMessage: String = ""
 
+    init(initialCategory: SettingsCategory = .general) {
+        _selectedCategory = State(initialValue: initialCategory)
+    }
+
     var body: some View {
         NavigationSplitView(
             columnVisibility: .constant(SettingsWindowLayout.sidebarVisibility)
@@ -124,6 +151,7 @@ struct SettingsView: View {
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 190)
+            .focused($isSidebarFocused)
         } detail: {
             VStack(spacing: 0) {
                 settingsContent
@@ -169,6 +197,7 @@ struct SettingsView: View {
                         }
                         .keyboardShortcut(.defaultAction)
                         .buttonStyle(.borderedProminent)
+                        .disabled(!isCurrentCategorySaveEnabled)
                     }
                 }
                 .padding(.horizontal, 20)
@@ -181,8 +210,8 @@ struct SettingsView: View {
             minHeight: SettingsWindowLayout.minimumHeight
         )
         .onAppear {
-            selectedCategory = initialCategory
-            loadCategory(initialCategory)
+            loadCategory(selectedCategory)
+            isSidebarFocused = true
         }
         .onChange(of: selectedCategory) {
             showSaveSuccess = false
@@ -214,6 +243,13 @@ struct SettingsView: View {
         )
     }
 
+    private var isCurrentCategorySaveEnabled: Bool {
+        SettingsSavePolicy.isEnabled(
+            for: selectedCategory,
+            allowsExternalConfigSaving: allowsExternalConfigSaving
+        )
+    }
+
     @ViewBuilder
     private var settingsContent: some View {
         switch selectedCategory {
@@ -227,7 +263,8 @@ struct SettingsView: View {
                 draftCodexQuotaEnabled: $draftCodexQuotaEnabled,
                 draftClaudeExpirationDate: $draftClaudeExpirationDate,
                 draftCodexExpirationDate: $draftCodexExpirationDate,
-                draftQuotaRefreshInterval: $draftQuotaRefreshInterval
+                draftQuotaRefreshInterval: $draftQuotaRefreshInterval,
+                allowsGlobalShortcutRegistration: allowsGlobalShortcutRegistration
             )
         case .extensions:
             ExtensionsSettingsView(
@@ -317,12 +354,14 @@ struct SettingsView: View {
     private func saveCurrentCategory() {
         switch selectedCategory {
         case .general:
-            do {
-                try GlobalShortcutController.shared.updateShortcut(draftGlobalShortcut)
-            } catch {
-                saveErrorMessage = error.localizedDescription
-                showSaveError = true
-                return
+            if allowsGlobalShortcutRegistration {
+                do {
+                    try GlobalShortcutController.shared.updateShortcut(draftGlobalShortcut)
+                } catch {
+                    saveErrorMessage = error.localizedDescription
+                    showSaveError = true
+                    return
+                }
             }
             themeManager.theme = draftTheme
             SyncSettings.shared.interval = draftSyncInterval
@@ -446,6 +485,7 @@ struct GeneralSettingsView: View {
     @Binding var draftClaudeExpirationDate: Date?
     @Binding var draftCodexExpirationDate: Date?
     @Binding var draftQuotaRefreshInterval: QuotaRefreshInterval
+    let allowsGlobalShortcutRegistration: Bool
     @State private var showUsageDataRebuildSheet = false
 
     var body: some View {
@@ -468,9 +508,12 @@ struct GeneralSettingsView: View {
 
                 SettingsRow(
                     title: "Global Shortcut",
-                    description: "Show or hide the main panel from any app. Requires at least one modifier key."
+                    description: allowsGlobalShortcutRegistration
+                        ? GlobalShortcutSettingsCopy.enabledDescription
+                        : GlobalShortcutSettingsCopy.developmentDisabledDescription
                 ) {
                     GlobalShortcutRecorder(shortcut: $draftGlobalShortcut)
+                        .disabled(!allowsGlobalShortcutRegistration)
                 }
 
                 SettingsRow(
@@ -848,8 +891,12 @@ struct UsageDataRebuildSheetView: View {
     }
 
     private var headerTitle: String {
-        if store.isRebuildingUsageData { return UsageDataRebuildCopy.runningMessage }
+        if store.isRebuildingUsageData {
+            return store.usageDataRebuildProgress?.phase?.displayName
+                ?? UsageDataRebuildCopy.runningMessage
+        }
         if store.usageDataRebuildSummary != nil { return UsageDataRebuildCopy.successTitle }
+        if store.usageDataRebuildWasCancelled { return UsageDataRebuildCopy.canceledTitle }
         if store.usageDataRebuildErrorMessage != nil { return UsageDataRebuildCopy.failureTitle }
         return UsageDataRebuildCopy.confirmationTitle
     }
@@ -857,12 +904,14 @@ struct UsageDataRebuildSheetView: View {
     private var headerIconName: String {
         if store.isRebuildingUsageData { return "arrow.triangle.2.circlepath" }
         if store.usageDataRebuildSummary != nil { return "checkmark.circle.fill" }
+        if store.usageDataRebuildWasCancelled { return "xmark.circle.fill" }
         if store.usageDataRebuildErrorMessage != nil { return "exclamationmark.triangle.fill" }
         return "externaldrive.badge.timemachine"
     }
 
     private var headerColor: Color {
         if store.usageDataRebuildSummary != nil { return StatusPalette.success }
+        if store.usageDataRebuildWasCancelled { return .secondary }
         if store.usageDataRebuildErrorMessage != nil { return StatusPalette.warning }
         return .accentColor
     }
@@ -876,6 +925,10 @@ struct UsageDataRebuildSheetView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        } else if store.usageDataRebuildWasCancelled {
+            Text("Your existing usage data was not changed.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
         } else if let message = store.usageDataRebuildErrorMessage {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Your existing usage data was not changed.")
@@ -899,12 +952,23 @@ struct UsageDataRebuildSheetView: View {
         HStack {
             Spacer()
             if store.isRebuildingUsageData {
-                Button("Close") {}
-                    .disabled(true)
-            } else if store.usageDataRebuildSummary != nil || store.usageDataRebuildErrorMessage != nil {
+                Button("Cancel Rebuild", role: .cancel) {
+                    store.cancelUsageDataRebuild()
+                }
+                .disabled(store.usageDataRebuildProgress?.phase?.isCancellable == false)
+            } else if store.usageDataRebuildSummary != nil {
                 Button("Done") {
                     isPresented = false
                 }
+                .keyboardShortcut(.defaultAction)
+            } else if store.usageDataRebuildWasCancelled || store.usageDataRebuildErrorMessage != nil {
+                Button("Close", role: .cancel) {
+                    isPresented = false
+                }
+                Button("Retry") {
+                    store.rebuildLocalUsageData()
+                }
+                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
             } else {
                 Button("Cancel", role: .cancel) {
@@ -925,11 +989,23 @@ struct UsageDataRebuildProgressView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ProgressView(value: progress?.fractionCompleted ?? 0)
-                .progressViewStyle(.linear)
+            if let progress, progress.totalBytes > 0 || progress.totalFiles > 0 {
+                ProgressView(value: progress.fractionCompleted)
+                    .progressViewStyle(.linear)
+            } else {
+                ProgressView()
+                    .progressViewStyle(.linear)
+            }
 
             HStack {
                 Text(fileProgressText)
+                Spacer()
+                Text(byteProgressText)
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            HStack {
+                Text(progress?.currentSource ?? " ")
                 Spacer()
                 Text(recordProgressText)
             }
@@ -940,13 +1016,23 @@ struct UsageDataRebuildProgressView: View {
 
     private var fileProgressText: String {
         guard let progress else { return "Preparing files..." }
+        guard progress.totalFiles > 0 else { return "Preparing files..." }
         return "\(progress.completedFiles) / \(progress.totalFiles) files"
+    }
+
+    private var byteProgressText: String {
+        guard let progress, progress.totalBytes > 0 else { return " " }
+        return "\(formatBytes(progress.processedBytes)) / \(formatBytes(progress.totalBytes))"
     }
 
     private var recordProgressText: String {
         guard let progress else { return "0 requests rebuilt" }
         let label = progress.recordsSynced == 1 ? "request" : "requests"
         return "\(progress.recordsSynced) \(label) rebuilt"
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }
 
@@ -1061,9 +1147,10 @@ struct FileEditorSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(subtitle)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+            SourcePathHeader(path: subtitle, finderKind: .file) {
+                Text(SourcePathPresentation.fileName(for: subtitle))
+                    .font(.system(size: 13, weight: .semibold))
+            }
 
             if fileExists {
                 TextEditor(text: $text)

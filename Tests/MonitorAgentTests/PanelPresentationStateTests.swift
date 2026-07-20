@@ -47,15 +47,6 @@ final class PanelPresentationStateTests: XCTestCase {
         XCTAssertTrue(state.isPinned)
     }
 
-    func testAutomaticDismissalCanBeSuppressedOnceWithoutPinning() {
-        let state = PanelPresentationState()
-        state.suppressNextAutomaticDismissal()
-
-        XCTAssertFalse(state.allowsDismissal(for: .automatic))
-        XCTAssertTrue(state.allowsDismissal(for: .automatic))
-        XCTAssertFalse(state.isPinned)
-    }
-
     func testCustomPositionPersistsUntilReset() {
         let state = PanelPresentationState()
 

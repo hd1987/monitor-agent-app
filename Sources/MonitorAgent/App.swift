@@ -58,7 +58,6 @@ final class PanelPresentationState: ObservableObject {
     @Published private(set) var isPinned = false
     @Published private(set) var isPanelFocused = false
     private(set) var hasCustomPosition = false
-    private var suppressesNextAutomaticDismissal = false
 
     var isPinHighlighted: Bool {
         isPinned && isPanelFocused
@@ -76,15 +75,7 @@ final class PanelPresentationState: ObservableObject {
         if reason == .explicit {
             return true
         }
-        if suppressesNextAutomaticDismissal {
-            suppressesNextAutomaticDismissal = false
-            return false
-        }
         return !isPinned
-    }
-
-    func suppressNextAutomaticDismissal() {
-        suppressesNextAutomaticDismissal = true
     }
 
     func recordCustomPosition() {
@@ -120,13 +111,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var aboutPanel: NSWindow?
     private var statusMenu: NSMenu!
     private var rightClickHandled = false
-    private let store = AppStore()
+    private let runtimeEnvironment = RuntimeEnvironment.current
+    private lazy var database = DatabaseManager.openForRuntime(runtimeEnvironment)
+    private lazy var store = AppStore(
+        database: database,
+        allowsLiveQuotaRefresh: runtimeEnvironment.featurePolicy.allowsLiveQuotaRefresh,
+        quotaFixture: runtimeEnvironment.mode == .development
+            && !runtimeEnvironment.featurePolicy.allowsLiveQuotaRefresh
+            ? DevelopmentQuotaFixtures.make()
+            : nil
+    )
+    private var instanceLock: ProcessInstanceLock?
     private let panelPresentationState = PanelPresentationState()
     private let themeManager = ThemeManager.shared
     private let globalShortcutController = GlobalShortcutController.shared
     private var themeCancellable: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard acquireProductionInstanceLock() else { return }
         NSApp.setActivationPolicy(.accessory)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
@@ -169,7 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hostingView = NSHostingView(
             rootView: PopoverView { [weak self] in
-                self?.openSettings(category: .general, keepingMainPanelVisible: true)
+                self?.openSettings(category: .general)
             } onResetPanelPosition: { [weak self] in
                 self?.resetPanelPosition()
             }
@@ -233,6 +235,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Auto-check for updates on launch (silent, 24h throttle)
         UpdateChecker.shared.checkOnLaunch()
+    }
+
+    private func acquireProductionInstanceLock() -> Bool {
+        guard runtimeEnvironment.isProduction else { return true }
+        do {
+            instanceLock = try ProcessInstanceLock(path: runtimeEnvironment.instanceLockPath)
+            return true
+        } catch ProcessInstanceLockError.alreadyLocked {
+            let currentProcessIdentifier = ProcessInfo.processInfo.processIdentifier
+            NSRunningApplication.runningApplications(
+                withBundleIdentifier: RuntimeEnvironment.productionBundleIdentifier
+            )
+            .first { $0.processIdentifier != currentProcessIdentifier }?
+            .activate(options: [])
+        } catch {
+            print("Failed to acquire production instance lock: \(error)")
+        }
+        NSApp.terminate(nil)
+        ForceTermination.scheduleFallbackExit()
+        return false
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
@@ -339,10 +361,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openSettings(category: .prompt)
     }
 
-    private func openSettings(
-        category: SettingsCategory,
-        keepingMainPanelVisible: Bool = false
-    ) {
+    private func openSettings(category: SettingsCategory) {
         // Always recreate so @State drafts reset to saved values
         settingsPanel?.close()
         settingsPanel = nil
@@ -376,15 +395,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             width: SettingsWindowLayout.minimumWidth,
             height: SettingsWindowLayout.minimumHeight
         )
+        SettingsWindowToolbar.prepareForPresentation(w)
         w.center()
-        if keepingMainPanelVisible && panel.isVisible {
-            panelPresentationState.suppressNextAutomaticDismissal()
-        }
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         settingsPanel = w
         DispatchQueue.main.async { [weak w] in
-            SettingsWindowToolbar.removeSidebarToggle(from: w)
+            SettingsWindowToolbar.revealAfterPresentation(w)
         }
     }
 
@@ -456,9 +473,22 @@ enum SettingsWindowToolbar {
         "com.apple.SwiftUI.navigationSplitView.toggleSidebar"
     )
 
-    static func removeSidebarToggle(from window: NSWindow?) {
+    static func prepareForPresentation(_ window: NSWindow) {
+        window.alphaValue = 0
+        window.contentView?.layoutSubtreeIfNeeded()
+    }
+
+    static func revealAfterPresentation(_ window: NSWindow?) {
+        guard let window else { return }
+        removeSidebarToggle(from: window)
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        window.alphaValue = 1
+    }
+
+    private static func removeSidebarToggle(from window: NSWindow) {
         guard
-            let toolbar = window?.toolbar,
+            let toolbar = window.toolbar,
             let index = toolbar.items.firstIndex(where: {
                 $0.itemIdentifier == sidebarToggleIdentifier
             })
