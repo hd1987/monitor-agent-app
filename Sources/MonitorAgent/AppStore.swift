@@ -54,8 +54,6 @@ final class AppStore: ObservableObject {
         self.quotaRefreshScheduler = quotaRefreshScheduler
         self.activeDay = Calendar.current.startOfDay(for: currentDateProvider())
 
-        DatabaseManager.cleanUpTemporaryRebuildDatabase()
-
         // React to filter changes
         Publishers.CombineLatest3($appFilter, $timeRange, $heatmapMode)
             .debounce(for: .milliseconds(100), scheduler: DispatchQueue.main)

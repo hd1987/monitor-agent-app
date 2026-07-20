@@ -24,9 +24,12 @@ Self-owned JSONL parsing, no third-party dependency.
 | Claude Code | `~/.claude/projects/**/*.jsonl` | `ClaudeLogParser` — extracts `message.usage` from `type == "assistant"` lines |
 | Codex | `~/.codex/sessions/**/rollout-*.jsonl` + `~/.codex/archived_sessions/rollout-*.jsonl` | `CodexLogParser` — stateful, extracts `token_count` events with heartbeat dedup and stores uncached input tokens |
 
-Database: `~/.monitor-agent/monitor.db`
+Database:
 
-The database is a derived local cache, not the source of truth. Database open failures keep the app available so the rebuild action remains accessible. `Settings > General > Data` can rebuild the cache while Claude Code and Codex continue writing logs. The rebuild snapshots each discovered file's identity and byte boundary, streams only complete JSONL lines within that boundary into `~/.monitor-agent/monitor-rebuild.tmp.db`, performs one bounded catch-up pass for newly created or appended data, validates the temporary database and source coverage, then replaces `monitor.db` only after every pre-replacement stage succeeds. Source files may grow during a rebuild, but deletion, replacement, truncation, read failure, or database write failure aborts without replacing the active database. An existing nonempty database is also preserved if the rebuilt result contains no requests. After replacement, one immediate incremental sync captures activity written after the catch-up boundary.
+- Installed app: `~/.monitor-agent/monitor.db`
+- Bare executable (`swift run`, any build configuration): `~/.monitor-agent/development/monitor.db`
+
+The database is a derived local cache, not the source of truth. Only the installed `.app` with bundle identifier `com.hd1987.monitor-agent` uses the production database paths. Bare executables isolate both the active and temporary rebuild databases under `~/.monitor-agent/development/`, regardless of build configuration. Database open failures keep the app available so the rebuild action remains accessible. `Settings > General > Data` can rebuild the cache while Claude Code and Codex continue writing logs. The rebuild snapshots each discovered file's identity and byte boundary, streams only complete JSONL lines within that boundary into the active environment's `monitor-rebuild.tmp.db`, performs one bounded catch-up pass for newly created or appended data, validates the temporary database and source coverage, then replaces `monitor.db` only after every pre-replacement stage succeeds. Source files may grow during a rebuild, but deletion, replacement, truncation, read failure, or database write failure aborts without replacing the active database. An existing nonempty database is also preserved if the rebuilt result contains no requests. After replacement, one immediate incremental sync captures activity written after the catch-up boundary.
 
 The rebuild path filters JSONL ranges by the minimal Claude/Codex event markers before copying or JSON decoding, uses accelerated newline searches, and commits parsed records plus parser state once per source file. The temporary database retains SQLite's normal durability throughout the rebuild so a validated replacement is already durable. The rebuild sheet shows phase, byte, file, and request progress and allows cancellation while the temporary database is being built. Cancellation cleans up the temporary database without modifying the active database. Original Claude/Codex logs and settings are never modified. Any leftover temporary rebuild database is cleaned up on app startup.
 
@@ -69,6 +72,7 @@ Sources/MonitorAgent/
 ├── AppStore.swift                 # ObservableObject, Combine filter → reload, selected activity detail, manages sync/rebuild lifecycle
 ├── ActivityTokenChartLayout.swift # Fixed layout constants for the Activity selected-day drawer
 ├── DatabaseManager.swift          # GRDB r/w, schema setup, path-based databases, all queries + insert/sync methods
+├── DatabasePaths.swift            # Build-environment-specific active and rebuild database paths
 ├── Models.swift                   # AppFilter, TimeRange, UsageStats, DayActivity, HourlyTokenUsage, ParsedRecord, SyncState, rebuild summaries
 ├── ExtensionInventory.swift       # Read-only Claude Code / Codex user skill and MCP discovery
 ├── SyncSettings.swift             # SyncInterval enum + UserDefaults persistence (default 30s)

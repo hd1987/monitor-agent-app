@@ -11,9 +11,9 @@ enum DatabaseManagerError: LocalizedError {
 
 final class DatabaseManager {
     static let shared = openOrUnavailable(path: defaultDatabasePath)
-    static let defaultDirectory = NSHomeDirectory() + "/.monitor-agent"
-    static let defaultDatabasePath = defaultDirectory + "/monitor.db"
-    static let rebuildDatabasePath = defaultDirectory + "/monitor-rebuild.tmp.db"
+    static let defaultDirectory = DatabasePaths.current.directory
+    static let defaultDatabasePath = DatabasePaths.current.database
+    static let rebuildDatabasePath = DatabasePaths.current.rebuildDatabase
 
     private var dbQueue: DatabaseQueue?
     private let databasePath: String?

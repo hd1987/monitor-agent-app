@@ -305,7 +305,10 @@ final class QuotaFeatureTests: XCTestCase {
     }
 
     func testVisibleQuotaProvidersFollowAppFilter() {
-        let store = AppStore(observeSyncIntervalChanges: false)
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            observeSyncIntervalChanges: false
+        )
 
         store.appFilter = .all
         XCTAssertEqual(store.visibleQuotaProviders, [.claude, .codex])

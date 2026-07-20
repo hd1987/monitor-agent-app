@@ -7,7 +7,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 ## [Unreleased]
 
 ### Changed
-- Revert development runtime isolation and restore the previous shared runtime behavior
+- Revert broad development runtime isolation and restore the previous shared runtime behavior
+- Isolate bare development executables from the installed app's active and temporary usage databases
 
 ## [0.6.5] - 2026-07-20
 
