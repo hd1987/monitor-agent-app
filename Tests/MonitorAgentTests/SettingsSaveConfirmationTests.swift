@@ -182,6 +182,7 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         XCTAssertEqual(UsageDataRebuildCopy.runningMessage, "Rebuilding local usage data...")
         XCTAssertEqual(UsageDataRebuildCopy.successTitle, "Local usage data rebuilt successfully.")
         XCTAssertEqual(UsageDataRebuildCopy.failureTitle, "Rebuild failed. Your existing usage data was not changed.")
+        XCTAssertEqual(UsageDataRebuildCopy.canceledTitle, "Rebuild canceled.")
     }
 }
 

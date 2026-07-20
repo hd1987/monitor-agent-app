@@ -18,6 +18,7 @@ final class AppStore: ObservableObject {
     @Published var usageDataRebuildProgress: SessionSyncProgress?
     @Published var usageDataRebuildSummary: UsageDataRebuildSummary?
     @Published var usageDataRebuildErrorMessage: String?
+    @Published var usageDataRebuildWasCancelled = false
     @Published var quotaSnapshots: [QuotaProviderID: QuotaSnapshot] = [:]
 
     private let db: DatabaseManager
@@ -29,6 +30,7 @@ final class AppStore: ObservableObject {
     private let quotaRefreshScheduler: QuotaRefreshScheduler
     private var activeDay: Date
     private var cancellables = Set<AnyCancellable>()
+    private var usageDataRebuildCancellation: UsageDataRebuildCancellation?
     private(set) var isPanelVisible = false
     var isPeriodicSyncActive: Bool { syncManager.isRunning }
     var isPeriodicQuotaRefreshActive: Bool { quotaRefreshScheduler.isRunning }
@@ -166,6 +168,9 @@ final class AppStore: ObservableObject {
         usageDataRebuildProgress = nil
         usageDataRebuildSummary = nil
         usageDataRebuildErrorMessage = nil
+        usageDataRebuildWasCancelled = false
+        let cancellation = UsageDataRebuildCancellation()
+        usageDataRebuildCancellation = cancellation
         syncManager.stop()
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -173,7 +178,9 @@ final class AppStore: ObservableObject {
 
             do {
                 let summary = try syncManager.performExclusive {
-                    try UsageDataRebuilder(activeDatabase: self.db).rebuild { [weak self] progress in
+                    try UsageDataRebuilder(activeDatabase: self.db).rebuild(
+                        cancellation: cancellation
+                    ) { [weak self] progress in
                         DispatchQueue.main.async {
                             self?.usageDataRebuildProgress = progress
                         }
@@ -182,17 +189,28 @@ final class AppStore: ObservableObject {
                 DispatchQueue.main.async {
                     self.usageDataRebuildSummary = summary
                     self.isRebuildingUsageData = false
+                    self.usageDataRebuildCancellation = nil
                     self.applySyncInterval(self.syncSettings.interval)
                     self.reload()
                 }
             } catch {
                 DispatchQueue.main.async {
-                    self.usageDataRebuildErrorMessage = error.localizedDescription
+                    if (error as? StrictSessionSyncError) == .cancelled {
+                        self.usageDataRebuildWasCancelled = true
+                    } else {
+                        self.usageDataRebuildErrorMessage = error.localizedDescription
+                    }
                     self.isRebuildingUsageData = false
+                    self.usageDataRebuildCancellation = nil
                     self.applySyncInterval(self.syncSettings.interval)
                 }
             }
         }
+    }
+
+    func cancelUsageDataRebuild() {
+        guard usageDataRebuildProgress?.phase?.isCancellable != false else { return }
+        usageDataRebuildCancellation?.cancel()
     }
 
     func prepareUsageDataRebuild() {
@@ -200,6 +218,7 @@ final class AppStore: ObservableObject {
         usageDataRebuildProgress = nil
         usageDataRebuildSummary = nil
         usageDataRebuildErrorMessage = nil
+        usageDataRebuildWasCancelled = false
     }
 
     func reload() {

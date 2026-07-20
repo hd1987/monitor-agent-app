@@ -54,10 +54,11 @@ enum UsageDataRebuildCopy {
     static let buttonTitle = "Rebuild Local Usage Data"
     static let description = "Rebuilds Monitor Agent's local usage database from Claude Code and Codex session logs. Original session logs and settings will not be changed."
     static let confirmationTitle = "Rebuild Local Usage Data?"
-    static let confirmationMessage = "Monitor Agent will rebuild its local usage database from your Claude Code and Codex session logs. Your original logs and settings will not be changed.\n\nThe current database will remain in use unless the rebuild completes successfully."
+    static let confirmationMessage = "Monitor Agent will rebuild its local usage database from your Claude Code and Codex session logs. Your original logs and settings will not be changed.\n\nClaude Code and Codex can continue running during the rebuild. New activity will be synchronized before completion.\n\nThe current database will remain in use unless the rebuild completes successfully."
     static let runningMessage = "Rebuilding local usage data..."
     static let successTitle = "Local usage data rebuilt successfully."
     static let failureTitle = "Rebuild failed. Your existing usage data was not changed."
+    static let canceledTitle = "Rebuild canceled."
 }
 
 // MARK: - Settings View
@@ -852,8 +853,12 @@ struct UsageDataRebuildSheetView: View {
     }
 
     private var headerTitle: String {
-        if store.isRebuildingUsageData { return UsageDataRebuildCopy.runningMessage }
+        if store.isRebuildingUsageData {
+            return store.usageDataRebuildProgress?.phase?.displayName
+                ?? UsageDataRebuildCopy.runningMessage
+        }
         if store.usageDataRebuildSummary != nil { return UsageDataRebuildCopy.successTitle }
+        if store.usageDataRebuildWasCancelled { return UsageDataRebuildCopy.canceledTitle }
         if store.usageDataRebuildErrorMessage != nil { return UsageDataRebuildCopy.failureTitle }
         return UsageDataRebuildCopy.confirmationTitle
     }
@@ -861,12 +866,14 @@ struct UsageDataRebuildSheetView: View {
     private var headerIconName: String {
         if store.isRebuildingUsageData { return "arrow.triangle.2.circlepath" }
         if store.usageDataRebuildSummary != nil { return "checkmark.circle.fill" }
+        if store.usageDataRebuildWasCancelled { return "xmark.circle.fill" }
         if store.usageDataRebuildErrorMessage != nil { return "exclamationmark.triangle.fill" }
         return "externaldrive.badge.timemachine"
     }
 
     private var headerColor: Color {
         if store.usageDataRebuildSummary != nil { return StatusPalette.success }
+        if store.usageDataRebuildWasCancelled { return .secondary }
         if store.usageDataRebuildErrorMessage != nil { return StatusPalette.warning }
         return .accentColor
     }
@@ -880,6 +887,10 @@ struct UsageDataRebuildSheetView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        } else if store.usageDataRebuildWasCancelled {
+            Text("Your existing usage data was not changed.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
         } else if let message = store.usageDataRebuildErrorMessage {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Your existing usage data was not changed.")
@@ -903,12 +914,23 @@ struct UsageDataRebuildSheetView: View {
         HStack {
             Spacer()
             if store.isRebuildingUsageData {
-                Button("Close") {}
-                    .disabled(true)
-            } else if store.usageDataRebuildSummary != nil || store.usageDataRebuildErrorMessage != nil {
+                Button("Cancel Rebuild", role: .cancel) {
+                    store.cancelUsageDataRebuild()
+                }
+                .disabled(store.usageDataRebuildProgress?.phase?.isCancellable == false)
+            } else if store.usageDataRebuildSummary != nil {
                 Button("Done") {
                     isPresented = false
                 }
+                .keyboardShortcut(.defaultAction)
+            } else if store.usageDataRebuildWasCancelled || store.usageDataRebuildErrorMessage != nil {
+                Button("Close", role: .cancel) {
+                    isPresented = false
+                }
+                Button("Retry") {
+                    store.rebuildLocalUsageData()
+                }
+                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
             } else {
                 Button("Cancel", role: .cancel) {
@@ -929,11 +951,23 @@ struct UsageDataRebuildProgressView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ProgressView(value: progress?.fractionCompleted ?? 0)
-                .progressViewStyle(.linear)
+            if let progress, progress.totalBytes > 0 || progress.totalFiles > 0 {
+                ProgressView(value: progress.fractionCompleted)
+                    .progressViewStyle(.linear)
+            } else {
+                ProgressView()
+                    .progressViewStyle(.linear)
+            }
 
             HStack {
                 Text(fileProgressText)
+                Spacer()
+                Text(byteProgressText)
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            HStack {
+                Text(progress?.currentSource ?? " ")
                 Spacer()
                 Text(recordProgressText)
             }
@@ -944,13 +978,23 @@ struct UsageDataRebuildProgressView: View {
 
     private var fileProgressText: String {
         guard let progress else { return "Preparing files..." }
+        guard progress.totalFiles > 0 else { return "Preparing files..." }
         return "\(progress.completedFiles) / \(progress.totalFiles) files"
+    }
+
+    private var byteProgressText: String {
+        guard let progress, progress.totalBytes > 0 else { return " " }
+        return "\(formatBytes(progress.processedBytes)) / \(formatBytes(progress.totalBytes))"
     }
 
     private var recordProgressText: String {
         guard let progress else { return "0 requests rebuilt" }
         let label = progress.recordsSynced == 1 ? "request" : "requests"
         return "\(progress.recordsSynced) \(label) rebuilt"
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }
 

@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ### Changed
 - Share source headers across Extensions, Config, and Prompt settings, with names on the left and paths plus Finder actions on the right
+- Rebuild local usage data from bounded streaming snapshots while Claude Code and Codex remain active, with pre-copy event filtering, accelerated line scanning, durable per-file transactions, a catch-up pass, byte-level phase progress, cancellation, strict source validation, and an immediate final sync
 
 ## [0.6.4] - 2026-07-19
 

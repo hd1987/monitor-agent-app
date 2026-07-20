@@ -236,6 +236,16 @@ final class DatabaseManager {
         }
     }
 
+    func insertRecordsThrowing(_ records: [ParsedRecord]) throws {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard let db = dbQueue else { throw DatabaseManagerError.unavailable }
+        guard !records.isEmpty else { return }
+        try db.write { db in
+            try insertRecords(records, in: db)
+        }
+    }
+
     private func insertRecords(_ records: [ParsedRecord], in db: Database) throws {
         for record in records {
             try db.execute(
