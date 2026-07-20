@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-07-21
+
+### Changed
+- Adjust subscription quota Remaining colors so values at or below 10% are red and values above 10% through 40% are orange
+
 ## [0.6.6] - 2026-07-21
 
 ### Changed
