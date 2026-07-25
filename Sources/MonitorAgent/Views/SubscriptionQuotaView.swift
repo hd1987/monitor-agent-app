@@ -26,10 +26,12 @@ struct SubscriptionQuotaView: View {
 }
 
 private struct SubscriptionQuotaCard: View {
+    @EnvironmentObject private var store: AppStore
     @EnvironmentObject private var theme: ThemeManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isExpirationTipPresented = false
     @State private var isResetTipPresented = false
+    @State private var isRefreshing = false
     @State private var cardWidth: CGFloat = 0
     @State private var rightRegionWidth: CGFloat = 0
     @State private var resetTipAnchorX: CGFloat = 0
@@ -137,6 +139,7 @@ private struct SubscriptionQuotaCard: View {
             }
         }
         .zIndex(isExpirationTipPresented || isResetTipPresented ? 2 : 0)
+        .onChange(of: snapshot) { _, _ in isRefreshing = false }
     }
 
     private var clampedResetTipX: CGFloat {
@@ -200,7 +203,33 @@ private struct SubscriptionQuotaCard: View {
         case .authenticationExpired:
             statusText("Subscription sign-in expired")
         case .unavailable(let message):
-            statusText(message)
+            // Subscribed but the request failed: offer a manual retry.
+            HStack(spacing: 8) {
+                statusText(message)
+                refreshButton
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var refreshButton: some View {
+        if isRefreshing {
+            ProgressView()
+                .controlSize(.mini)
+                .frame(height: QuotaCardLayout.metricHeight)
+        } else {
+            Button {
+                isRefreshing = true
+                store.refreshQuota(provider: provider)
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(theme.panelSecondaryForeground)
+                    .frame(height: QuotaCardLayout.metricHeight)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Refresh quota")
         }
     }
 

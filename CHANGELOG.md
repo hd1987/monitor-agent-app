@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Added
+- Show a refresh button on a subscription quota card when a subscribed provider's request fails so it can be retried without waiting for the next interval
+
 ### Changed
 - Fix the Settings sidebar at a constant width and block its divider drag so it cannot be resized or collapsed
 

@@ -146,6 +146,20 @@ final class AppStore: ObservableObject {
         }
     }
 
+    /// Force a single provider's quota request, bypassing the throttle. Used by
+    /// the per-card refresh button shown when a subscribed provider fails.
+    func refreshQuota(provider: QuotaProviderID) {
+        guard quotaSettings.isEnabled(provider) else { return }
+        quotaService.refresh(
+            provider: provider,
+            minimumInterval: quotaSettings.refreshInterval.minimumRequestInterval,
+            force: true,
+            now: Date()
+        ) { [weak self] snapshot in
+            self?.quotaSnapshots[provider] = snapshot
+        }
+    }
+
     func quotaSettingsDidChange() {
         quotaSnapshots = quotaSnapshots.filter { quotaSettings.isEnabled($0.key) }
         applyQuotaRefreshInterval(quotaSettings.refreshInterval)
