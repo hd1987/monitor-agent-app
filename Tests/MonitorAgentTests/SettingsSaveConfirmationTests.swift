@@ -103,7 +103,7 @@ final class SettingsSaveConfirmationTests: XCTestCase {
     func testExtensionsIsACombinedReadOnlyCategory() {
         XCTAssertEqual(
             SettingsCategory.allCases.map(\.rawValue),
-            ["General", "Extensions", "Config", "Prompt"]
+            ["General", "Shortcuts", "Extensions", "Config", "Prompt"]
         )
         XCTAssertTrue(SettingsCategory.extensions.isReadOnly)
         XCTAssertFalse(SettingsCategory.general.isReadOnly)
@@ -149,9 +149,9 @@ final class SettingsSaveConfirmationTests: XCTestCase {
     func testSubscriptionQuotaSettingsArePresentedAsOneGroup() {
         XCTAssertEqual(QuotaSettingsCopy.title, "Subscription Quota")
         XCTAssertEqual(QuotaSettingsCopy.claudeTitle, "Claude Code")
-        XCTAssertEqual(QuotaSettingsCopy.claudeDescription, "Show Claude Code subscription quota in the main panel.")
+        XCTAssertEqual(QuotaSettingsCopy.claudeDescription, "Set an expiration date to show Claude Code subscription quota in the main panel; leave it empty to hide.")
         XCTAssertEqual(QuotaSettingsCopy.codexTitle, "Codex")
-        XCTAssertEqual(QuotaSettingsCopy.codexDescription, "Show Codex subscription quota in the main panel.")
+        XCTAssertEqual(QuotaSettingsCopy.codexDescription, "Set an expiration date to show Codex subscription quota in the main panel; leave it empty to hide.")
         XCTAssertEqual(QuotaSettingsCopy.expirationNotSet, "Not set")
         XCTAssertEqual(QuotaSettingsCopy.expirationPickerTitle, "Subscription Expiration")
         XCTAssertEqual(QuotaSettingsCopy.today, "Today")

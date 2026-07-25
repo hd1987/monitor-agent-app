@@ -17,6 +17,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         let quotaDefaults = UserDefaults(suiteName: "\(suiteName).quota")!
         quotaDefaults.removePersistentDomain(forName: "\(suiteName).quota")
         let quotaSettings = QuotaSettings(defaults: quotaDefaults)
+        enableAllProviders(quotaSettings)
         let quotaService = RecordingQuotaService()
         let store = AppStore(
             database: DatabaseManager(inMemory: true),
@@ -61,10 +62,16 @@ final class AppStoreTodayRolloverTests: XCTestCase {
     }
 
     func testPanelOpenRefreshesAllEnabledQuotaProvidersRegardlessOfFilter() {
+        let suiteName = "AppStoreTodayRolloverTests.refreshAllProviders"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        enableAllProviders(quotaSettings)
         let quotaService = RecordingQuotaService()
         let store = AppStore(
             database: DatabaseManager(inMemory: true),
             quotaService: quotaService,
+            quotaSettings: quotaSettings,
             observeSyncIntervalChanges: false
         )
         store.appFilter = .claude
@@ -73,6 +80,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
 
         XCTAssertEqual(quotaService.providers, [.claude, .codex])
         store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
     func testQuotaSettingsChangeRestartsVisiblePanelWithNewInterval() {
@@ -80,6 +88,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         let quotaSettings = QuotaSettings(defaults: defaults)
+        enableAllProviders(quotaSettings)
         let quotaService = RecordingQuotaService()
         let store = AppStore(
             database: DatabaseManager(inMemory: true),
@@ -103,6 +112,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         let quotaSettings = QuotaSettings(defaults: defaults)
+        enableAllProviders(quotaSettings)
         quotaSettings.refreshInterval = .never
         let quotaService = RecordingQuotaService()
         let store = AppStore(
@@ -243,6 +253,14 @@ final class AppStoreTodayRolloverTests: XCTestCase {
                 completion: completion
             )
         }
+    }
+
+    /// Enables both quota providers by giving each a future expiration date,
+    /// since enablement now derives from a set expiration date.
+    private func enableAllProviders(_ settings: QuotaSettings) {
+        let future = Date(timeIntervalSinceNow: 30 * 24 * 60 * 60)
+        settings.claudeExpirationDate = future
+        settings.codexExpirationDate = future
     }
 
     private func date(year: Int, month: Int, day: Int, hour: Int = 0) -> Date {

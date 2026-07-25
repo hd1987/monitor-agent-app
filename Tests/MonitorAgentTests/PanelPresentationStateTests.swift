@@ -1,3 +1,5 @@
+import AppKit
+import Carbon.HIToolbox
 import XCTest
 @testable import MonitorAgent
 
@@ -81,13 +83,25 @@ final class PanelPresentationStateTests: XCTestCase {
         XCTAssertEqual(origin.y, 500)
     }
 
-    func testEscapeHidesPanelRegardlessOfAutomaticDismissalPolicy() {
+    func testHidePanelShortcutHidesRegardlessOfAutomaticDismissalPolicy() {
         let panel = FloatingPanel()
         var didHide = false
         panel.allowsAutomaticDismissal = { false }
         panel.onHide = { didHide = true }
 
-        panel.cancelOperation(nil)
+        let escape = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\u{1b}",
+            charactersIgnoringModifiers: "\u{1b}",
+            isARepeat: false,
+            keyCode: UInt16(kVK_Escape)
+        )!
+        panel.sendEvent(escape)
 
         XCTAssertTrue(didHide)
     }

@@ -146,34 +146,37 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertTrue(paths.contains("/Applications/Codex.app/Contents/Resources/codex"))
     }
 
-    func testQuotaSettingsDefaultToEnabledAndPersistIndependently() throws {
+    func testQuotaEnablementDerivesFromExpirationDate() throws {
         let suiteName = "QuotaFeatureTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let settings = QuotaSettings(defaults: defaults)
-        XCTAssertTrue(settings.claudeEnabled)
-        XCTAssertTrue(settings.codexEnabled)
+        // No expiration date means the provider is disabled and hidden.
+        XCTAssertFalse(settings.isEnabled(.claude))
+        XCTAssertFalse(settings.isEnabled(.codex))
         XCTAssertNil(settings.claudeExpirationDate)
         XCTAssertNil(settings.codexExpirationDate)
         XCTAssertEqual(settings.refreshInterval, .twoMinutes)
 
         let claudeExpiration = Date(timeIntervalSince1970: 1_800_000_000)
         let codexExpiration = Date(timeIntervalSince1970: 1_900_000_000)
-        settings.claudeEnabled = false
         settings.claudeExpirationDate = claudeExpiration
         settings.codexExpirationDate = codexExpiration
         settings.refreshInterval = .fiveMinutes
-        XCTAssertFalse(QuotaSettings(defaults: defaults).claudeEnabled)
-        XCTAssertTrue(QuotaSettings(defaults: defaults).codexEnabled)
+        // Setting a date enables the provider.
+        XCTAssertTrue(QuotaSettings(defaults: defaults).isEnabled(.claude))
+        XCTAssertTrue(QuotaSettings(defaults: defaults).isEnabled(.codex))
         XCTAssertEqual(QuotaSettings(defaults: defaults).claudeExpirationDate, claudeExpiration)
         XCTAssertEqual(QuotaSettings(defaults: defaults).codexExpirationDate, codexExpiration)
         XCTAssertEqual(QuotaSettings(defaults: defaults).expirationDate(for: .claude), claudeExpiration)
         XCTAssertEqual(QuotaSettings(defaults: defaults).expirationDate(for: .codex), codexExpiration)
         XCTAssertEqual(QuotaSettings(defaults: defaults).refreshInterval, .fiveMinutes)
 
+        // Clearing the date disables the provider again.
         settings.claudeExpirationDate = nil
         XCTAssertNil(QuotaSettings(defaults: defaults).claudeExpirationDate)
+        XCTAssertFalse(QuotaSettings(defaults: defaults).isEnabled(.claude))
     }
 
     func testSubscriptionExpirationUsesCalendarDayDistance() {

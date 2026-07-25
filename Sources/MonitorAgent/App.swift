@@ -116,6 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let themeManager = ThemeManager.shared
     private let globalShortcutController = GlobalShortcutController.shared
     private var themeCancellable: AnyCancellable?
+    private var settingsDividerMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         DatabaseManager.cleanUpTemporaryRebuildDatabase()
@@ -136,6 +137,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let generalItem = NSMenuItem(title: "General", action: #selector(openSettingsGeneral(_:)), keyEquivalent: ",")
         generalItem.target = self
+        let shortcutsItem = NSMenuItem(title: "Shortcuts", action: #selector(openSettingsShortcuts(_:)), keyEquivalent: "")
+        shortcutsItem.target = self
         let extensionsItem = NSMenuItem(title: "Extensions", action: #selector(openSettingsExtensions(_:)), keyEquivalent: "")
         extensionsItem.target = self
         let configItem = NSMenuItem(title: "Config", action: #selector(openSettingsConfig(_:)), keyEquivalent: "")
@@ -150,6 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(aboutItem)
         menu.addItem(.separator())
         menu.addItem(generalItem)
+        menu.addItem(shortcutsItem)
         menu.addItem(extensionsItem)
         menu.addItem(configItem)
         menu.addItem(promptItem)
@@ -190,6 +194,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         panel.onResetPosition = { [weak self] in
             self?.resetPanelPosition()
+        }
+        panel.onTogglePin = { [weak self] in
+            self?.panelPresentationState.togglePin()
         }
         panel.contentView = hostingView
         globalShortcutController.configure { [weak self] in
@@ -319,6 +326,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openSettings(category: .general)
     }
 
+    @objc private func openSettingsShortcuts(_ sender: AnyObject?) {
+        openSettings(category: .shortcuts)
+    }
+
     @objc private func openSettingsExtensions(_ sender: AnyObject?) {
         openSettings(category: .extensions)
     }
@@ -336,7 +347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsPanel?.close()
         settingsPanel = nil
 
-        let hosting = NSHostingView(
+        let hosting = NSHostingController(
             rootView: SettingsView(initialCategory: category)
                 .environmentObject(store)
                 .environmentObject(themeManager)
@@ -360,7 +371,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.level = .normal
         w.hidesOnDeactivate = false
         w.appearance = themeManager.nsAppearance
-        w.contentView = hosting
+        w.contentViewController = hosting
         w.minSize = NSSize(
             width: SettingsWindowLayout.minimumWidth,
             height: SettingsWindowLayout.minimumHeight
@@ -370,9 +381,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         settingsPanel = w
+        installSettingsDividerMonitorIfNeeded()
         DispatchQueue.main.async { [weak w] in
             SettingsWindowToolbar.revealAfterPresentation(w)
         }
+    }
+
+    /// Swallow mouse events landing on the settings sidebar divider so it can
+    /// never be dragged to resize or collapse. Event-level interception is
+    /// independent of SwiftUI's split-view layout, which re-asserts itself.
+    private func installSettingsDividerMonitorIfNeeded() {
+        guard settingsDividerMonitor == nil else { return }
+        // Grab margin on each side of the divider's actual x position.
+        let hitMargin: CGFloat = 8
+        settingsDividerMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .mouseMoved, .cursorUpdate]
+        ) { [weak self] event in
+            guard
+                let self,
+                let panel = self.settingsPanel,
+                event.window === panel,
+                let dividerX = self.settingsDividerX(in: panel)
+            else { return event }
+            guard abs(event.locationInWindow.x - dividerX) <= hitMargin else { return event }
+            // Over the divider: keep the normal cursor and discard the event so
+            // the split view neither shows the resize cursor nor starts a drag.
+            NSCursor.arrow.set()
+            return nil
+        }
+    }
+
+    /// The sidebar/detail divider x in window coordinates, read from the live
+    /// split view so it tracks SwiftUI's actual rendered sidebar width.
+    private func settingsDividerX(in panel: NSWindow) -> CGFloat? {
+        guard
+            let content = panel.contentView,
+            let split = Self.firstSplitView(in: content),
+            let sidebar = split.arrangedSubviews.first
+        else { return nil }
+        let edge = NSPoint(x: sidebar.frame.maxX, y: sidebar.frame.minY)
+        return split.convert(edge, to: nil).x
+    }
+
+    private static func firstSplitView(in view: NSView) -> NSSplitView? {
+        if let split = view as? NSSplitView { return split }
+        for subview in view.subviews {
+            if let found = firstSplitView(in: subview) { return found }
+        }
+        return nil
     }
 
     @objc private func openAbout(_ sender: AnyObject?) {
@@ -479,6 +535,7 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     var onFocusChange: ((Bool) -> Void)?
     var onCycleAppFilter: ((Bool) -> Void)?
     var onResetPosition: (() -> Void)?
+    var onTogglePin: (() -> Void)?
 
     init() {
         super.init(
@@ -570,19 +627,40 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     }
 
     private func handlePanelShortcut(_ event: NSEvent) -> Bool {
-        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard modifiers.subtracting(.shift).isEmpty else { return false }
+        let settings = PanelShortcutSettings.shared
+        let modifiers = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .intersection(GlobalShortcut.supportedModifiers)
 
-        switch event.charactersIgnoringModifiers {
-        case "\t":
-            onCycleAppFilter?(modifiers.contains(.shift))
+        if let binding = settings.binding(for: .togglePin),
+           binding.matches(keyCode: event.keyCode, modifiers: modifiers) {
+            onTogglePin?()
             return true
-        case "\r", "\u{3}":
+        }
+        if let binding = settings.binding(for: .hidePanel),
+           binding.matches(keyCode: event.keyCode, modifiers: modifiers) {
+            orderOut(nil)
+            return true
+        }
+        if let binding = settings.binding(for: .resetPosition),
+           binding.matches(keyCode: event.keyCode, modifiers: modifiers) {
             onResetPosition?()
             return true
-        default:
-            return false
         }
+        if let binding = settings.binding(for: .cycleFilter) {
+            if binding.matches(keyCode: event.keyCode, modifiers: modifiers) {
+                onCycleAppFilter?(false)
+                return true
+            }
+            // Shift reverses the cycle when the base binding has no Shift of its own.
+            if !binding.modifiers.contains(.shift),
+               UInt32(event.keyCode) == binding.keyCode,
+               modifiers == binding.modifiers.union(.shift) {
+                onCycleAppFilter?(true)
+                return true
+            }
+        }
+        return false
     }
 
     func windowWillMove(_ notification: Notification) {
@@ -612,10 +690,6 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         super.orderOut(sender)
         onFocusChange?(false)
         onHide?()
-    }
-
-    override func cancelOperation(_ sender: Any?) {
-        orderOut(sender)
     }
 
     override func resignKey() {

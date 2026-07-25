@@ -4,6 +4,7 @@ import SwiftUI
 
 enum SettingsCategory: String, CaseIterable, Identifiable {
     case general = "General"
+    case shortcuts = "Shortcuts"
     case extensions = "Extensions"
     case config = "Config"
     case prompt = "Prompt"
@@ -13,6 +14,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: return "gearshape"
+        case .shortcuts: return "keyboard"
         case .extensions: return "puzzlepiece.extension"
         case .config: return "doc.text"
         case .prompt: return "text.bubble"
@@ -46,6 +48,7 @@ enum SettingsWindowLayout {
     static let minimumWidth: CGFloat = 760
     static let minimumHeight: CGFloat = 520
     static let sidebarVisibility: NavigationSplitViewVisibility = .all
+    static let sidebarWidth: CGFloat = 170
     static let contentTopPadding: CGFloat = 0
     static let groupedFormTopPadding: CGFloat = -20
 }
@@ -75,9 +78,8 @@ struct SettingsView: View {
     @State private var draftTheme: Theme = .system
     @State private var draftSyncInterval: SyncInterval = .thirty
     @State private var draftGlobalShortcut: GlobalShortcut?
+    @State private var draftPanelShortcuts: [String: GlobalShortcut?] = [:]
     @State private var draftLaunchAtLogin: Bool = false
-    @State private var draftClaudeQuotaEnabled: Bool = true
-    @State private var draftCodexQuotaEnabled: Bool = true
     @State private var draftClaudeExpirationDate: Date?
     @State private var draftCodexExpirationDate: Date?
     @State private var draftQuotaRefreshInterval: QuotaRefreshInterval = .twoMinutes
@@ -127,7 +129,7 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 190)
+            .navigationSplitViewColumnWidth(SettingsWindowLayout.sidebarWidth)
             .focused($isSidebarFocused)
         } detail: {
             VStack(spacing: 0) {
@@ -226,13 +228,16 @@ struct SettingsView: View {
             GeneralSettingsView(
                 draftTheme: $draftTheme,
                 draftSyncInterval: $draftSyncInterval,
-                draftGlobalShortcut: $draftGlobalShortcut,
                 draftLaunchAtLogin: $draftLaunchAtLogin,
-                draftClaudeQuotaEnabled: $draftClaudeQuotaEnabled,
-                draftCodexQuotaEnabled: $draftCodexQuotaEnabled,
                 draftClaudeExpirationDate: $draftClaudeExpirationDate,
                 draftCodexExpirationDate: $draftCodexExpirationDate,
                 draftQuotaRefreshInterval: $draftQuotaRefreshInterval
+            )
+        case .shortcuts:
+            ShortcutsSettingsView(
+                draftGlobalShortcut: $draftGlobalShortcut,
+                draftPanelShortcuts: $draftPanelShortcuts,
+                onRestoreDefaults: restoreShortcutDefaults
             )
         case .extensions:
             ExtensionsSettingsView(
@@ -282,13 +287,17 @@ struct SettingsView: View {
         case .general:
             draftTheme = themeManager.theme
             draftSyncInterval = SyncSettings.shared.interval
-            draftGlobalShortcut = GlobalShortcutController.shared.shortcut
             draftLaunchAtLogin = SyncSettings.shared.launchAtLogin
-            draftClaudeQuotaEnabled = QuotaSettings.shared.claudeEnabled
-            draftCodexQuotaEnabled = QuotaSettings.shared.codexEnabled
             draftClaudeExpirationDate = QuotaSettings.shared.claudeExpirationDate
             draftCodexExpirationDate = QuotaSettings.shared.codexExpirationDate
             draftQuotaRefreshInterval = QuotaSettings.shared.refreshInterval
+        case .shortcuts:
+            draftGlobalShortcut = GlobalShortcutController.shared.shortcut
+            var panelDraft: [String: GlobalShortcut?] = [:]
+            for action in PanelShortcutAction.allCases {
+                panelDraft[action.rawValue] = PanelShortcutSettings.shared.binding(for: action)
+            }
+            draftPanelShortcuts = panelDraft
         case .extensions:
             extensionsTab = .claude
             loadExtensionInventories()
@@ -322,6 +331,20 @@ struct SettingsView: View {
     private func saveCurrentCategory() {
         switch selectedCategory {
         case .general:
+            themeManager.theme = draftTheme
+            SyncSettings.shared.interval = draftSyncInterval
+            SyncSettings.shared.launchAtLogin = draftLaunchAtLogin
+            QuotaSettings.shared.claudeExpirationDate = draftClaudeExpirationDate
+            QuotaSettings.shared.codexExpirationDate = draftCodexExpirationDate
+            QuotaSettings.shared.refreshInterval = draftQuotaRefreshInterval
+            store.quotaSettingsDidChange()
+
+        case .shortcuts:
+            if let conflict = panelShortcutConflict() {
+                saveErrorMessage = conflict
+                showSaveError = true
+                return
+            }
             do {
                 try GlobalShortcutController.shared.updateShortcut(draftGlobalShortcut)
             } catch {
@@ -329,15 +352,11 @@ struct SettingsView: View {
                 showSaveError = true
                 return
             }
-            themeManager.theme = draftTheme
-            SyncSettings.shared.interval = draftSyncInterval
-            SyncSettings.shared.launchAtLogin = draftLaunchAtLogin
-            QuotaSettings.shared.claudeEnabled = draftClaudeQuotaEnabled
-            QuotaSettings.shared.codexEnabled = draftCodexQuotaEnabled
-            QuotaSettings.shared.claudeExpirationDate = draftClaudeExpirationDate
-            QuotaSettings.shared.codexExpirationDate = draftCodexExpirationDate
-            QuotaSettings.shared.refreshInterval = draftQuotaRefreshInterval
-            store.quotaSettingsDidChange()
+            var bindings: [PanelShortcutAction: GlobalShortcut?] = [:]
+            for action in PanelShortcutAction.allCases {
+                bindings[action] = draftPanelShortcuts[action.rawValue] ?? action.defaultBinding
+            }
+            PanelShortcutSettings.shared.update(bindings)
 
         case .extensions:
             return
@@ -370,6 +389,29 @@ struct SettingsView: View {
         }
 
         showSaveSuccessIndicator()
+    }
+
+    private func restoreShortcutDefaults() {
+        draftGlobalShortcut = nil
+        var panelDraft: [String: GlobalShortcut?] = [:]
+        for action in PanelShortcutAction.allCases {
+            panelDraft[action.rawValue] = action.defaultBinding
+        }
+        draftPanelShortcuts = panelDraft
+    }
+
+    /// Returns an error message if two panel actions are assigned the same key combination.
+    private func panelShortcutConflict() -> String? {
+        var seen: [String: PanelShortcutAction] = [:]
+        for action in PanelShortcutAction.allCases {
+            guard let binding = draftPanelShortcuts[action.rawValue] ?? nil else { continue }
+            let key = "\(binding.keyCode)-\(binding.modifiers.rawValue)"
+            if let other = seen[key] {
+                return "\(action.title) and \(other.title) use the same shortcut (\(binding.displayName)). Choose different keys."
+            }
+            seen[key] = action
+        }
+        return nil
     }
 
     private func showSaveSuccessIndicator() {
@@ -444,10 +486,7 @@ struct GeneralSettingsView: View {
 
     @Binding var draftTheme: Theme
     @Binding var draftSyncInterval: SyncInterval
-    @Binding var draftGlobalShortcut: GlobalShortcut?
     @Binding var draftLaunchAtLogin: Bool
-    @Binding var draftClaudeQuotaEnabled: Bool
-    @Binding var draftCodexQuotaEnabled: Bool
     @Binding var draftClaudeExpirationDate: Date?
     @Binding var draftCodexExpirationDate: Date?
     @Binding var draftQuotaRefreshInterval: QuotaRefreshInterval
@@ -469,13 +508,6 @@ struct GeneralSettingsView: View {
                     .labelsHidden()
                     .pickerStyle(.segmented)
                     .frame(width: 240)
-                }
-
-                SettingsRow(
-                    title: "Global Shortcut",
-                    description: "Show or hide the main panel from any app. Requires at least one modifier key."
-                ) {
-                    GlobalShortcutRecorder(shortcut: $draftGlobalShortcut)
                 }
 
                 SettingsRow(
@@ -505,8 +537,6 @@ struct GeneralSettingsView: View {
 
             Section(QuotaSettingsCopy.title) {
                 QuotaSettingsGroup(
-                    claudeEnabled: $draftClaudeQuotaEnabled,
-                    codexEnabled: $draftCodexQuotaEnabled,
                     claudeExpirationDate: $draftClaudeExpirationDate,
                     codexExpirationDate: $draftCodexExpirationDate,
                     refreshInterval: $draftQuotaRefreshInterval
@@ -546,33 +576,45 @@ struct GeneralSettingsView: View {
 
 }
 
-struct GlobalShortcutRecorder: View {
+/// Records a key binding. Global shortcuts require a modifier and treat Esc as cancel;
+/// panel shortcuts accept single keys (including Esc) and cancel by clicking again.
+struct ShortcutRecorder: View {
     @Binding var shortcut: GlobalShortcut?
+    var requiresModifier: Bool = true
+    var clearHelp: String = "Clear shortcut"
     @State private var isRecording = false
     @State private var eventMonitor: Any?
 
     var body: some View {
+        // Fixed widths and an always-reserved clear slot keep the row from shifting
+        // horizontally as the title changes or the clear button appears.
         HStack(spacing: 8) {
             Button {
-                beginRecording()
+                if isRecording {
+                    stopRecording()
+                } else {
+                    beginRecording()
+                }
             } label: {
                 Text(buttonTitle)
                     .font(.system(size: 12))
-                    .frame(minWidth: 150)
+                    .lineLimit(1)
+                    .frame(width: 150)
             }
 
-            if shortcut != nil {
-                Button {
-                    shortcut = nil
-                    stopRecording()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(UtilityWindowPressButtonStyle())
-                .help("Clear global shortcut")
-                .accessibilityLabel("Clear global shortcut")
+            Button {
+                shortcut = nil
+                stopRecording()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
             }
+            .buttonStyle(UtilityWindowPressButtonStyle())
+            .help(clearHelp)
+            .accessibilityLabel(clearHelp)
+            .opacity(shortcut == nil ? 0 : 1)
+            .disabled(shortcut == nil)
+            .allowsHitTesting(shortcut != nil)
         }
         .onDisappear {
             stopRecording()
@@ -588,11 +630,12 @@ struct GlobalShortcutRecorder: View {
         stopRecording()
         isRecording = true
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if GlobalShortcut.isRecordingCancellation(event) {
+            // Global recorder uses Esc to cancel; panel recorder accepts Esc as a binding.
+            if requiresModifier, GlobalShortcut.isRecordingCancellation(event) {
                 stopRecording()
                 return nil
             }
-            guard let recordedShortcut = GlobalShortcut.make(from: event) else {
+            guard let recordedShortcut = GlobalShortcut.make(from: event, requireModifier: requiresModifier) else {
                 NSSound.beep()
                 return nil
             }
@@ -611,12 +654,74 @@ struct GlobalShortcutRecorder: View {
     }
 }
 
+// MARK: - Shortcuts
+
+struct ShortcutsSettingsView: View {
+    @Binding var draftGlobalShortcut: GlobalShortcut?
+    @Binding var draftPanelShortcuts: [String: GlobalShortcut?]
+    var onRestoreDefaults: () -> Void
+
+    var body: some View {
+        Form {
+            Section("Global") {
+                SettingsRow(
+                    title: "Toggle Main Panel",
+                    description: "Show or hide the main panel from any app. Requires at least one modifier key."
+                ) {
+                    ShortcutRecorder(
+                        shortcut: $draftGlobalShortcut,
+                        requiresModifier: true,
+                        clearHelp: "Clear global shortcut"
+                    )
+                }
+            }
+
+            Section("Panel") {
+                ForEach(PanelShortcutAction.allCases) { action in
+                    SettingsRow(title: action.title, description: action.description) {
+                        ShortcutRecorder(
+                            shortcut: panelBinding(for: action),
+                            requiresModifier: false,
+                            clearHelp: "Clear \(action.title) shortcut"
+                        )
+                    }
+                }
+            }
+
+            Section {
+                SettingsRow(
+                    title: "Restore Defaults",
+                    description: "Reset every shortcut on this page to its original key."
+                ) {
+                    Button("Restore Defaults") { onRestoreDefaults() }
+                        .font(.system(size: 12))
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .contentMargins(
+            .top,
+            SettingsWindowLayout.groupedFormTopPadding,
+            for: .scrollContent
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Bridges the optional-valued draft dictionary to a plain `Binding<GlobalShortcut?>`.
+    private func panelBinding(for action: PanelShortcutAction) -> Binding<GlobalShortcut?> {
+        Binding(
+            get: { draftPanelShortcuts[action.rawValue] ?? nil },
+            set: { draftPanelShortcuts[action.rawValue] = $0 }
+        )
+    }
+}
+
 enum QuotaSettingsCopy {
     static let title = "Subscription Quota"
     static let claudeTitle = "Claude Code"
-    static let claudeDescription = "Show Claude Code subscription quota in the main panel."
+    static let claudeDescription = "Set an expiration date to show Claude Code subscription quota in the main panel; leave it empty to hide."
     static let codexTitle = "Codex"
-    static let codexDescription = "Show Codex subscription quota in the main panel."
+    static let codexDescription = "Set an expiration date to show Codex subscription quota in the main panel; leave it empty to hide."
     static let expirationNotSet = "Not set"
     static let expirationPickerTitle = "Subscription Expiration"
     static let today = "Today"
@@ -633,8 +738,6 @@ enum ExpirationDateControlStyle {
 }
 
 private struct QuotaSettingsGroup: View {
-    @Binding var claudeEnabled: Bool
-    @Binding var codexEnabled: Bool
     @Binding var claudeExpirationDate: Date?
     @Binding var codexExpirationDate: Date?
     @Binding var refreshInterval: QuotaRefreshInterval
@@ -644,15 +747,13 @@ private struct QuotaSettingsGroup: View {
             quotaRow(
                 title: QuotaSettingsCopy.claudeTitle,
                 description: QuotaSettingsCopy.claudeDescription,
-                expirationDate: $claudeExpirationDate,
-                isOn: $claudeEnabled
+                expirationDate: $claudeExpirationDate
             )
             Divider()
             quotaRow(
                 title: QuotaSettingsCopy.codexTitle,
                 description: QuotaSettingsCopy.codexDescription,
-                expirationDate: $codexExpirationDate,
-                isOn: $codexEnabled
+                expirationDate: $codexExpirationDate
             )
             Divider()
             HStack(spacing: 16) {
@@ -677,15 +778,12 @@ private struct QuotaSettingsGroup: View {
     private func quotaRow(
         title: String,
         description: String,
-        expirationDate: Binding<Date?>,
-        isOn: Binding<Bool>
+        expirationDate: Binding<Date?>
     ) -> some View {
         HStack(spacing: 16) {
             settingLabel(title: title, description: description)
             Spacer(minLength: 16)
             ExpirationDateControl(expirationDate: expirationDate)
-            Toggle("", isOn: isOn)
-                .toggleStyle(.switch)
         }
         .padding(.vertical, 8)
     }
