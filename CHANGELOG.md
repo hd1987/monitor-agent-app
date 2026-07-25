@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Fix the Settings sidebar at a constant width and block its divider drag so it cannot be resized or collapsed
+
 ## [0.6.7] - 2026-07-21
 
 ### Changed

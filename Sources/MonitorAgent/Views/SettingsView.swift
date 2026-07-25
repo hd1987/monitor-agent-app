@@ -46,6 +46,7 @@ enum SettingsWindowLayout {
     static let minimumWidth: CGFloat = 760
     static let minimumHeight: CGFloat = 520
     static let sidebarVisibility: NavigationSplitViewVisibility = .all
+    static let sidebarWidth: CGFloat = 170
     static let contentTopPadding: CGFloat = 0
     static let groupedFormTopPadding: CGFloat = -20
 }
@@ -127,7 +128,7 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 190)
+            .navigationSplitViewColumnWidth(SettingsWindowLayout.sidebarWidth)
             .focused($isSidebarFocused)
         } detail: {
             VStack(spacing: 0) {

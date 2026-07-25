@@ -116,6 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let themeManager = ThemeManager.shared
     private let globalShortcutController = GlobalShortcutController.shared
     private var themeCancellable: AnyCancellable?
+    private var settingsDividerMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         DatabaseManager.cleanUpTemporaryRebuildDatabase()
@@ -336,7 +337,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsPanel?.close()
         settingsPanel = nil
 
-        let hosting = NSHostingView(
+        let hosting = NSHostingController(
             rootView: SettingsView(initialCategory: category)
                 .environmentObject(store)
                 .environmentObject(themeManager)
@@ -360,7 +361,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.level = .normal
         w.hidesOnDeactivate = false
         w.appearance = themeManager.nsAppearance
-        w.contentView = hosting
+        w.contentViewController = hosting
         w.minSize = NSSize(
             width: SettingsWindowLayout.minimumWidth,
             height: SettingsWindowLayout.minimumHeight
@@ -370,9 +371,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         settingsPanel = w
+        installSettingsDividerMonitorIfNeeded()
         DispatchQueue.main.async { [weak w] in
             SettingsWindowToolbar.revealAfterPresentation(w)
         }
+    }
+
+    /// Swallow mouse events landing on the settings sidebar divider so it can
+    /// never be dragged to resize or collapse. Event-level interception is
+    /// independent of SwiftUI's split-view layout, which re-asserts itself.
+    private func installSettingsDividerMonitorIfNeeded() {
+        guard settingsDividerMonitor == nil else { return }
+        // Grab margin on each side of the divider's actual x position.
+        let hitMargin: CGFloat = 8
+        settingsDividerMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .mouseMoved, .cursorUpdate]
+        ) { [weak self] event in
+            guard
+                let self,
+                let panel = self.settingsPanel,
+                event.window === panel,
+                let dividerX = self.settingsDividerX(in: panel)
+            else { return event }
+            guard abs(event.locationInWindow.x - dividerX) <= hitMargin else { return event }
+            // Over the divider: keep the normal cursor and discard the event so
+            // the split view neither shows the resize cursor nor starts a drag.
+            NSCursor.arrow.set()
+            return nil
+        }
+    }
+
+    /// The sidebar/detail divider x in window coordinates, read from the live
+    /// split view so it tracks SwiftUI's actual rendered sidebar width.
+    private func settingsDividerX(in panel: NSWindow) -> CGFloat? {
+        guard
+            let content = panel.contentView,
+            let split = Self.firstSplitView(in: content),
+            let sidebar = split.arrangedSubviews.first
+        else { return nil }
+        let edge = NSPoint(x: sidebar.frame.maxX, y: sidebar.frame.minY)
+        return split.convert(edge, to: nil).x
+    }
+
+    private static func firstSplitView(in view: NSView) -> NSSplitView? {
+        if let split = view as? NSSplitView { return split }
+        for subview in view.subviews {
+            if let found = firstSplitView(in: subview) { return found }
+        }
+        return nil
     }
 
     @objc private func openAbout(_ sender: AnyObject?) {
