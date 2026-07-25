@@ -7,9 +7,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 ## [Unreleased]
 
 ### Added
+- Add a Shortcuts settings category holding the global panel shortcut plus customizable in-panel shortcuts for Toggle Pin (default `P`), Cycle App Filter (`Tab`, Shift reverses), Reset Panel Position (`Return`), and Hide Panel (`Esc`), with per-shortcut clear and a Restore Defaults action
+- Add a Shortcuts entry to the menu bar right-click menu
 - Show a refresh button on a subscription quota card when a subscribed provider's request fails so it can be retried without waiting for the next interval
 
 ### Changed
+- Move the global panel shortcut out of General into the new Shortcuts category
+- Keep the shortcut recorder row from shifting by fixing the button width and reserving the clear button's space
 - Fix the Settings sidebar at a constant width and block its divider drag so it cannot be resized or collapsed
 
 ## [0.6.7] - 2026-07-21

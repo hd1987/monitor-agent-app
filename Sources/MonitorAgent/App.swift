@@ -137,6 +137,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let generalItem = NSMenuItem(title: "General", action: #selector(openSettingsGeneral(_:)), keyEquivalent: ",")
         generalItem.target = self
+        let shortcutsItem = NSMenuItem(title: "Shortcuts", action: #selector(openSettingsShortcuts(_:)), keyEquivalent: "")
+        shortcutsItem.target = self
         let extensionsItem = NSMenuItem(title: "Extensions", action: #selector(openSettingsExtensions(_:)), keyEquivalent: "")
         extensionsItem.target = self
         let configItem = NSMenuItem(title: "Config", action: #selector(openSettingsConfig(_:)), keyEquivalent: "")
@@ -151,6 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(aboutItem)
         menu.addItem(.separator())
         menu.addItem(generalItem)
+        menu.addItem(shortcutsItem)
         menu.addItem(extensionsItem)
         menu.addItem(configItem)
         menu.addItem(promptItem)
@@ -191,6 +194,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         panel.onResetPosition = { [weak self] in
             self?.resetPanelPosition()
+        }
+        panel.onTogglePin = { [weak self] in
+            self?.panelPresentationState.togglePin()
         }
         panel.contentView = hostingView
         globalShortcutController.configure { [weak self] in
@@ -318,6 +324,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettingsGeneral(_ sender: AnyObject?) {
         openSettings(category: .general)
+    }
+
+    @objc private func openSettingsShortcuts(_ sender: AnyObject?) {
+        openSettings(category: .shortcuts)
     }
 
     @objc private func openSettingsExtensions(_ sender: AnyObject?) {
@@ -525,6 +535,7 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     var onFocusChange: ((Bool) -> Void)?
     var onCycleAppFilter: ((Bool) -> Void)?
     var onResetPosition: (() -> Void)?
+    var onTogglePin: (() -> Void)?
 
     init() {
         super.init(
@@ -616,19 +627,40 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     }
 
     private func handlePanelShortcut(_ event: NSEvent) -> Bool {
-        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard modifiers.subtracting(.shift).isEmpty else { return false }
+        let settings = PanelShortcutSettings.shared
+        let modifiers = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .intersection(GlobalShortcut.supportedModifiers)
 
-        switch event.charactersIgnoringModifiers {
-        case "\t":
-            onCycleAppFilter?(modifiers.contains(.shift))
+        if let binding = settings.binding(for: .togglePin),
+           binding.matches(keyCode: event.keyCode, modifiers: modifiers) {
+            onTogglePin?()
             return true
-        case "\r", "\u{3}":
+        }
+        if let binding = settings.binding(for: .hidePanel),
+           binding.matches(keyCode: event.keyCode, modifiers: modifiers) {
+            orderOut(nil)
+            return true
+        }
+        if let binding = settings.binding(for: .resetPosition),
+           binding.matches(keyCode: event.keyCode, modifiers: modifiers) {
             onResetPosition?()
             return true
-        default:
-            return false
         }
+        if let binding = settings.binding(for: .cycleFilter) {
+            if binding.matches(keyCode: event.keyCode, modifiers: modifiers) {
+                onCycleAppFilter?(false)
+                return true
+            }
+            // Shift reverses the cycle when the base binding has no Shift of its own.
+            if !binding.modifiers.contains(.shift),
+               UInt32(event.keyCode) == binding.keyCode,
+               modifiers == binding.modifiers.union(.shift) {
+                onCycleAppFilter?(true)
+                return true
+            }
+        }
+        return false
     }
 
     func windowWillMove(_ notification: Notification) {
@@ -658,10 +690,6 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         super.orderOut(sender)
         onFocusChange?(false)
         onHide?()
-    }
-
-    override func cancelOperation(_ sender: Any?) {
-        orderOut(sender)
     }
 
     override func resignKey() {

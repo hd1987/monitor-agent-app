@@ -103,7 +103,7 @@ final class SettingsSaveConfirmationTests: XCTestCase {
     func testExtensionsIsACombinedReadOnlyCategory() {
         XCTAssertEqual(
             SettingsCategory.allCases.map(\.rawValue),
-            ["General", "Extensions", "Config", "Prompt"]
+            ["General", "Shortcuts", "Extensions", "Config", "Prompt"]
         )
         XCTAssertTrue(SettingsCategory.extensions.isReadOnly)
         XCTAssertFalse(SettingsCategory.general.isReadOnly)

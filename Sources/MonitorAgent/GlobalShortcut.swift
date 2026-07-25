@@ -22,9 +22,12 @@ struct GlobalShortcut: Codable, Equatable {
         return result + keyLabel
     }
 
-    static func make(from event: NSEvent) -> GlobalShortcut? {
+    /// Builds a binding from a key event.
+    /// - Parameter requireModifier: when `true` a bare key (no modifier) is rejected; panel
+    ///   shortcuts pass `false` so single keys such as Tab or Esc can be recorded.
+    static func make(from event: NSEvent, requireModifier: Bool = true) -> GlobalShortcut? {
         let modifiers = event.modifierFlags.intersection(supportedModifiers)
-        guard !modifiers.isEmpty else { return nil }
+        if requireModifier, modifiers.isEmpty { return nil }
 
         return GlobalShortcut(
             keyCode: UInt32(event.keyCode),
@@ -37,10 +40,18 @@ struct GlobalShortcut: Codable, Equatable {
         Int(event.keyCode) == kVK_Escape
     }
 
+    /// Matches a raw key event against this binding by keyCode and normalized modifiers.
+    func matches(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        UInt32(keyCode) == self.keyCode
+            && modifiers.intersection(Self.supportedModifiers) == self.modifiers
+    }
+
     private static func keyLabel(for event: NSEvent) -> String {
         switch Int(event.keyCode) {
         case kVK_Space: return "Space"
         case kVK_Return: return "Return"
+        case kVK_ANSI_KeypadEnter: return "Enter"
+        case kVK_Escape: return "Esc"
         case kVK_Tab: return "Tab"
         case kVK_Delete: return "Delete"
         case kVK_ForwardDelete: return "Forward Delete"
