@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-07-25
+
 ### Added
 - Add a Shortcuts settings category holding the global panel shortcut plus customizable in-panel shortcuts for Toggle Pin (default `P`), Cycle App Filter (`Tab`, Shift reverses), Reset Panel Position (`Return`), and Hide Panel (`Esc`), with per-shortcut clear and a Restore Defaults action
 - Add a Shortcuts entry to the menu bar right-click menu
