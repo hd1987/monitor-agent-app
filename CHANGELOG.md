@@ -12,6 +12,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 - Show a refresh button on a subscription quota card when a subscribed provider's request fails so it can be retried without waiting for the next interval
 
 ### Changed
+- Remove the Subscription Quota on/off toggles and derive each provider's visibility from whether its expiration date is set, moving the date control to the right
 - Move the global panel shortcut out of General into the new Shortcuts category
 - Keep the shortcut recorder row from shifting by fixing the button width and reserving the clear button's space
 - Fix the Settings sidebar at a constant width and block its divider drag so it cannot be resized or collapsed

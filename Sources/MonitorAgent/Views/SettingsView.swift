@@ -80,8 +80,6 @@ struct SettingsView: View {
     @State private var draftGlobalShortcut: GlobalShortcut?
     @State private var draftPanelShortcuts: [String: GlobalShortcut?] = [:]
     @State private var draftLaunchAtLogin: Bool = false
-    @State private var draftClaudeQuotaEnabled: Bool = true
-    @State private var draftCodexQuotaEnabled: Bool = true
     @State private var draftClaudeExpirationDate: Date?
     @State private var draftCodexExpirationDate: Date?
     @State private var draftQuotaRefreshInterval: QuotaRefreshInterval = .twoMinutes
@@ -231,8 +229,6 @@ struct SettingsView: View {
                 draftTheme: $draftTheme,
                 draftSyncInterval: $draftSyncInterval,
                 draftLaunchAtLogin: $draftLaunchAtLogin,
-                draftClaudeQuotaEnabled: $draftClaudeQuotaEnabled,
-                draftCodexQuotaEnabled: $draftCodexQuotaEnabled,
                 draftClaudeExpirationDate: $draftClaudeExpirationDate,
                 draftCodexExpirationDate: $draftCodexExpirationDate,
                 draftQuotaRefreshInterval: $draftQuotaRefreshInterval
@@ -292,8 +288,6 @@ struct SettingsView: View {
             draftTheme = themeManager.theme
             draftSyncInterval = SyncSettings.shared.interval
             draftLaunchAtLogin = SyncSettings.shared.launchAtLogin
-            draftClaudeQuotaEnabled = QuotaSettings.shared.claudeEnabled
-            draftCodexQuotaEnabled = QuotaSettings.shared.codexEnabled
             draftClaudeExpirationDate = QuotaSettings.shared.claudeExpirationDate
             draftCodexExpirationDate = QuotaSettings.shared.codexExpirationDate
             draftQuotaRefreshInterval = QuotaSettings.shared.refreshInterval
@@ -340,8 +334,6 @@ struct SettingsView: View {
             themeManager.theme = draftTheme
             SyncSettings.shared.interval = draftSyncInterval
             SyncSettings.shared.launchAtLogin = draftLaunchAtLogin
-            QuotaSettings.shared.claudeEnabled = draftClaudeQuotaEnabled
-            QuotaSettings.shared.codexEnabled = draftCodexQuotaEnabled
             QuotaSettings.shared.claudeExpirationDate = draftClaudeExpirationDate
             QuotaSettings.shared.codexExpirationDate = draftCodexExpirationDate
             QuotaSettings.shared.refreshInterval = draftQuotaRefreshInterval
@@ -495,8 +487,6 @@ struct GeneralSettingsView: View {
     @Binding var draftTheme: Theme
     @Binding var draftSyncInterval: SyncInterval
     @Binding var draftLaunchAtLogin: Bool
-    @Binding var draftClaudeQuotaEnabled: Bool
-    @Binding var draftCodexQuotaEnabled: Bool
     @Binding var draftClaudeExpirationDate: Date?
     @Binding var draftCodexExpirationDate: Date?
     @Binding var draftQuotaRefreshInterval: QuotaRefreshInterval
@@ -547,8 +537,6 @@ struct GeneralSettingsView: View {
 
             Section(QuotaSettingsCopy.title) {
                 QuotaSettingsGroup(
-                    claudeEnabled: $draftClaudeQuotaEnabled,
-                    codexEnabled: $draftCodexQuotaEnabled,
                     claudeExpirationDate: $draftClaudeExpirationDate,
                     codexExpirationDate: $draftCodexExpirationDate,
                     refreshInterval: $draftQuotaRefreshInterval
@@ -731,9 +719,9 @@ struct ShortcutsSettingsView: View {
 enum QuotaSettingsCopy {
     static let title = "Subscription Quota"
     static let claudeTitle = "Claude Code"
-    static let claudeDescription = "Show Claude Code subscription quota in the main panel."
+    static let claudeDescription = "Set an expiration date to show Claude Code subscription quota in the main panel; leave it empty to hide."
     static let codexTitle = "Codex"
-    static let codexDescription = "Show Codex subscription quota in the main panel."
+    static let codexDescription = "Set an expiration date to show Codex subscription quota in the main panel; leave it empty to hide."
     static let expirationNotSet = "Not set"
     static let expirationPickerTitle = "Subscription Expiration"
     static let today = "Today"
@@ -750,8 +738,6 @@ enum ExpirationDateControlStyle {
 }
 
 private struct QuotaSettingsGroup: View {
-    @Binding var claudeEnabled: Bool
-    @Binding var codexEnabled: Bool
     @Binding var claudeExpirationDate: Date?
     @Binding var codexExpirationDate: Date?
     @Binding var refreshInterval: QuotaRefreshInterval
@@ -761,15 +747,13 @@ private struct QuotaSettingsGroup: View {
             quotaRow(
                 title: QuotaSettingsCopy.claudeTitle,
                 description: QuotaSettingsCopy.claudeDescription,
-                expirationDate: $claudeExpirationDate,
-                isOn: $claudeEnabled
+                expirationDate: $claudeExpirationDate
             )
             Divider()
             quotaRow(
                 title: QuotaSettingsCopy.codexTitle,
                 description: QuotaSettingsCopy.codexDescription,
-                expirationDate: $codexExpirationDate,
-                isOn: $codexEnabled
+                expirationDate: $codexExpirationDate
             )
             Divider()
             HStack(spacing: 16) {
@@ -794,15 +778,12 @@ private struct QuotaSettingsGroup: View {
     private func quotaRow(
         title: String,
         description: String,
-        expirationDate: Binding<Date?>,
-        isOn: Binding<Bool>
+        expirationDate: Binding<Date?>
     ) -> some View {
         HStack(spacing: 16) {
             settingLabel(title: title, description: description)
             Spacer(minLength: 16)
             ExpirationDateControl(expirationDate: expirationDate)
-            Toggle("", isOn: isOn)
-                .toggleStyle(.switch)
         }
         .padding(.vertical, 8)
     }
