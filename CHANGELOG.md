@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.6.9] - 2026-07-27
+
+### Fixed
+- Prevent the main-panel header controls from moving upward when they dismiss the expanded Activity hourly chart
+
 ## [0.6.8] - 2026-07-25
 
 ### Added
