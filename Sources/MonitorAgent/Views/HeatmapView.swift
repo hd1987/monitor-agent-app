@@ -216,7 +216,9 @@ struct HeatmapView: View {
                     isActive: store.selectedActivityDate != nil,
                     excludedFrames: [activityFrameInWindow, appFilterFrameInWindow],
                     onOutsideClick: {
-                        store.clearSelectedActivityDate()
+                        withTransaction(Transaction(animation: nil)) {
+                            store.clearSelectedActivityDate()
+                        }
                     }
                 )
             }
