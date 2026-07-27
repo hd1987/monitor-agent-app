@@ -145,6 +145,29 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         XCTAssertEqual(store.selectedActivityDate, "2026-07-09")
     }
 
+    func testSelectActivityDateFromDateUsesCanonicalCalendarDay() {
+        let now = date(year: 2026, month: 7, day: 9, hour: 10)
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            observeSyncIntervalChanges: false,
+            currentDateProvider: { now }
+        )
+
+        store.selectActivityDate(
+            date(year: 2026, month: 7, day: 8, hour: 18),
+            calendar: .current
+        )
+
+        XCTAssertEqual(
+            store.timeRange,
+            .custom(
+                start: date(year: 2026, month: 7, day: 8),
+                end: date(year: 2026, month: 7, day: 8)
+            )
+        )
+        XCTAssertEqual(store.selectedActivityDate, "2026-07-08")
+    }
+
     func testSelectZeroActivityDateKeepsSelectionAndLoadsZeroHourlyUsage() {
         let now = date(year: 2026, month: 7, day: 9, hour: 10)
         let store = AppStore(

@@ -7,7 +7,7 @@ struct FilterBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let onOpenGeneralSettings: () -> Void
     let onResetPanelPosition: () -> Void
-    let onAppFilterFrameChange: (CGRect) -> Void
+    let onFilterBarFrameChange: (CGRect) -> Void
 
     @State private var isTimeRangePopoverPresented = false
     @State private var calendarSelection = CalendarRangeSelection()
@@ -33,6 +33,12 @@ struct FilterBar: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 10)
         }
+        .overlay(
+            WindowFrameReader { frame in
+                onFilterBarFrameChange(frame)
+            }
+            .allowsHitTesting(false)
+        )
     }
 
     private var headerContent: some View {
@@ -68,12 +74,6 @@ struct FilterBar: View {
                     cornerRadius: MainPanelDesign.controlCornerRadius,
                     style: .continuous
                 )
-            )
-            .overlay(
-                WindowFrameReader { frame in
-                    onAppFilterFrameChange(frame)
-                }
-                .allowsHitTesting(false)
             )
             .layoutPriority(1)
 
@@ -200,7 +200,15 @@ struct FilterBar: View {
     private func presetButton(for range: TimeRange) -> some View {
         Button {
             withTransaction(Transaction(animation: nil)) {
-                store.setTimeRangeFromFilter(range)
+                if range == .today {
+                    if store.selectedActivityDate != nil {
+                        store.selectActivityDate(Date())
+                    } else {
+                        store.setTimeRangeFromFilter(.today)
+                    }
+                } else {
+                    store.setTimeRangeFromFilter(range)
+                }
                 calendarSelection = CalendarRangeSelection()
             }
         } label: {
@@ -246,13 +254,22 @@ struct FilterBar: View {
     }
 
     private func selectCalendarDate(_ date: Date) {
+        let keepsActivityChartOpen = store.selectedActivityDate != nil
         calendarSelection.select(date)
         guard let start = calendarSelection.start, let end = calendarSelection.end else { return }
         let calendar = Calendar.current
-        if calendar.isDate(start, inSameDayAs: end) {
-            store.setTimeRangeFromFilter(TimeRange.singleDaySelection(for: start, calendar: calendar))
-        } else {
-            store.setTimeRangeFromFilter(.custom(start: start, end: end))
+        withTransaction(Transaction(animation: nil)) {
+            if calendar.isDate(start, inSameDayAs: end) {
+                if keepsActivityChartOpen {
+                    store.selectActivityDate(start, calendar: calendar)
+                } else {
+                    store.setTimeRangeFromFilter(
+                        TimeRange.singleDaySelection(for: start, calendar: calendar)
+                    )
+                }
+            } else {
+                store.setTimeRangeFromFilter(.custom(start: start, end: end))
+            }
         }
     }
 

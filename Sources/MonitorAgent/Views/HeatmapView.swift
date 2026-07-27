@@ -5,7 +5,7 @@ struct HeatmapView: View {
     @EnvironmentObject var store: AppStore
     @EnvironmentObject var theme: ThemeManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    let appFilterFrameInWindow: CGRect
+    let filterBarFrameInWindow: CGRect
     @State private var hoveredCell: String?
     @State private var hoveredCount: Int = 0
     @State private var hoverAnchor: CGPoint = .zero
@@ -214,7 +214,7 @@ struct HeatmapView: View {
                 }
                 ActivityChartClickMonitor(
                     isActive: store.selectedActivityDate != nil,
-                    excludedFrames: [activityFrameInWindow, appFilterFrameInWindow],
+                    excludedFrames: [activityFrameInWindow, filterBarFrameInWindow],
                     onOutsideClick: {
                         store.clearSelectedActivityDate()
                     }

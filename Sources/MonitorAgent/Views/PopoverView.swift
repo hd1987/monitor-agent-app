@@ -5,7 +5,7 @@ struct PopoverView: View {
     @EnvironmentObject var theme: ThemeManager
     let onOpenGeneralSettings: () -> Void
     let onResetPanelPosition: () -> Void
-    @State private var appFilterFrameInWindow: CGRect = .null
+    @State private var filterBarFrameInWindow: CGRect = .null
     @State private var isTokenBreakdownPresented = false
 
     var body: some View {
@@ -13,12 +13,12 @@ struct PopoverView: View {
             FilterBar(
                 onOpenGeneralSettings: onOpenGeneralSettings,
                 onResetPanelPosition: onResetPanelPosition,
-                onAppFilterFrameChange: { frame in
-                    appFilterFrameInWindow = frame
+                onFilterBarFrameChange: { frame in
+                    filterBarFrameInWindow = frame
                 }
             )
             StatCardsView(isTokenBreakdownPresented: $isTokenBreakdownPresented)
-            HeatmapView(appFilterFrameInWindow: appFilterFrameInWindow)
+            HeatmapView(filterBarFrameInWindow: filterBarFrameInWindow)
                 .allowsHitTesting(!isTokenBreakdownPresented)
             ModelDistributionView()
             SubscriptionQuotaView()
