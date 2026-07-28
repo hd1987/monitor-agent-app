@@ -303,6 +303,15 @@ final class AppStore: ObservableObject {
         loadHourlyTokenUsage(for: date)
     }
 
+    func selectActivityDate(_ date: Date, calendar: Calendar = .current) {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        guard let year = components.year,
+              let month = components.month,
+              let day = components.day else { return }
+
+        selectActivityDate(String(format: "%04d-%02d-%02d", year, month, day))
+    }
+
     func setTimeRangeFromFilter(_ range: TimeRange) {
         clearSelectedActivityDate()
         timeRange = range

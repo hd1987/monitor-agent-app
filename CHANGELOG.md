@@ -6,6 +6,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.6.10] - 2026-07-28
+
+### Fixed
+- Keep the expanded Activity hourly chart open while interacting with the FilterBar, including app tabs, panel tools, drag regions, and the date control
+- Refresh an open Activity hourly chart in place when selecting a single day or Today, while closing it for multi-day ranges and other presets
+
 ## [0.6.9] - 2026-07-27
 
 ### Fixed
