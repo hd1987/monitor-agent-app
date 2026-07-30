@@ -22,6 +22,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 - Remove the per-provider refresh action from unavailable subscription quota cards in favor of the unified panel refresh
 
 ### Fixed
+- Allow a manual refresh to queue after its cooldown while an existing refresh cycle is still running
 - Replace Cursor usage atomically after an account change so records from different accounts cannot mix
 - Advance Cursor's incremental watermark after every successful query and keep overlap counts from accumulating
 - Preserve existing Cursor usage when a rebuild unexpectedly returns no Cursor events

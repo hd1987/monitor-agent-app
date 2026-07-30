@@ -132,7 +132,6 @@ struct FilterBar: View {
                     .buttonStyle(MainPanelPressButtonStyle())
                     .disabled(
                         store.isRebuildingUsageData
-                            || store.isRefreshInProgress
                             || cooldownRemaining > 0
                     )
                     .help(
