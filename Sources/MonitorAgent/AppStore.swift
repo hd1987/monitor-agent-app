@@ -23,27 +23,26 @@ final class AppStore: ObservableObject {
 
     private let db: DatabaseManager
     private let syncManager: SessionSyncManager
-    private let syncSettings: SyncSettings
+    private let refreshSettings: RefreshSettings
     private let currentDateProvider: () -> Date
     private let quotaService: QuotaRefreshing
     private let quotaSettings: QuotaSettings
-    private let quotaRefreshScheduler: QuotaRefreshScheduler
+    private let refreshCoordinator: PanelRefreshCoordinator
     private var activeDay: Date
     private var cancellables = Set<AnyCancellable>()
     private var usageDataRebuildCancellation: UsageDataRebuildCancellation?
     private var reloadGeneration = 0
     private(set) var isPanelVisible = false
-    var isPeriodicSyncActive: Bool { syncManager.isRunning }
-    var isPeriodicQuotaRefreshActive: Bool { quotaRefreshScheduler.isRunning }
+    var isPeriodicRefreshActive: Bool { refreshCoordinator.isRunning }
 
     init(
         database: DatabaseManager = .shared,
         syncManager: SessionSyncManager? = nil,
-        syncSettings: SyncSettings = .shared,
+        refreshSettings: RefreshSettings = .shared,
         quotaService: QuotaRefreshing = QuotaService.shared,
         quotaSettings: QuotaSettings = .shared,
-        quotaRefreshScheduler: QuotaRefreshScheduler = QuotaRefreshScheduler(),
-        observeSyncIntervalChanges: Bool = true,
+        refreshCoordinator: PanelRefreshCoordinator = PanelRefreshCoordinator(),
+        observeRefreshIntervalChanges: Bool = true,
         currentDateProvider: @escaping () -> Date = Date.init
     ) {
         self.db = database
@@ -51,11 +50,11 @@ final class AppStore: ObservableObject {
             database: database,
             cursorUsageSyncer: CursorUsageService(database: database)
         )
-        self.syncSettings = syncSettings
+        self.refreshSettings = refreshSettings
         self.currentDateProvider = currentDateProvider
         self.quotaService = quotaService
         self.quotaSettings = quotaSettings
-        self.quotaRefreshScheduler = quotaRefreshScheduler
+        self.refreshCoordinator = refreshCoordinator
         self.activeDay = Calendar.current.startOfDay(for: currentDateProvider())
 
         // React to filter changes
@@ -66,107 +65,100 @@ final class AppStore: ObservableObject {
             }
             .store(in: &cancellables)
 
-        if observeSyncIntervalChanges {
-            // React to sync interval changes
-            syncSettings.$interval
+        if observeRefreshIntervalChanges {
+            refreshSettings.$interval
                 .sink { [weak self] interval in
-                    self?.applySyncInterval(interval)
+                    self?.applyRefreshInterval(interval)
                 }
                 .store(in: &cancellables)
         }
 
     }
 
-    /// Apply the sync interval while the panel is visible.
-    private func applySyncInterval(_ interval: SyncInterval) {
-        guard isPanelVisible, !isRebuildingUsageData, interval != .never else {
-            syncManager.stop()
+    private func applyRefreshInterval(_ interval: RefreshInterval) {
+        guard isPanelVisible, !isRebuildingUsageData else {
+            refreshCoordinator.stop()
             return
         }
 
-        syncManager.restart(interval: TimeInterval(interval.rawValue)) { [weak self] in
-            DispatchQueue.main.async {
-                guard let self, self.isPanelVisible else { return }
-                self.reload()
+        refreshCoordinator.start(interval: interval) { [weak self] completion in
+            guard let self else {
+                completion()
+                return
             }
+            self.performRefreshCycle(completion: completion)
         }
     }
 
-    /// Apply the quota refresh interval while the panel is visible.
-    private func applyQuotaRefreshInterval(_ interval: QuotaRefreshInterval) {
-        guard isPanelVisible else {
-            quotaRefreshScheduler.stop()
+    private func performRefreshCycle(completion: @escaping () -> Void) {
+        guard !isRebuildingUsageData else {
+            completion()
             return
         }
 
-        guard interval != .never else {
-            quotaRefreshScheduler.stop()
-            refreshEnabledQuotaProviders()
-            return
-        }
+        let group = DispatchGroup()
 
-        quotaRefreshScheduler.restart(interval: TimeInterval(interval.rawValue)) { [weak self] in
-            self?.refreshEnabledQuotaProviders()
-        }
-    }
+        group.enter()
+        syncManager.syncOnce(
+            onLocalComplete: { [weak self] in
+                DispatchQueue.main.async {
+                    guard let self, self.isPanelVisible else { return }
+                    self.reload()
+                }
+            },
+            onCursorComplete: { [weak self] in
+                DispatchQueue.main.async {
+                    guard let self, self.isPanelVisible else { return }
+                    self.reload()
+                }
+            },
+            completion: {
+                group.leave()
+            }
+        )
 
-    /// Start visible-panel syncing. Timed intervals fire immediately on start.
-    func panelDidOpen() {
-        isPanelVisible = true
-        if syncSettings.interval == .never {
-            sync()
-        } else {
-            applySyncInterval(syncSettings.interval)
-        }
-        applyQuotaRefreshInterval(quotaSettings.refreshInterval)
-    }
-
-    /// Stop periodic syncing when the panel is hidden.
-    func panelDidClose() {
-        isPanelVisible = false
-        syncManager.stop()
-        quotaRefreshScheduler.stop()
-    }
-
-    /// Trigger a one-shot sync + reload.
-    func sync() {
-        guard !isRebuildingUsageData else { return }
-        syncManager.syncOnce { [weak self] in
-            self?.reload()
-        }
-    }
-
-    func refreshEnabledQuotaProviders(force: Bool = false) {
-        let minimumInterval = quotaSettings.refreshInterval.minimumRequestInterval
         for provider in QuotaProviderID.allCases where quotaSettings.isEnabled(provider) {
+            group.enter()
             quotaService.refresh(
                 provider: provider,
-                minimumInterval: minimumInterval,
-                force: force,
                 now: Date()
             ) { [weak self] snapshot in
-                self?.quotaSnapshots[provider] = snapshot
+                if self?.quotaSettings.isEnabled(provider) == true {
+                    self?.quotaSnapshots[provider] = snapshot
+                }
+                group.leave()
             }
         }
+
+        group.notify(queue: .main, execute: completion)
     }
 
-    /// Force a single provider's quota request, bypassing the throttle. Used by
-    /// the per-card refresh button shown when a subscribed provider fails.
+    /// Start one unified visible-panel refresh lifecycle.
+    func panelDidOpen() {
+        isPanelVisible = true
+        applyRefreshInterval(refreshSettings.interval)
+    }
+
+    /// Stop periodic refreshing when the panel is hidden.
+    func panelDidClose() {
+        isPanelVisible = false
+        refreshCoordinator.stop()
+    }
+
+    /// Request one provider immediately from its per-card refresh button.
     func refreshQuota(provider: QuotaProviderID) {
         guard quotaSettings.isEnabled(provider) else { return }
         quotaService.refresh(
             provider: provider,
-            minimumInterval: quotaSettings.refreshInterval.minimumRequestInterval,
-            force: true,
             now: Date()
         ) { [weak self] snapshot in
+            guard self?.quotaSettings.isEnabled(provider) == true else { return }
             self?.quotaSnapshots[provider] = snapshot
         }
     }
 
-    func quotaSettingsDidChange() {
+    func quotaProviderSettingsDidChange() {
         quotaSnapshots = quotaSnapshots.filter { quotaSettings.isEnabled($0.key) }
-        applyQuotaRefreshInterval(quotaSettings.refreshInterval)
     }
 
     var visibleQuotaProviders: [QuotaProviderID] {
@@ -188,7 +180,7 @@ final class AppStore: ObservableObject {
         usageDataRebuildWasCancelled = false
         let cancellation = UsageDataRebuildCancellation()
         usageDataRebuildCancellation = cancellation
-        syncManager.stop()
+        refreshCoordinator.stop()
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
@@ -210,8 +202,8 @@ final class AppStore: ObservableObject {
                     self.usageDataRebuildSummary = summary
                     self.isRebuildingUsageData = false
                     self.usageDataRebuildCancellation = nil
-                    self.applySyncInterval(self.syncSettings.interval)
                     self.reload()
+                    self.applyRefreshInterval(self.refreshSettings.interval)
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -222,7 +214,7 @@ final class AppStore: ObservableObject {
                     }
                     self.isRebuildingUsageData = false
                     self.usageDataRebuildCancellation = nil
-                    self.applySyncInterval(self.syncSettings.interval)
+                    self.applyRefreshInterval(self.refreshSettings.interval)
                 }
             }
         }

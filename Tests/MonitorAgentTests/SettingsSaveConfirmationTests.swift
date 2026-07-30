@@ -142,10 +142,6 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         )
     }
 
-    func testSyncIntervalOptionsMatchGeneralSettingsMenu() {
-        XCTAssertEqual(SyncInterval.allCases.map(\.displayName), ["10s", "30s", "60s", "Never"])
-    }
-
     func testSubscriptionQuotaSettingsArePresentedAsOneGroup() {
         XCTAssertEqual(QuotaSettingsCopy.title, "Subscription Quota")
         XCTAssertEqual(QuotaSettingsCopy.claudeTitle, "Claude Code")
@@ -156,9 +152,9 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         XCTAssertEqual(QuotaSettingsCopy.expirationPickerTitle, "Subscription Expiration")
         XCTAssertEqual(QuotaSettingsCopy.today, "Today")
         XCTAssertEqual(QuotaSettingsCopy.clearExpiration, "Clear")
-        XCTAssertEqual(QuotaSettingsCopy.refreshIntervalTitle, "Refresh Interval")
-        XCTAssertEqual(QuotaSettingsCopy.refreshIntervalDescription, "Refresh while the panel is open. \"Never\" refreshes once when opened.")
-        XCTAssertEqual(QuotaRefreshInterval.allCases.map(\.displayName), ["1 min", "2 min", "5 min", "Never"])
+        XCTAssertEqual(RefreshSettingsCopy.title, "Refresh Interval")
+        XCTAssertEqual(RefreshSettingsCopy.description, "Refresh usage data and subscription quota while the panel is open. \"Never\" refreshes when opened, at most once per minute.")
+        XCTAssertEqual(RefreshInterval.allCases.map(\.displayName), ["1 min", "2 min", "5 min", "Never"])
     }
 
     func testExpirationDateControlUsesCompactInputGeometry() {

@@ -87,7 +87,7 @@ enum SessionLogLineFilter {
 }
 
 /// Syncs Claude Code and Codex JSONL logs plus Cursor usage events into the
-/// local database on a background timer.
+/// local database for one refresh cycle.
 final class SessionSyncManager {
     private static let rebuildReadChunkSize = 1_048_576
     private static let rebuildRecordBatchSize = 10_000
@@ -95,7 +95,6 @@ final class SessionSyncManager {
     private let queue = DispatchQueue(label: "com.monitoragent.sync", qos: .utility)
     private let cursorQueue = DispatchQueue(label: "com.monitoragent.cursor-sync", qos: .utility)
     private let cursorScheduleLock = NSLock()
-    private var timer: DispatchSourceTimer?
     private var isCursorSyncScheduled = false
     private let db: DatabaseManager
     private let fm = FileManager.default
@@ -103,7 +102,6 @@ final class SessionSyncManager {
     private let codexSessionsPath: String
     private let codexArchivedSessionsPath: String
     private let cursorUsageSyncer: CursorUsageSyncing?
-    private(set) var isRunning = false
 
     init(
         database: DatabaseManager = .shared,
@@ -119,34 +117,23 @@ final class SessionSyncManager {
         self.cursorUsageSyncer = cursorUsageSyncer
     }
 
-    /// Start periodic sync. Local and successful Cursor syncs notify separately.
-    func start(interval: TimeInterval = 30, onComplete: @escaping () -> Void) {
-        let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now(), repeating: interval)
-        t.setEventHandler { [weak self] in
-            guard let self else { return }
-            _ = self.syncLocal()
-            onComplete()
-            self.scheduleCursorSync(onComplete: onComplete)
-        }
-        t.resume()
-        timer = t
-        isRunning = true
-    }
-
-    func stop() {
-        timer?.cancel()
-        timer = nil
-        isRunning = false
-    }
-
     /// Run local and Cursor syncs on separate background queues.
-    func syncOnce(onComplete: @escaping () -> Void) {
+    func syncOnce(
+        onLocalComplete: @escaping () -> Void,
+        onCursorComplete: @escaping () -> Void,
+        completion: @escaping () -> Void
+    ) {
         queue.async { [weak self] in
-            guard let self else { return }
+            guard let self else {
+                completion()
+                return
+            }
             _ = self.syncLocal()
-            onComplete()
-            self.scheduleCursorSync(onComplete: onComplete)
+            onLocalComplete()
+            self.scheduleCursorSync(
+                onSuccess: onCursorComplete,
+                completion: completion
+            )
         }
     }
 
@@ -270,12 +257,6 @@ final class SessionSyncManager {
         return result
     }
 
-    /// Restart the periodic timer with a new interval.
-    func restart(interval: TimeInterval, onComplete: @escaping () -> Void) {
-        stop()
-        start(interval: interval, onComplete: onComplete)
-    }
-
     // MARK: - Sync Cycle
 
     private func syncLocal(
@@ -306,29 +287,40 @@ final class SessionSyncManager {
         return result
     }
 
-    private func scheduleCursorSync(onComplete: @escaping () -> Void) {
-        guard let cursorUsageSyncer else { return }
+    private func scheduleCursorSync(
+        onSuccess: @escaping () -> Void,
+        completion: @escaping () -> Void
+    ) {
+        guard let cursorUsageSyncer else {
+            completion()
+            return
+        }
 
         cursorScheduleLock.lock()
         guard !isCursorSyncScheduled else {
             cursorScheduleLock.unlock()
+            completion()
             return
         }
         isCursorSyncScheduled = true
         cursorScheduleLock.unlock()
 
         cursorQueue.async { [weak self] in
-            guard let self else { return }
+            guard let self else {
+                completion()
+                return
+            }
             defer {
                 self.cursorScheduleLock.lock()
                 self.isCursorSyncScheduled = false
                 self.cursorScheduleLock.unlock()
+                completion()
             }
             guard let result = try? cursorUsageSyncer.sync(),
                   result.filesSynced > 0 else {
                 return
             }
-            onComplete()
+            onSuccess()
         }
     }
 

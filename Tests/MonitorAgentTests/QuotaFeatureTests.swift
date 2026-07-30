@@ -157,13 +157,11 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertFalse(settings.isEnabled(.codex))
         XCTAssertNil(settings.claudeExpirationDate)
         XCTAssertNil(settings.codexExpirationDate)
-        XCTAssertEqual(settings.refreshInterval, .twoMinutes)
 
         let claudeExpiration = Date(timeIntervalSince1970: 1_800_000_000)
         let codexExpiration = Date(timeIntervalSince1970: 1_900_000_000)
         settings.claudeExpirationDate = claudeExpiration
         settings.codexExpirationDate = codexExpiration
-        settings.refreshInterval = .fiveMinutes
         // Setting a date enables the provider.
         XCTAssertTrue(QuotaSettings(defaults: defaults).isEnabled(.claude))
         XCTAssertTrue(QuotaSettings(defaults: defaults).isEnabled(.codex))
@@ -171,7 +169,6 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(QuotaSettings(defaults: defaults).codexExpirationDate, codexExpiration)
         XCTAssertEqual(QuotaSettings(defaults: defaults).expirationDate(for: .claude), claudeExpiration)
         XCTAssertEqual(QuotaSettings(defaults: defaults).expirationDate(for: .codex), codexExpiration)
-        XCTAssertEqual(QuotaSettings(defaults: defaults).refreshInterval, .fiveMinutes)
 
         // Clearing the date disables the provider again.
         settings.claudeExpirationDate = nil
@@ -252,66 +249,53 @@ final class QuotaFeatureTests: XCTestCase {
         )
     }
 
-    func testQuotaRefreshIntervalOptionsAndFallback() throws {
+    func testRefreshIntervalOptionsAndFallback() throws {
         XCTAssertEqual(
-            QuotaRefreshInterval.allCases.map(\.displayName),
+            RefreshInterval.allCases.map(\.displayName),
             ["1 min", "2 min", "5 min", "Never"]
         )
-        XCTAssertEqual(QuotaRefreshInterval.never.minimumRequestInterval, 120)
+        XCTAssertEqual(RefreshInterval.defaultValue, .oneMinute)
+        XCTAssertEqual(RefreshInterval.never.effectiveInterval, 60)
 
         let suiteName = "QuotaFeatureTests.invalidInterval.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        defaults.set(999, forKey: "quotaRefreshInterval")
+        defaults.set(999, forKey: "refreshInterval")
 
-        XCTAssertEqual(QuotaSettings(defaults: defaults).refreshInterval, .twoMinutes)
+        XCTAssertEqual(RefreshSettings(defaults: defaults).interval, .oneMinute)
     }
 
-    func testNeverQuotaRefreshIntervalPersistsAsAValidChoice() throws {
+    func testNeverRefreshIntervalPersistsAsAValidChoice() throws {
         let suiteName = "QuotaFeatureTests.neverInterval.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        let settings = QuotaSettings(defaults: defaults)
-        settings.refreshInterval = .never
+        let settings = RefreshSettings(defaults: defaults)
+        settings.interval = .never
 
-        XCTAssertEqual(QuotaSettings(defaults: defaults).refreshInterval, .never)
+        XCTAssertEqual(RefreshSettings(defaults: defaults).interval, .never)
     }
 
-    func testQuotaRefreshThrottleUsesDynamicIntervalPerProvider() {
-        var throttle = QuotaRefreshThrottle()
-        let start = Date(timeIntervalSince1970: 1_000)
+    func testRefreshIntervalMigratesLegacySettings() throws {
+        let quotaSuiteName = "QuotaFeatureTests.quotaMigration.\(UUID().uuidString)"
+        let quotaDefaults = try XCTUnwrap(UserDefaults(suiteName: quotaSuiteName))
+        defer { quotaDefaults.removePersistentDomain(forName: quotaSuiteName) }
+        quotaDefaults.set(RefreshInterval.fiveMinutes.rawValue, forKey: "quotaRefreshInterval")
 
-        XCTAssertTrue(throttle.allowsRefresh(
-            provider: .claude,
-            minimumInterval: 120,
-            force: false,
-            now: start
-        ))
-        XCTAssertFalse(throttle.allowsRefresh(
-            provider: .claude,
-            minimumInterval: 120,
-            force: false,
-            now: start.addingTimeInterval(119)
-        ))
-        XCTAssertTrue(throttle.allowsRefresh(
-            provider: .claude,
-            minimumInterval: 120,
-            force: false,
-            now: start.addingTimeInterval(120)
-        ))
-        XCTAssertTrue(throttle.allowsRefresh(
-            provider: .codex,
-            minimumInterval: 120,
-            force: false,
-            now: start.addingTimeInterval(1)
-        ))
+        XCTAssertEqual(RefreshSettings(defaults: quotaDefaults).interval, .fiveMinutes)
+
+        let syncSuiteName = "QuotaFeatureTests.syncMigration.\(UUID().uuidString)"
+        let syncDefaults = try XCTUnwrap(UserDefaults(suiteName: syncSuiteName))
+        defer { syncDefaults.removePersistentDomain(forName: syncSuiteName) }
+        syncDefaults.set(30, forKey: "syncInterval")
+
+        XCTAssertEqual(RefreshSettings(defaults: syncDefaults).interval, .oneMinute)
     }
 
     func testVisibleQuotaProvidersFollowAppFilter() {
         let store = AppStore(
             database: DatabaseManager(inMemory: true),
-            observeSyncIntervalChanges: false
+            observeRefreshIntervalChanges: false
         )
 
         store.appFilter = .all

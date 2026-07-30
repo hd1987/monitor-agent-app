@@ -132,16 +132,20 @@ final class RebuildUsageDataTests: XCTestCase {
             cursorUsageSyncer: cursorSyncer
         )
 
-        syncManager.syncOnce {
-            callback.signal()
-        }
+        syncManager.syncOnce(
+            onLocalComplete: { callback.signal() },
+            onCursorComplete: { callback.signal() },
+            completion: {}
+        )
 
         XCTAssertEqual(callback.wait(timeout: .now() + 1), .success)
         XCTAssertEqual(cursorSyncer.entered.wait(timeout: .now() + 1), .success)
 
-        syncManager.syncOnce {
-            callback.signal()
-        }
+        syncManager.syncOnce(
+            onLocalComplete: { callback.signal() },
+            onCursorComplete: { callback.signal() },
+            completion: {}
+        )
         XCTAssertEqual(callback.wait(timeout: .now() + 1), .success)
         XCTAssertEqual(cursorSyncer.entered.wait(timeout: .now() + 0.05), .timedOut)
 

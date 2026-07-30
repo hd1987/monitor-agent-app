@@ -76,13 +76,12 @@ struct SettingsView: View {
 
     // General drafts
     @State private var draftTheme: Theme = .system
-    @State private var draftSyncInterval: SyncInterval = .thirty
+    @State private var draftRefreshInterval: RefreshInterval = .defaultValue
     @State private var draftGlobalShortcut: GlobalShortcut?
     @State private var draftPanelShortcuts: [String: GlobalShortcut?] = [:]
     @State private var draftLaunchAtLogin: Bool = false
     @State private var draftClaudeExpirationDate: Date?
     @State private var draftCodexExpirationDate: Date?
-    @State private var draftQuotaRefreshInterval: QuotaRefreshInterval = .twoMinutes
 
     // Config drafts
     @State private var claudeConfigText: String = ""
@@ -227,11 +226,10 @@ struct SettingsView: View {
         case .general:
             GeneralSettingsView(
                 draftTheme: $draftTheme,
-                draftSyncInterval: $draftSyncInterval,
+                draftRefreshInterval: $draftRefreshInterval,
                 draftLaunchAtLogin: $draftLaunchAtLogin,
                 draftClaudeExpirationDate: $draftClaudeExpirationDate,
-                draftCodexExpirationDate: $draftCodexExpirationDate,
-                draftQuotaRefreshInterval: $draftQuotaRefreshInterval
+                draftCodexExpirationDate: $draftCodexExpirationDate
             )
         case .shortcuts:
             ShortcutsSettingsView(
@@ -286,11 +284,10 @@ struct SettingsView: View {
         switch category {
         case .general:
             draftTheme = themeManager.theme
-            draftSyncInterval = SyncSettings.shared.interval
-            draftLaunchAtLogin = SyncSettings.shared.launchAtLogin
+            draftRefreshInterval = RefreshSettings.shared.interval
+            draftLaunchAtLogin = LaunchAtLoginController.shared.launchAtLogin
             draftClaudeExpirationDate = QuotaSettings.shared.claudeExpirationDate
             draftCodexExpirationDate = QuotaSettings.shared.codexExpirationDate
-            draftQuotaRefreshInterval = QuotaSettings.shared.refreshInterval
         case .shortcuts:
             draftGlobalShortcut = GlobalShortcutController.shared.shortcut
             var panelDraft: [String: GlobalShortcut?] = [:]
@@ -332,12 +329,11 @@ struct SettingsView: View {
         switch selectedCategory {
         case .general:
             themeManager.theme = draftTheme
-            SyncSettings.shared.interval = draftSyncInterval
-            SyncSettings.shared.launchAtLogin = draftLaunchAtLogin
+            LaunchAtLoginController.shared.launchAtLogin = draftLaunchAtLogin
             QuotaSettings.shared.claudeExpirationDate = draftClaudeExpirationDate
             QuotaSettings.shared.codexExpirationDate = draftCodexExpirationDate
-            QuotaSettings.shared.refreshInterval = draftQuotaRefreshInterval
-            store.quotaSettingsDidChange()
+            RefreshSettings.shared.interval = draftRefreshInterval
+            store.quotaProviderSettingsDidChange()
 
         case .shortcuts:
             if let conflict = panelShortcutConflict() {
@@ -485,11 +481,10 @@ struct GeneralSettingsView: View {
     @EnvironmentObject var store: AppStore
 
     @Binding var draftTheme: Theme
-    @Binding var draftSyncInterval: SyncInterval
+    @Binding var draftRefreshInterval: RefreshInterval
     @Binding var draftLaunchAtLogin: Bool
     @Binding var draftClaudeExpirationDate: Date?
     @Binding var draftCodexExpirationDate: Date?
-    @Binding var draftQuotaRefreshInterval: QuotaRefreshInterval
     @State private var showUsageDataRebuildSheet = false
 
     var body: some View {
@@ -512,21 +507,21 @@ struct GeneralSettingsView: View {
 
                 SettingsRow(
                     title: "Launch at Login",
-                    description: SyncSettings.shared.canControlLaunchAtLogin
+                    description: LaunchAtLoginController.shared.canControlLaunchAtLogin
                         ? "Automatically start MonitorAgent when you log in."
                         : "Available only when running MonitorAgent from the installed app."
                 ) {
                     Toggle("", isOn: $draftLaunchAtLogin)
                         .toggleStyle(.switch)
-                        .disabled(!SyncSettings.shared.canControlLaunchAtLogin)
+                        .disabled(!LaunchAtLoginController.shared.canControlLaunchAtLogin)
                 }
 
                 SettingsRow(
-                    title: "Sync Interval",
-                    description: "How often to sync while the panel is open. \"Never\" syncs once when opened."
+                    title: RefreshSettingsCopy.title,
+                    description: RefreshSettingsCopy.description
                 ) {
-                    Picker("", selection: $draftSyncInterval) {
-                        ForEach(SyncInterval.allCases) { interval in
+                    Picker("Refresh Interval", selection: $draftRefreshInterval) {
+                        ForEach(RefreshInterval.allCases) { interval in
                             Text(interval.displayName).tag(interval)
                         }
                     }
@@ -538,8 +533,7 @@ struct GeneralSettingsView: View {
             Section(QuotaSettingsCopy.title) {
                 QuotaSettingsGroup(
                     claudeExpirationDate: $draftClaudeExpirationDate,
-                    codexExpirationDate: $draftCodexExpirationDate,
-                    refreshInterval: $draftQuotaRefreshInterval
+                    codexExpirationDate: $draftCodexExpirationDate
                 )
             }
 
@@ -726,8 +720,11 @@ enum QuotaSettingsCopy {
     static let expirationPickerTitle = "Subscription Expiration"
     static let today = "Today"
     static let clearExpiration = "Clear"
-    static let refreshIntervalTitle = "Refresh Interval"
-    static let refreshIntervalDescription = "Refresh while the panel is open. \"Never\" refreshes once when opened."
+}
+
+enum RefreshSettingsCopy {
+    static let title = "Refresh Interval"
+    static let description = "Refresh usage data and subscription quota while the panel is open. \"Never\" refreshes when opened, at most once per minute."
 }
 
 enum ExpirationDateControlStyle {
@@ -740,7 +737,6 @@ enum ExpirationDateControlStyle {
 private struct QuotaSettingsGroup: View {
     @Binding var claudeExpirationDate: Date?
     @Binding var codexExpirationDate: Date?
-    @Binding var refreshInterval: QuotaRefreshInterval
 
     var body: some View {
         VStack(spacing: 0) {
@@ -755,22 +751,6 @@ private struct QuotaSettingsGroup: View {
                 description: QuotaSettingsCopy.codexDescription,
                 expirationDate: $codexExpirationDate
             )
-            Divider()
-            HStack(spacing: 16) {
-                settingLabel(
-                    title: QuotaSettingsCopy.refreshIntervalTitle,
-                    description: QuotaSettingsCopy.refreshIntervalDescription
-                )
-                Spacer(minLength: 16)
-                Picker("Refresh Interval", selection: $refreshInterval) {
-                    ForEach(QuotaRefreshInterval.allCases) { interval in
-                        Text(interval.displayName).tag(interval)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 100)
-            }
-            .padding(.vertical, 8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

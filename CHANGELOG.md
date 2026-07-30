@@ -13,7 +13,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 - Read Cursor's local access token only for bounded, non-redirecting requests to `https://api2.cursor.sh`, without persisting or logging the credential
 
 ### Changed
-- Make Cursor usage refresh follow General's Sync Interval without a separate minimum interval
+- Replace separate Sync Interval and subscription quota timers with one panel-visible Refresh Interval, defaulting to 1 minute, and a non-overlapping refresh cycle for Claude Code, Codex, Cursor, and subscription quota; `Never` uses the same 1-minute default as its panel-open refresh minimum
 - Reload Claude Code and Codex results before waiting for the Cursor network refresh
 
 ### Fixed
