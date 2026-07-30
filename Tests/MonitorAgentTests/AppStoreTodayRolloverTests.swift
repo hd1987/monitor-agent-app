@@ -142,6 +142,54 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
+    func testManualRefreshRunsUnifiedCycleForEveryEnabledProvider() {
+        let suiteName = "AppStoreTodayRolloverTests.manualRefresh"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let refreshSettings = RefreshSettings(defaults: defaults)
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        enableAllProviders(quotaSettings)
+        let quotaService = RecordingQuotaService()
+        let database = DatabaseManager(inMemory: true)
+        var now = Date(timeIntervalSince1970: 1_000)
+        let refreshCoordinator = PanelRefreshCoordinator(currentDateProvider: { now })
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/nonexistent/claude",
+            codexSessionsPath: "/nonexistent/codex",
+            codexArchivedSessionsPath: "/nonexistent/codex-archive"
+        )
+        let store = AppStore(
+            database: database,
+            syncManager: syncManager,
+            refreshSettings: refreshSettings,
+            quotaService: quotaService,
+            quotaSettings: quotaSettings,
+            refreshCoordinator: refreshCoordinator
+        )
+
+        store.panelDidOpen()
+        XCTAssertEqual(
+            store.manualRefreshCooldownRemaining(at: now),
+            Int(PanelRefreshCoordinator.manualRefreshCooldown)
+        )
+        now = now.addingTimeInterval(PanelRefreshCoordinator.manualRefreshCooldown)
+        store.refreshNow()
+
+        let refreshed = expectation(description: "manual unified refresh completes")
+        waitUntil(attemptsRemaining: 50) {
+            quotaService.providers.count == 4
+        } completion: {
+            XCTAssertEqual(quotaService.providers, [.claude, .codex, .claude, .codex])
+            XCTAssertTrue(store.isPeriodicRefreshActive)
+            refreshed.fulfill()
+        }
+        wait(for: [refreshed], timeout: 1)
+
+        store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
     func testSelectActivityDateForTodayUsesDynamicTodayPreset() {
         let now = date(year: 2026, month: 7, day: 9, hour: 10)
         let store = AppStore(

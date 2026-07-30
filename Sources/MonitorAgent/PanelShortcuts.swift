@@ -7,6 +7,7 @@ import Combine
 /// these bindings apply only to the focused panel and cannot collide with global input.
 enum PanelShortcutAction: String, CaseIterable, Identifiable {
     case togglePin
+    case refreshData
     case cycleFilter
     case resetPosition
     case hidePanel
@@ -16,6 +17,7 @@ enum PanelShortcutAction: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .togglePin: return "Toggle Pin"
+        case .refreshData: return "Refresh Data"
         case .cycleFilter: return "Cycle App Filter"
         case .resetPosition: return "Reset Panel Position"
         case .hidePanel: return "Hide Panel"
@@ -26,8 +28,10 @@ enum PanelShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .togglePin:
             return "Pin or unpin the panel so it stays open when focus moves away."
+        case .refreshData:
+            return "Refresh all data and restart the automatic refresh interval."
         case .cycleFilter:
-            return "Switch All / Claude Code / Codex. Hold Shift to cycle backward."
+            return "Switch All / Claude Code / Codex / Cursor. Hold Shift to cycle backward."
         case .resetPosition:
             return "Move the panel back below the menu bar icon."
         case .hidePanel:
@@ -40,6 +44,8 @@ enum PanelShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .togglePin:
             return GlobalShortcut(keyCode: UInt32(kVK_ANSI_P), modifierFlags: 0, keyLabel: "P")
+        case .refreshData:
+            return GlobalShortcut(keyCode: UInt32(kVK_ANSI_R), modifierFlags: 0, keyLabel: "R")
         case .cycleFilter:
             return GlobalShortcut(keyCode: UInt32(kVK_Tab), modifierFlags: 0, keyLabel: "Tab")
         case .resetPosition:

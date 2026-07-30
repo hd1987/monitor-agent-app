@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ### Added
 - Add a Cursor main-panel filter backed by the signed-in user's exact usage events, including requests, sessions, tokens, cache hit, activity, and model distribution
+- Add a main-panel refresh button and configurable Refresh Data shortcut, defaulting to `R`, that restart the automatic refresh interval, share a 10-second request cooldown, and animate during manually triggered refreshes
 
 ### Security
 - Read Cursor's local access token only for bounded, non-redirecting requests to `https://api2.cursor.sh`, without persisting or logging the credential
@@ -15,6 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 ### Changed
 - Replace separate Sync Interval and subscription quota timers with one panel-visible Refresh Interval, defaulting to 1 minute, and a non-overlapping refresh cycle for Claude Code, Codex, Cursor, and subscription quota; `Never` uses the same 1-minute default as its panel-open refresh minimum
 - Reload Claude Code and Codex results before waiting for the Cursor network refresh
+- Remove the per-provider refresh action from unavailable subscription quota cards in favor of the unified panel refresh
 
 ### Fixed
 - Replace Cursor usage atomically after an account change so records from different accounts cannot mix

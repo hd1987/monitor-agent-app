@@ -198,6 +198,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onTogglePin = { [weak self] in
             self?.panelPresentationState.togglePin()
         }
+        panel.onRefreshData = { [weak self] in
+            self?.store.refreshNow()
+        }
         panel.contentView = hostingView
         globalShortcutController.configure { [weak self] in
             self?.togglePanel(nil)
@@ -536,6 +539,7 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     var onCycleAppFilter: ((Bool) -> Void)?
     var onResetPosition: (() -> Void)?
     var onTogglePin: (() -> Void)?
+    var onRefreshData: (() -> Void)?
 
     init() {
         super.init(
@@ -635,6 +639,13 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         if let binding = settings.binding(for: .togglePin),
            binding.matches(keyCode: event.keyCode, modifiers: modifiers) {
             onTogglePin?()
+            return true
+        }
+        if let binding = settings.binding(for: .refreshData),
+           binding.matches(keyCode: event.keyCode, modifiers: modifiers) {
+            if !event.isARepeat {
+                onRefreshData?()
+            }
             return true
         }
         if let binding = settings.binding(for: .hidePanel),

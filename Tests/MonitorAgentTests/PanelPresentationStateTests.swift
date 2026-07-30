@@ -106,4 +106,40 @@ final class PanelPresentationStateTests: XCTestCase {
 
         XCTAssertTrue(didHide)
     }
+
+    func testRefreshPanelShortcutInvokesRefreshOnceAndConsumesRepeats() {
+        let panel = FloatingPanel()
+        var refreshCount = 0
+        panel.onRefreshData = { refreshCount += 1 }
+
+        let refresh = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "r",
+            charactersIgnoringModifiers: "r",
+            isARepeat: false,
+            keyCode: UInt16(kVK_ANSI_R)
+        )!
+        let repeatedRefresh = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "r",
+            charactersIgnoringModifiers: "r",
+            isARepeat: true,
+            keyCode: UInt16(kVK_ANSI_R)
+        )!
+
+        panel.sendEvent(refresh)
+        panel.sendEvent(repeatedRefresh)
+
+        XCTAssertEqual(refreshCount, 1)
+    }
 }

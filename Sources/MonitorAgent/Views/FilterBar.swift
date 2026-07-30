@@ -109,6 +109,40 @@ struct FilterBar: View {
                 .help(panelPresentationState.isPinned ? "Unpin Panel" : "Keep Panel Open")
                 .accessibilityLabel(panelPresentationState.isPinned ? "Unpin panel" : "Keep panel open")
 
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let cooldownRemaining = store.manualRefreshCooldownRemaining(at: context.date)
+                    let isCoolingDown = cooldownRemaining > 0 && !store.isRefreshInProgress
+
+                    Button {
+                        store.refreshNow()
+                    } label: {
+                        RefreshStatusIcon(
+                            isRefreshing: store.isManualRefreshInProgress,
+                            foreground: isCoolingDown || store.isRebuildingUsageData
+                                ? headerToolForeground.opacity(0.35)
+                                : headerToolForeground,
+                            reduceMotion: reduceMotion
+                        )
+                            .frame(
+                                width: MainPanelDesign.headerControlItemHeight,
+                                height: MainPanelDesign.headerControlItemHeight
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(MainPanelPressButtonStyle())
+                    .disabled(
+                        store.isRebuildingUsageData
+                            || store.isRefreshInProgress
+                            || cooldownRemaining > 0
+                    )
+                    .help(
+                        store.isRefreshInProgress
+                            ? "Refreshing Data"
+                            : (isCoolingDown ? "Refresh unavailable during cooldown" : "Refresh Data")
+                    )
+                    .accessibilityLabel("Refresh data")
+                }
+
                 Button {
                     onResetPanelPosition()
                 } label: {
@@ -310,6 +344,33 @@ struct FilterBar: View {
         return formatter
     }()
 
+}
+
+private struct RefreshStatusIcon: View {
+    let isRefreshing: Bool
+    let foreground: Color
+    let reduceMotion: Bool
+
+    var body: some View {
+        TimelineView(
+            .animation(
+                minimumInterval: 1.0 / 30.0,
+                paused: !isRefreshing || reduceMotion
+            )
+        ) { context in
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(foreground)
+                .rotationEffect(.degrees(rotation(at: context.date)))
+        }
+    }
+
+    private func rotation(at date: Date) -> Double {
+        guard isRefreshing, !reduceMotion else { return 0 }
+        let cycleDuration = 0.8
+        return date.timeIntervalSinceReferenceDate
+            .truncatingRemainder(dividingBy: cycleDuration) / cycleDuration * 360
+    }
 }
 
 private struct PanelDragArea: NSViewRepresentable {

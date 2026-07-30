@@ -8,6 +8,7 @@ final class PanelShortcutSettingsTests: XCTestCase {
         let settings = PanelShortcutSettings(defaults: makeDefaults())
 
         XCTAssertEqual(settings.binding(for: .togglePin)?.keyCode, UInt32(kVK_ANSI_P))
+        XCTAssertEqual(settings.binding(for: .refreshData)?.keyCode, UInt32(kVK_ANSI_R))
         XCTAssertEqual(settings.binding(for: .cycleFilter)?.keyCode, UInt32(kVK_Tab))
         XCTAssertEqual(settings.binding(for: .resetPosition)?.keyCode, UInt32(kVK_Return))
         XCTAssertEqual(settings.binding(for: .hidePanel)?.keyCode, UInt32(kVK_Escape))
@@ -20,6 +21,7 @@ final class PanelShortcutSettingsTests: XCTestCase {
 
         settings.update([
             .togglePin: custom,
+            .refreshData: PanelShortcutAction.refreshData.defaultBinding,
             .cycleFilter: nil,
             .resetPosition: PanelShortcutAction.resetPosition.defaultBinding,
             .hidePanel: PanelShortcutAction.hidePanel.defaultBinding,
@@ -27,6 +29,7 @@ final class PanelShortcutSettingsTests: XCTestCase {
 
         let reloaded = PanelShortcutSettings(defaults: defaults)
         XCTAssertEqual(reloaded.binding(for: .togglePin), custom)
+        XCTAssertEqual(reloaded.binding(for: .refreshData)?.keyCode, UInt32(kVK_ANSI_R))
         XCTAssertNil(reloaded.binding(for: .cycleFilter))
         XCTAssertEqual(reloaded.binding(for: .resetPosition)?.keyCode, UInt32(kVK_Return))
     }

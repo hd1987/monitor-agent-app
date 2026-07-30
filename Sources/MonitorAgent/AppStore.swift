@@ -20,6 +20,9 @@ final class AppStore: ObservableObject {
     @Published var usageDataRebuildErrorMessage: String?
     @Published var usageDataRebuildWasCancelled = false
     @Published var quotaSnapshots: [QuotaProviderID: QuotaSnapshot] = [:]
+    @Published private(set) var manualRefreshAvailableAt: Date?
+    @Published private(set) var isRefreshInProgress = false
+    @Published private(set) var isManualRefreshInProgress = false
 
     private let db: DatabaseManager
     private let syncManager: SessionSyncManager
@@ -56,6 +59,10 @@ final class AppStore: ObservableObject {
         self.quotaSettings = quotaSettings
         self.refreshCoordinator = refreshCoordinator
         self.activeDay = Calendar.current.startOfDay(for: currentDateProvider())
+        refreshCoordinator.setRefreshStateHandler { [weak self] isRefreshing, isManual in
+            self?.isRefreshInProgress = isRefreshing
+            self?.isManualRefreshInProgress = isManual
+        }
 
         // React to filter changes
         Publishers.CombineLatest3($appFilter, $timeRange, $heatmapMode)
@@ -86,6 +93,7 @@ final class AppStore: ObservableObject {
                 completion()
                 return
             }
+            self.manualRefreshAvailableAt = self.refreshCoordinator.manualRefreshAvailableAt
             self.performRefreshCycle(completion: completion)
         }
     }
@@ -145,16 +153,15 @@ final class AppStore: ObservableObject {
         refreshCoordinator.stop()
     }
 
-    /// Request one provider immediately from its per-card refresh button.
-    func refreshQuota(provider: QuotaProviderID) {
-        guard quotaSettings.isEnabled(provider) else { return }
-        quotaService.refresh(
-            provider: provider,
-            now: Date()
-        ) { [weak self] snapshot in
-            guard self?.quotaSettings.isEnabled(provider) == true else { return }
-            self?.quotaSnapshots[provider] = snapshot
-        }
+    /// Start a unified manual refresh and reset the next automatic interval.
+    func refreshNow() {
+        guard isPanelVisible, !isRebuildingUsageData else { return }
+        refreshCoordinator.refreshNow()
+    }
+
+    func manualRefreshCooldownRemaining(at date: Date) -> Int {
+        guard let manualRefreshAvailableAt else { return 0 }
+        return max(0, Int(ceil(manualRefreshAvailableAt.timeIntervalSince(date))))
     }
 
     func quotaProviderSettingsDidChange() {
