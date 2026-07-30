@@ -9,6 +9,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 ### Added
 - Add a Cursor main-panel filter backed by the signed-in user's exact usage events, including requests, sessions, tokens, cache hit, activity, and model distribution
 - Add a main-panel refresh button and configurable Refresh Data shortcut, defaulting to `R`, that restart the automatic refresh interval, share a 10-second request cooldown, and animate during manually triggered refreshes
+- Add Cursor MCP Servers plus separate User and Built-in Skills to the MCP & Skill settings inventory
 
 ### Security
 - Read Cursor's local access token only for bounded, non-redirecting requests to `https://api2.cursor.sh`, without persisting or logging the credential

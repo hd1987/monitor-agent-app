@@ -21,7 +21,7 @@ struct ExtensionsSettingsView: View {
             }
 
             ExtensionGroup(
-                title: "Skills",
+                title: selectedTab == .cursor ? "User Skills" : "Skills",
                 source: skillsSource,
                 count: inventory.skills.count,
                 emptyMessage: "No user skills found.",
@@ -38,6 +38,27 @@ struct ExtensionsSettingsView: View {
                     }
                 }
             }
+
+            if selectedTab == .cursor, let builtInSkillsSource {
+                ExtensionGroup(
+                    title: "Built-in Skills",
+                    source: builtInSkillsSource,
+                    count: inventory.builtInSkills.count,
+                    emptyMessage: "No built-in skills found.",
+                    sourceKind: .directory
+                ) {
+                    ExtensionCardGrid {
+                        ForEach(inventory.builtInSkills) { skill in
+                            ExtensionItemCard {
+                                Text(skill.name)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .help(skill.name)
+                            }
+                            .accessibilityLabel(skill.name)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -49,8 +70,16 @@ struct ExtensionsSettingsView: View {
         inventorySource.mcpDisplayPath
     }
 
+    private var builtInSkillsSource: String? {
+        inventorySource.builtInSkillsDisplayPath
+    }
+
     private var inventorySource: ExtensionInventorySource {
-        selectedTab == .claude ? .claude : .codex
+        switch selectedTab {
+        case .claude: .claude
+        case .codex: .codex
+        case .cursor: .cursor
+        }
     }
 }
 
@@ -62,7 +91,7 @@ private struct InventoryPage<Content: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            AppSourceTabBar(selection: $selectedTab)
+            AppSourceTabBar(selection: $selectedTab, tabs: AppSourceTab.allCases)
                 .padding(.top, SettingsWindowLayout.contentTopPadding)
 
             if isLoading {

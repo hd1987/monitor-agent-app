@@ -71,7 +71,7 @@ Open settings from the right-click menu or `Cmd+,`.
 | General | Theme, Launch at Login, subscription quota visibility, unified usage and quota refresh interval (`1 min`, `2 min`, `5 min`, `Never`), local usage data rebuild |
 | Config | `~/.claude/settings.json` and `~/.codex/config.toml` |
 | Prompt | `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` |
-| MCP & Skill | Read-only configured MCP server states and User Skill names from `~/.claude.json` and `~/.codex/config.toml`, with MCP Servers shown before Skills and each section's data source in its header |
+| MCP & Skill | Read-only configured MCP server states and Skill names for Claude Code, Codex, and Cursor; Cursor separates `~/.cursor/skills` User Skills from `~/.cursor/skills-cursor` Built-in Skills, and MCP Servers appear before Skills |
 
 Saving an editable page asks for confirmation, applies only the current page, keeps the window open, and shows a success toast. MCP & Skill is read-only and can be refreshed from disk.
 
@@ -138,7 +138,7 @@ MIT
 | General | 主题、登录启动、订阅额度显示、统一的用量与额度刷新间隔（`1 min`、`2 min`、`5 min`、`Never`）、本地使用数据重建 |
 | Config | `~/.claude/settings.json` 和 `~/.codex/config.toml` |
 | Prompt | `~/.claude/CLAUDE.md` 和 `~/.codex/AGENTS.md` |
-| MCP & Skill | 只读查看 Claude Code 和 Codex 的 MCP Server 状态与 User Skill 名称，MCP Servers 显示在 Skills 上方，并在各分组标题中显示数据来源 |
+| MCP & Skill | 只读查看 Claude Code、Codex 和 Cursor 的 MCP Server 状态与 Skill 名称；Cursor 将 `~/.cursor/skills` User Skills 和 `~/.cursor/skills-cursor` Built-in Skills 分组显示，MCP Servers 显示在 Skills 上方 |
 
 可编辑页面保存前会二次确认，只应用当前页面，保存后窗口保持打开并显示成功提示。MCP & Skill 为只读页面，可从磁盘刷新。
 

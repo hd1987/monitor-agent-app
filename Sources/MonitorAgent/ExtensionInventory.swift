@@ -3,11 +3,20 @@ import Foundation
 enum ExtensionInventorySource {
     case claude
     case codex
+    case cursor
 
     var skillsRelativePath: String {
         switch self {
         case .claude: ".claude/skills"
         case .codex: ".codex/skills"
+        case .cursor: ".cursor/skills"
+        }
+    }
+
+    var builtInSkillsRelativePath: String? {
+        switch self {
+        case .cursor: ".cursor/skills-cursor"
+        case .claude, .codex: nil
         }
     }
 
@@ -15,10 +24,14 @@ enum ExtensionInventorySource {
         switch self {
         case .claude: ".claude.json"
         case .codex: ".codex/config.toml"
+        case .cursor: ".cursor/mcp.json"
         }
     }
 
     var skillsDisplayPath: String { "~/\(skillsRelativePath)" }
+    var builtInSkillsDisplayPath: String? {
+        builtInSkillsRelativePath.map { "~/\($0)" }
+    }
     var mcpDisplayPath: String { "~/\(mcpRelativePath)" }
 }
 
@@ -38,9 +51,10 @@ struct ConfiguredMCPServer: Identifiable, Equatable {
 
 struct ExtensionInventory {
     let skills: [InstalledSkill]
+    let builtInSkills: [InstalledSkill]
     let mcpServers: [ConfiguredMCPServer]
 
-    static let empty = ExtensionInventory(skills: [], mcpServers: [])
+    static let empty = ExtensionInventory(skills: [], builtInSkills: [], mcpServers: [])
 }
 
 struct ExtensionInventoryLoader {
@@ -55,14 +69,27 @@ struct ExtensionInventoryLoader {
             root: homeDirectory.appendingPathComponent(source.skillsRelativePath),
             homeDirectory: homeDirectory
         )
+        let builtInSkills: [InstalledSkill]
+        if let builtInSkillsRelativePath = source.builtInSkillsRelativePath {
+            builtInSkills = loadSkills(
+                root: homeDirectory.appendingPathComponent(builtInSkillsRelativePath),
+                homeDirectory: homeDirectory
+            )
+        } else {
+            builtInSkills = []
+        }
         let mcpServers: [ConfiguredMCPServer]
         switch source {
-        case .claude:
-            mcpServers = loadClaudeMCPServers(homeDirectory: homeDirectory)
+        case .claude, .cursor:
+            mcpServers = loadJSONMCPServers(source: source, homeDirectory: homeDirectory)
         case .codex:
             mcpServers = loadCodexMCPServers(homeDirectory: homeDirectory)
         }
-        return ExtensionInventory(skills: skills, mcpServers: mcpServers)
+        return ExtensionInventory(
+            skills: skills,
+            builtInSkills: builtInSkills,
+            mcpServers: mcpServers
+        )
     }
 
     private func loadSkills(
@@ -104,9 +131,12 @@ struct ExtensionInventoryLoader {
         return nil
     }
 
-    private func loadClaudeMCPServers(homeDirectory: URL) -> [ConfiguredMCPServer] {
+    private func loadJSONMCPServers(
+        source: ExtensionInventorySource,
+        homeDirectory: URL
+    ) -> [ConfiguredMCPServer] {
         let url = homeDirectory.appendingPathComponent(
-            ExtensionInventorySource.claude.mcpRelativePath
+            source.mcpRelativePath
         )
         guard
             let data = try? Data(contentsOf: url),
