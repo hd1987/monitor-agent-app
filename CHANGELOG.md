@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-30
+
 ### Added
 - Add a Cursor main-panel filter backed by the signed-in user's exact usage events, including requests, sessions, tokens, cache hit, activity, and model distribution
 - Add a main-panel refresh button and configurable Refresh Data shortcut, defaulting to `R`, that restart the automatic refresh interval, share a 10-second request cooldown, and animate during manually triggered refreshes
