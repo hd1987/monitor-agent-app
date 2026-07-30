@@ -7,8 +7,9 @@ final class PanelPresentationStateTests: XCTestCase {
     func testAppFilterCyclesForwardAndBackward() {
         XCTAssertEqual(AppFilter.all.cycled(), .claude)
         XCTAssertEqual(AppFilter.claude.cycled(), .codex)
-        XCTAssertEqual(AppFilter.codex.cycled(), .all)
-        XCTAssertEqual(AppFilter.all.cycled(reverse: true), .codex)
+        XCTAssertEqual(AppFilter.codex.cycled(), .cursor)
+        XCTAssertEqual(AppFilter.cursor.cycled(), .all)
+        XCTAssertEqual(AppFilter.all.cycled(reverse: true), .cursor)
     }
 
     func testPinnedPanelRejectsAutomaticDismissalButAllowsExplicitDismissal() {

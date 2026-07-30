@@ -31,6 +31,7 @@ final class AppStore: ObservableObject {
     private var activeDay: Date
     private var cancellables = Set<AnyCancellable>()
     private var usageDataRebuildCancellation: UsageDataRebuildCancellation?
+    private var reloadGeneration = 0
     private(set) var isPanelVisible = false
     var isPeriodicSyncActive: Bool { syncManager.isRunning }
     var isPeriodicQuotaRefreshActive: Bool { quotaRefreshScheduler.isRunning }
@@ -46,7 +47,10 @@ final class AppStore: ObservableObject {
         currentDateProvider: @escaping () -> Date = Date.init
     ) {
         self.db = database
-        self.syncManager = syncManager ?? SessionSyncManager(database: database)
+        self.syncManager = syncManager ?? SessionSyncManager(
+            database: database,
+            cursorUsageSyncer: CursorUsageService(database: database)
+        )
         self.syncSettings = syncSettings
         self.currentDateProvider = currentDateProvider
         self.quotaService = quotaService
@@ -170,6 +174,7 @@ final class AppStore: ObservableObject {
         case .all: return QuotaProviderID.allCases
         case .claude: return [.claude]
         case .codex: return [.codex]
+        case .cursor: return []
         }
     }
 
@@ -190,7 +195,10 @@ final class AppStore: ObservableObject {
 
             do {
                 let summary = try syncManager.performExclusive {
-                    try UsageDataRebuilder(activeDatabase: self.db).rebuild(
+                    try UsageDataRebuilder(
+                        activeDatabase: self.db,
+                        cursorUsageServiceFactory: { CursorUsageService(database: $0) }
+                    ).rebuild(
                         cancellation: cancellation
                     ) { [weak self] progress in
                         DispatchQueue.main.async {
@@ -242,11 +250,13 @@ final class AppStore: ObservableObject {
         }
 
         resetToTodayAfterDayRolloverIfNeeded()
+        reloadGeneration += 1
 
         let appFilter = appFilter
         let timeRange = timeRange
         let heatmapMode = heatmapMode
         let selectedActivityDate = selectedActivityDate
+        let reloadGeneration = reloadGeneration
         let db = db
 
         DispatchQueue.global(qos: .userInitiated).async {
@@ -275,7 +285,8 @@ final class AppStore: ObservableObject {
                     self.appFilter == appFilter,
                     self.timeRange == timeRange,
                     self.heatmapMode == heatmapMode,
-                    self.selectedActivityDate == selectedActivityDate
+                    self.selectedActivityDate == selectedActivityDate,
+                    self.reloadGeneration == reloadGeneration
                 else {
                     return
                 }

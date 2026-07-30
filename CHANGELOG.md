@@ -6,6 +6,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Added
+- Add a Cursor main-panel filter backed by the signed-in user's exact usage events, including requests, sessions, tokens, cache hit, activity, and model distribution
+
+### Security
+- Read Cursor's local access token only for bounded, non-redirecting requests to `https://api2.cursor.sh`, without persisting or logging the credential
+
+### Changed
+- Make Cursor usage refresh follow General's Sync Interval without a separate minimum interval
+- Reload Claude Code and Codex results before waiting for the Cursor network refresh
+
+### Fixed
+- Replace Cursor usage atomically after an account change so records from different accounts cannot mix
+- Advance Cursor's incremental watermark after every successful query and keep overlap counts from accumulating
+- Preserve existing Cursor usage when a rebuild unexpectedly returns no Cursor events
+
 ## [0.6.10] - 2026-07-28
 
 ### Fixed

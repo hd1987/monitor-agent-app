@@ -86,40 +86,48 @@ enum SessionLogLineFilter {
     }
 }
 
-/// Discovers and incrementally syncs Claude Code and Codex JSONL session logs
-/// into the local database on a background timer.
+/// Syncs Claude Code and Codex JSONL logs plus Cursor usage events into the
+/// local database on a background timer.
 final class SessionSyncManager {
     private static let rebuildReadChunkSize = 1_048_576
     private static let rebuildRecordBatchSize = 10_000
     private static let newlineDelimiter = Data([UInt8(0x0A)])
     private let queue = DispatchQueue(label: "com.monitoragent.sync", qos: .utility)
+    private let cursorQueue = DispatchQueue(label: "com.monitoragent.cursor-sync", qos: .utility)
+    private let cursorScheduleLock = NSLock()
     private var timer: DispatchSourceTimer?
+    private var isCursorSyncScheduled = false
     private let db: DatabaseManager
     private let fm = FileManager.default
     private let claudeProjectsPath: String
     private let codexSessionsPath: String
     private let codexArchivedSessionsPath: String
+    private let cursorUsageSyncer: CursorUsageSyncing?
     private(set) var isRunning = false
 
     init(
         database: DatabaseManager = .shared,
         claudeProjectsPath: String = NSHomeDirectory() + "/.claude/projects",
         codexSessionsPath: String = NSHomeDirectory() + "/.codex/sessions",
-        codexArchivedSessionsPath: String = NSHomeDirectory() + "/.codex/archived_sessions"
+        codexArchivedSessionsPath: String = NSHomeDirectory() + "/.codex/archived_sessions",
+        cursorUsageSyncer: CursorUsageSyncing? = nil
     ) {
         self.db = database
         self.claudeProjectsPath = claudeProjectsPath
         self.codexSessionsPath = codexSessionsPath
         self.codexArchivedSessionsPath = codexArchivedSessionsPath
+        self.cursorUsageSyncer = cursorUsageSyncer
     }
 
-    /// Start periodic sync. `onComplete` fires on the sync queue after each cycle.
+    /// Start periodic sync. Local and successful Cursor syncs notify separately.
     func start(interval: TimeInterval = 30, onComplete: @escaping () -> Void) {
         let t = DispatchSource.makeTimerSource(queue: queue)
         t.schedule(deadline: .now(), repeating: interval)
         t.setEventHandler { [weak self] in
-            _ = self?.syncAll()
+            guard let self else { return }
+            _ = self.syncLocal()
             onComplete()
+            self.scheduleCursorSync(onComplete: onComplete)
         }
         t.resume()
         timer = t
@@ -132,20 +140,29 @@ final class SessionSyncManager {
         isRunning = false
     }
 
-    /// Run a single sync cycle on the background queue, then call `onComplete`.
+    /// Run local and Cursor syncs on separate background queues.
     func syncOnce(onComplete: @escaping () -> Void) {
         queue.async { [weak self] in
-            _ = self?.syncAll()
+            guard let self else { return }
+            _ = self.syncLocal()
             onComplete()
+            self.scheduleCursorSync(onComplete: onComplete)
         }
     }
 
     func syncAllOnce(onProgress: ((SessionSyncProgress) -> Void)? = nil) -> SessionSyncResult {
-        syncAll(onProgress: onProgress)
+        var result = syncLocal(onProgress: onProgress)
+        if let cursorUsageSyncer,
+           let cursorResult = cursorQueue.sync(execute: { try? cursorUsageSyncer.sync() }) {
+            result.add(cursorResult)
+        }
+        return result
     }
 
     func performExclusive<T>(_ operation: () throws -> T) rethrows -> T {
-        try queue.sync(execute: operation)
+        try queue.sync {
+            try cursorQueue.sync(execute: operation)
+        }
     }
 
     func makeSourceSnapshot(
@@ -261,7 +278,9 @@ final class SessionSyncManager {
 
     // MARK: - Sync Cycle
 
-    private func syncAll(onProgress: ((SessionSyncProgress) -> Void)? = nil) -> SessionSyncResult {
+    private func syncLocal(
+        onProgress: ((SessionSyncProgress) -> Void)? = nil
+    ) -> SessionSyncResult {
         let claudeFiles = discoverClaudeFiles()
         let codexFiles = discoverCodexFiles()
         let allFiles = claudeFiles.map { ($0, false) } + codexFiles.map { ($0, true) }
@@ -285,6 +304,32 @@ final class SessionSyncManager {
             ))
         }
         return result
+    }
+
+    private func scheduleCursorSync(onComplete: @escaping () -> Void) {
+        guard let cursorUsageSyncer else { return }
+
+        cursorScheduleLock.lock()
+        guard !isCursorSyncScheduled else {
+            cursorScheduleLock.unlock()
+            return
+        }
+        isCursorSyncScheduled = true
+        cursorScheduleLock.unlock()
+
+        cursorQueue.async { [weak self] in
+            guard let self else { return }
+            defer {
+                self.cursorScheduleLock.lock()
+                self.isCursorSyncScheduled = false
+                self.cursorScheduleLock.unlock()
+            }
+            guard let result = try? cursorUsageSyncer.sync(),
+                  result.filesSynced > 0 else {
+                return
+            }
+            onComplete()
+        }
     }
 
     // MARK: - File Discovery

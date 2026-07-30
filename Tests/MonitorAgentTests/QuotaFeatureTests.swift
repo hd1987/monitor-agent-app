@@ -322,6 +322,9 @@ final class QuotaFeatureTests: XCTestCase {
 
         store.appFilter = .codex
         XCTAssertEqual(store.visibleQuotaProviders, [.codex])
+
+        store.appFilter = .cursor
+        XCTAssertEqual(store.visibleQuotaProviders, [])
     }
 
     func testQuotaResetFormatsStayCompactAndSingleLine() {
