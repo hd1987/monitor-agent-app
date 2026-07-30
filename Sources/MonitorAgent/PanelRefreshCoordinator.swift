@@ -37,14 +37,16 @@ final class PanelRefreshCoordinator {
         handler(isRefreshInFlight, activeTrigger == .manual)
     }
 
-    func start(interval: RefreshInterval, refresh: @escaping RefreshAction) {
+    func start(
+        interval: RefreshInterval,
+        initialRefreshMinimumInterval: TimeInterval? = nil,
+        refresh: @escaping RefreshAction
+    ) {
         stop()
         self.interval = interval
         refreshAction = refresh
         isRunning = interval != .never
-        requestRefresh(
-            minimumInterval: interval == .never ? interval.effectiveInterval : nil
-        )
+        requestRefresh(minimumInterval: initialRefreshMinimumInterval)
     }
 
     /// Start a manual refresh when the shared cooldown has elapsed.

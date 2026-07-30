@@ -82,13 +82,21 @@ final class AppStore: ObservableObject {
 
     }
 
-    private func applyRefreshInterval(_ interval: RefreshInterval) {
+    private func applyRefreshInterval(
+        _ interval: RefreshInterval,
+        throttleInitialRefresh: Bool = false
+    ) {
         guard isPanelVisible, !isRebuildingUsageData else {
             refreshCoordinator.stop()
             return
         }
 
-        refreshCoordinator.start(interval: interval) { [weak self] completion in
+        refreshCoordinator.start(
+            interval: interval,
+            initialRefreshMinimumInterval: throttleInitialRefresh
+                ? interval.effectiveInterval
+                : nil
+        ) { [weak self] completion in
             guard let self else {
                 completion()
                 return
@@ -144,7 +152,7 @@ final class AppStore: ObservableObject {
     /// Start one unified visible-panel refresh lifecycle.
     func panelDidOpen() {
         isPanelVisible = true
-        applyRefreshInterval(refreshSettings.interval)
+        applyRefreshInterval(refreshSettings.interval, throttleInitialRefresh: true)
     }
 
     /// Stop periodic refreshing when the panel is hidden.

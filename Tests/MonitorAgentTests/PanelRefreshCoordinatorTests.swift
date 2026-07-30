@@ -24,7 +24,11 @@ final class PanelRefreshCoordinatorTests: XCTestCase {
             completion()
         }
 
-        coordinator.start(interval: .never, refresh: refresh)
+        coordinator.start(
+            interval: .never,
+            initialRefreshMinimumInterval: RefreshInterval.never.effectiveInterval,
+            refresh: refresh
+        )
         let firstCompletionProcessed = expectation(description: "first refresh completes")
         DispatchQueue.main.async {
             firstCompletionProcessed.fulfill()
@@ -32,15 +36,66 @@ final class PanelRefreshCoordinatorTests: XCTestCase {
         wait(for: [firstCompletionProcessed], timeout: 1)
         coordinator.stop()
         now = now.addingTimeInterval(RefreshInterval.defaultValue.effectiveInterval - 1)
-        coordinator.start(interval: .never, refresh: refresh)
+        coordinator.start(
+            interval: .never,
+            initialRefreshMinimumInterval: RefreshInterval.never.effectiveInterval,
+            refresh: refresh
+        )
 
         XCTAssertEqual(refreshCount, 1)
 
         coordinator.stop()
         now = now.addingTimeInterval(1)
-        coordinator.start(interval: .never, refresh: refresh)
+        coordinator.start(
+            interval: .never,
+            initialRefreshMinimumInterval: RefreshInterval.never.effectiveInterval,
+            refresh: refresh
+        )
 
         XCTAssertEqual(refreshCount, 2)
+    }
+
+    func testConfiguredIntervalsThrottlePanelOpenRefreshes() {
+        for interval in [RefreshInterval.oneMinute, .twoMinutes, .fiveMinutes] {
+            var now = Date(timeIntervalSince1970: 1_000)
+            let coordinator = PanelRefreshCoordinator(currentDateProvider: { now })
+            var refreshCount = 0
+            let refresh: PanelRefreshCoordinator.RefreshAction = { completion in
+                refreshCount += 1
+                completion()
+            }
+
+            coordinator.start(
+                interval: interval,
+                initialRefreshMinimumInterval: interval.effectiveInterval,
+                refresh: refresh
+            )
+            let firstCompletionProcessed = expectation(
+                description: "initial \(interval.displayName) refresh completes"
+            )
+            DispatchQueue.main.async {
+                firstCompletionProcessed.fulfill()
+            }
+            wait(for: [firstCompletionProcessed], timeout: 1)
+
+            coordinator.stop()
+            now = now.addingTimeInterval(interval.effectiveInterval - 1)
+            coordinator.start(
+                interval: interval,
+                initialRefreshMinimumInterval: interval.effectiveInterval,
+                refresh: refresh
+            )
+            XCTAssertEqual(refreshCount, 1, "\(interval.displayName) should throttle panel-open refreshes")
+
+            coordinator.stop()
+            now = now.addingTimeInterval(1)
+            coordinator.start(
+                interval: interval,
+                initialRefreshMinimumInterval: interval.effectiveInterval,
+                refresh: refresh
+            )
+            XCTAssertEqual(refreshCount, 2, "\(interval.displayName) should refresh at its interval")
+        }
     }
 
     func testRestartCoalescesUntilInFlightCycleCompletes() {
