@@ -135,7 +135,7 @@ The reset-credit tip uses a compact width, labels its date column `Expires`, and
 - **Shortcuts** — Grouped `Form` with a Global section (Toggle Main Panel; requires a modifier, unassigned by default) and a Panel section for the customizable in-panel shortcuts (Toggle Pin, Refresh Data, Cycle App Filter, Reset Panel Position, Hide Panel). Each row uses the shared `ShortcutRecorder` (panel rows accept single keys and Esc, cancel recording by clicking again) with a per-row clear button. Saving validates that the five panel shortcuts do not collide and registers the global shortcut; a Restore Defaults action resets every shortcut on the page to its original key
 - **Config** — TextEditor for `~/.claude/settings.json` (JSON validated on save) and `~/.codex/config.toml`; shows "File not found" if missing
 - **Prompt** — TextEditor for `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`; shows "File not found" if missing
-- **MCP & Skill** — Combined read-only Claude Code, Codex, and Cursor MCP Servers and Skills inventory; Cursor separates User and Built-in Skills, MCP Servers appears first, and each type uses a System Settings-style grouped panel with its source at top-right and adaptive item cards below
+- **MCP & Skill** — Combined read-only Claude Code, Codex, Cursor, and Global inventory; Global lists `~/.agents/skills` without MCP Servers, Cursor separates User and Built-in Skills, MCP Servers appears first where available, and each type uses a System Settings-style grouped panel with its source at top-right and adaptive item cards below
 
 ## Branches
 

@@ -7,15 +7,17 @@ struct ExtensionsSettingsView: View {
 
     var body: some View {
         InventoryPage(selectedTab: $selectedTab, isLoading: isLoading) {
-            ExtensionGroup(
-                title: "MCP Servers",
-                source: mcpSource,
-                count: inventory.mcpServers.count,
-                emptyMessage: "No configured MCP servers found."
-            ) {
-                ExtensionCardGrid {
-                    ForEach(inventory.mcpServers) { server in
-                        MCPServerCard(server: server)
+            if let mcpSource {
+                ExtensionGroup(
+                    title: "MCP Servers",
+                    source: mcpSource,
+                    count: inventory.mcpServers.count,
+                    emptyMessage: "No configured MCP servers found."
+                ) {
+                    ExtensionCardGrid {
+                        ForEach(inventory.mcpServers) { server in
+                            MCPServerCard(server: server)
+                        }
                     }
                 }
             }
@@ -66,7 +68,7 @@ struct ExtensionsSettingsView: View {
         inventorySource.skillsDisplayPath
     }
 
-    private var mcpSource: String {
+    private var mcpSource: String? {
         inventorySource.mcpDisplayPath
     }
 
@@ -79,6 +81,7 @@ struct ExtensionsSettingsView: View {
         case .claude: .claude
         case .codex: .codex
         case .cursor: .cursor
+        case .global: .global
         }
     }
 }

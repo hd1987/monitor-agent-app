@@ -127,6 +127,30 @@ final class ExtensionInventoryTests: XCTestCase {
         XCTAssertEqual(inventory.mcpServers.map(\.isEnabled), [true, false])
     }
 
+    func testGlobalInventoryLoadsOnlyAgentSkills() throws {
+        let home = temporaryHome()
+        try write(
+            "---\nname: global-skill\n---\n",
+            to: home.appendingPathComponent(".agents/skills/global-skill/SKILL.md")
+        )
+        try write(
+            """
+            {
+              "mcpServers": {
+                "ignored-server": { "command": "example" }
+              }
+            }
+            """,
+            to: home.appendingPathComponent(".cursor/mcp.json")
+        )
+
+        let inventory = ExtensionInventoryLoader().load(source: .global, homeDirectory: home)
+
+        XCTAssertEqual(inventory.skills.map(\.name), ["global-skill"])
+        XCTAssertTrue(inventory.builtInSkills.isEmpty)
+        XCTAssertTrue(inventory.mcpServers.isEmpty)
+    }
+
     private func temporaryHome() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("MonitorAgentExtensionInventoryTests")

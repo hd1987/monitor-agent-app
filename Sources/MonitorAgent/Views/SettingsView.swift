@@ -104,6 +104,7 @@ struct SettingsView: View {
     @State private var claudeExtensionInventory: ExtensionInventory = .empty
     @State private var codexExtensionInventory: ExtensionInventory = .empty
     @State private var cursorExtensionInventory: ExtensionInventory = .empty
+    @State private var globalExtensionInventory: ExtensionInventory = .empty
     @State private var isLoadingExtensionInventories = false
     @State private var extensionInventoryLoadID = UUID()
 
@@ -431,11 +432,13 @@ struct SettingsView: View {
             let claudeInventory = loader.load(source: .claude, homeDirectory: homeDirectory)
             let codexInventory = loader.load(source: .codex, homeDirectory: homeDirectory)
             let cursorInventory = loader.load(source: .cursor, homeDirectory: homeDirectory)
+            let globalInventory = loader.load(source: .global, homeDirectory: homeDirectory)
             await MainActor.run {
                 guard extensionInventoryLoadID == loadID else { return }
                 claudeExtensionInventory = claudeInventory
                 codexExtensionInventory = codexInventory
                 cursorExtensionInventory = cursorInventory
+                globalExtensionInventory = globalInventory
                 isLoadingExtensionInventories = false
             }
         }
@@ -446,6 +449,7 @@ struct SettingsView: View {
         case .claude: claudeExtensionInventory
         case .codex: codexExtensionInventory
         case .cursor: cursorExtensionInventory
+        case .global: globalExtensionInventory
         }
     }
 
@@ -1092,6 +1096,7 @@ enum AppSourceTab: String, CaseIterable, Identifiable {
     case claude = "Claude Code"
     case codex = "Codex"
     case cursor = "Cursor"
+    case global = "Global"
 
     var id: String { rawValue }
 }
