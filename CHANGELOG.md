@@ -14,6 +14,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 - Read Cursor's local access token only for bounded, non-redirecting requests to `https://api2.cursor.sh`, without persisting or logging the credential
 
 ### Changed
+- Rename the Extensions settings category to MCP & Skill and show MCP Servers before Skills
 - Replace separate Sync Interval and subscription quota timers with one panel-visible Refresh Interval, defaulting to 1 minute, and a non-overlapping refresh cycle for Claude Code, Codex, Cursor, and subscription quota; panel-open refreshes honor the selected interval, while `Never` uses the same 1-minute default for that check
 - Reload Claude Code and Codex results before waiting for the Cursor network refresh
 - Remove the per-provider refresh action from unavailable subscription quota cards in favor of the unified panel refresh

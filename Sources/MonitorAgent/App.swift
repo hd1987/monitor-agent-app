@@ -139,7 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         generalItem.target = self
         let shortcutsItem = NSMenuItem(title: "Shortcuts", action: #selector(openSettingsShortcuts(_:)), keyEquivalent: "")
         shortcutsItem.target = self
-        let extensionsItem = NSMenuItem(title: "Extensions", action: #selector(openSettingsExtensions(_:)), keyEquivalent: "")
+        let extensionsItem = NSMenuItem(title: "MCP & Skill", action: #selector(openSettingsExtensions(_:)), keyEquivalent: "")
         extensionsItem.target = self
         let configItem = NSMenuItem(title: "Config", action: #selector(openSettingsConfig(_:)), keyEquivalent: "")
         configItem.target = self

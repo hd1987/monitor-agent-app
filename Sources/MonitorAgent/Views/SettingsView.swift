@@ -5,7 +5,7 @@ import SwiftUI
 enum SettingsCategory: String, CaseIterable, Identifiable {
     case general = "General"
     case shortcuts = "Shortcuts"
-    case extensions = "Extensions"
+    case extensions = "MCP & Skill"
     case config = "Config"
     case prompt = "Prompt"
 
@@ -95,7 +95,7 @@ struct SettingsView: View {
     @State private var claudePromptExists: Bool = false
     @State private var codexPromptExists: Bool = false
 
-    // Tab selection for Extensions, Config, and Prompt
+    // Tab selection for MCP & Skill, Config, and Prompt
     @State private var extensionsTab: AppSourceTab = .claude
     @State private var configTab: AppSourceTab = .claude
     @State private var promptTab: AppSourceTab = .claude

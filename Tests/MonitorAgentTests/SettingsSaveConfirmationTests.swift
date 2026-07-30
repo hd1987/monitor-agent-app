@@ -100,10 +100,10 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         XCTAssertEqual(SaveSuccessIndicatorStyle.systemImage, "checkmark.circle.fill")
     }
 
-    func testExtensionsIsACombinedReadOnlyCategory() {
+    func testMCPAndSkillIsACombinedReadOnlyCategory() {
         XCTAssertEqual(
             SettingsCategory.allCases.map(\.rawValue),
-            ["General", "Shortcuts", "Extensions", "Config", "Prompt"]
+            ["General", "Shortcuts", "MCP & Skill", "Config", "Prompt"]
         )
         XCTAssertTrue(SettingsCategory.extensions.isReadOnly)
         XCTAssertFalse(SettingsCategory.general.isReadOnly)
