@@ -93,6 +93,64 @@ final class ExtensionInventoryTests: XCTestCase {
         XCTAssertEqual(inventory.mcpServers.map(\.isEnabled), [true, false])
     }
 
+    func testCursorInventorySeparatesUserAndBuiltInSkills() throws {
+        let home = temporaryHome()
+        try write(
+            "---\nname: user-skill\n---\n",
+            to: home.appendingPathComponent(".cursor/skills/user-skill/SKILL.md")
+        )
+        try write(
+            "---\nname: built-in-skill\n---\n",
+            to: home.appendingPathComponent(".cursor/skills-cursor/built-in-skill/SKILL.md")
+        )
+        try write(
+            "---\nname: excluded-agent-skill\n---\n",
+            to: home.appendingPathComponent(".agents/skills/excluded-agent-skill/SKILL.md")
+        )
+        try write(
+            """
+            {
+              "mcpServers": {
+                "cursor-server": { "command": "example" },
+                "disabled-server": { "command": "example", "enabled": false }
+              }
+            }
+            """,
+            to: home.appendingPathComponent(".cursor/mcp.json")
+        )
+
+        let inventory = ExtensionInventoryLoader().load(source: .cursor, homeDirectory: home)
+
+        XCTAssertEqual(inventory.skills.map(\.name), ["user-skill"])
+        XCTAssertEqual(inventory.builtInSkills.map(\.name), ["built-in-skill"])
+        XCTAssertEqual(inventory.mcpServers.map(\.name), ["cursor-server", "disabled-server"])
+        XCTAssertEqual(inventory.mcpServers.map(\.isEnabled), [true, false])
+    }
+
+    func testGlobalInventoryLoadsOnlyAgentSkills() throws {
+        let home = temporaryHome()
+        try write(
+            "---\nname: global-skill\n---\n",
+            to: home.appendingPathComponent(".agents/skills/global-skill/SKILL.md")
+        )
+        try write(
+            """
+            {
+              "mcpServers": {
+                "ignored-server": { "command": "example" }
+              }
+            }
+            """,
+            to: home.appendingPathComponent(".cursor/mcp.json")
+        )
+
+        let inventory = ExtensionInventoryLoader().load(source: .global, homeDirectory: home)
+
+        XCTAssertEqual(inventory.skills.map(\.name), ["global-skill"])
+        XCTAssertTrue(inventory.builtInSkills.isEmpty)
+        XCTAssertTrue(inventory.mcpServers.isEmpty)
+    }
+
     private func temporaryHome() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("MonitorAgentExtensionInventoryTests")

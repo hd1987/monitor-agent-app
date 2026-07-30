@@ -3,23 +3,41 @@ import Foundation
 enum ExtensionInventorySource {
     case claude
     case codex
+    case cursor
+    case global
 
     var skillsRelativePath: String {
         switch self {
         case .claude: ".claude/skills"
         case .codex: ".codex/skills"
+        case .cursor: ".cursor/skills"
+        case .global: ".agents/skills"
         }
     }
 
-    var mcpRelativePath: String {
+    var builtInSkillsRelativePath: String? {
+        switch self {
+        case .cursor: ".cursor/skills-cursor"
+        case .claude, .codex, .global: nil
+        }
+    }
+
+    var mcpRelativePath: String? {
         switch self {
         case .claude: ".claude.json"
         case .codex: ".codex/config.toml"
+        case .cursor: ".cursor/mcp.json"
+        case .global: nil
         }
     }
 
     var skillsDisplayPath: String { "~/\(skillsRelativePath)" }
-    var mcpDisplayPath: String { "~/\(mcpRelativePath)" }
+    var builtInSkillsDisplayPath: String? {
+        builtInSkillsRelativePath.map { "~/\($0)" }
+    }
+    var mcpDisplayPath: String? {
+        mcpRelativePath.map { "~/\($0)" }
+    }
 }
 
 struct InstalledSkill: Identifiable {
@@ -38,9 +56,10 @@ struct ConfiguredMCPServer: Identifiable, Equatable {
 
 struct ExtensionInventory {
     let skills: [InstalledSkill]
+    let builtInSkills: [InstalledSkill]
     let mcpServers: [ConfiguredMCPServer]
 
-    static let empty = ExtensionInventory(skills: [], mcpServers: [])
+    static let empty = ExtensionInventory(skills: [], builtInSkills: [], mcpServers: [])
 }
 
 struct ExtensionInventoryLoader {
@@ -55,14 +74,29 @@ struct ExtensionInventoryLoader {
             root: homeDirectory.appendingPathComponent(source.skillsRelativePath),
             homeDirectory: homeDirectory
         )
+        let builtInSkills: [InstalledSkill]
+        if let builtInSkillsRelativePath = source.builtInSkillsRelativePath {
+            builtInSkills = loadSkills(
+                root: homeDirectory.appendingPathComponent(builtInSkillsRelativePath),
+                homeDirectory: homeDirectory
+            )
+        } else {
+            builtInSkills = []
+        }
         let mcpServers: [ConfiguredMCPServer]
         switch source {
-        case .claude:
-            mcpServers = loadClaudeMCPServers(homeDirectory: homeDirectory)
+        case .claude, .cursor:
+            mcpServers = loadJSONMCPServers(source: source, homeDirectory: homeDirectory)
         case .codex:
             mcpServers = loadCodexMCPServers(homeDirectory: homeDirectory)
+        case .global:
+            mcpServers = []
         }
-        return ExtensionInventory(skills: skills, mcpServers: mcpServers)
+        return ExtensionInventory(
+            skills: skills,
+            builtInSkills: builtInSkills,
+            mcpServers: mcpServers
+        )
     }
 
     private func loadSkills(
@@ -104,10 +138,12 @@ struct ExtensionInventoryLoader {
         return nil
     }
 
-    private func loadClaudeMCPServers(homeDirectory: URL) -> [ConfiguredMCPServer] {
-        let url = homeDirectory.appendingPathComponent(
-            ExtensionInventorySource.claude.mcpRelativePath
-        )
+    private func loadJSONMCPServers(
+        source: ExtensionInventorySource,
+        homeDirectory: URL
+    ) -> [ConfiguredMCPServer] {
+        guard let mcpRelativePath = source.mcpRelativePath else { return [] }
+        let url = homeDirectory.appendingPathComponent(mcpRelativePath)
         guard
             let data = try? Data(contentsOf: url),
             let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -130,9 +166,10 @@ struct ExtensionInventoryLoader {
     }
 
     private func loadCodexMCPServers(homeDirectory: URL) -> [ConfiguredMCPServer] {
-        let url = homeDirectory.appendingPathComponent(
-            ExtensionInventorySource.codex.mcpRelativePath
-        )
+        guard let mcpRelativePath = ExtensionInventorySource.codex.mcpRelativePath else {
+            return []
+        }
+        let url = homeDirectory.appendingPathComponent(mcpRelativePath)
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return [] }
 
         var enabledByName: [String: Bool] = [:]

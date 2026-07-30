@@ -5,7 +5,7 @@ import SwiftUI
 enum SettingsCategory: String, CaseIterable, Identifiable {
     case general = "General"
     case shortcuts = "Shortcuts"
-    case extensions = "Extensions"
+    case extensions = "MCP & Skill"
     case config = "Config"
     case prompt = "Prompt"
 
@@ -76,13 +76,12 @@ struct SettingsView: View {
 
     // General drafts
     @State private var draftTheme: Theme = .system
-    @State private var draftSyncInterval: SyncInterval = .thirty
+    @State private var draftRefreshInterval: RefreshInterval = .defaultValue
     @State private var draftGlobalShortcut: GlobalShortcut?
     @State private var draftPanelShortcuts: [String: GlobalShortcut?] = [:]
     @State private var draftLaunchAtLogin: Bool = false
     @State private var draftClaudeExpirationDate: Date?
     @State private var draftCodexExpirationDate: Date?
-    @State private var draftQuotaRefreshInterval: QuotaRefreshInterval = .twoMinutes
 
     // Config drafts
     @State private var claudeConfigText: String = ""
@@ -96,7 +95,7 @@ struct SettingsView: View {
     @State private var claudePromptExists: Bool = false
     @State private var codexPromptExists: Bool = false
 
-    // Tab selection for Extensions, Config, and Prompt
+    // Tab selection for MCP & Skill, Config, and Prompt
     @State private var extensionsTab: AppSourceTab = .claude
     @State private var configTab: AppSourceTab = .claude
     @State private var promptTab: AppSourceTab = .claude
@@ -104,6 +103,8 @@ struct SettingsView: View {
     // Extension inventory
     @State private var claudeExtensionInventory: ExtensionInventory = .empty
     @State private var codexExtensionInventory: ExtensionInventory = .empty
+    @State private var cursorExtensionInventory: ExtensionInventory = .empty
+    @State private var globalExtensionInventory: ExtensionInventory = .empty
     @State private var isLoadingExtensionInventories = false
     @State private var extensionInventoryLoadID = UUID()
 
@@ -227,11 +228,10 @@ struct SettingsView: View {
         case .general:
             GeneralSettingsView(
                 draftTheme: $draftTheme,
-                draftSyncInterval: $draftSyncInterval,
+                draftRefreshInterval: $draftRefreshInterval,
                 draftLaunchAtLogin: $draftLaunchAtLogin,
                 draftClaudeExpirationDate: $draftClaudeExpirationDate,
-                draftCodexExpirationDate: $draftCodexExpirationDate,
-                draftQuotaRefreshInterval: $draftQuotaRefreshInterval
+                draftCodexExpirationDate: $draftCodexExpirationDate
             )
         case .shortcuts:
             ShortcutsSettingsView(
@@ -242,9 +242,7 @@ struct SettingsView: View {
         case .extensions:
             ExtensionsSettingsView(
                 selectedTab: $extensionsTab,
-                inventory: extensionsTab == .claude
-                    ? claudeExtensionInventory
-                    : codexExtensionInventory,
+                inventory: extensionInventory(for: extensionsTab),
                 isLoading: isLoadingExtensionInventories
             )
         case .config:
@@ -286,11 +284,10 @@ struct SettingsView: View {
         switch category {
         case .general:
             draftTheme = themeManager.theme
-            draftSyncInterval = SyncSettings.shared.interval
-            draftLaunchAtLogin = SyncSettings.shared.launchAtLogin
+            draftRefreshInterval = RefreshSettings.shared.interval
+            draftLaunchAtLogin = LaunchAtLoginController.shared.launchAtLogin
             draftClaudeExpirationDate = QuotaSettings.shared.claudeExpirationDate
             draftCodexExpirationDate = QuotaSettings.shared.codexExpirationDate
-            draftQuotaRefreshInterval = QuotaSettings.shared.refreshInterval
         case .shortcuts:
             draftGlobalShortcut = GlobalShortcutController.shared.shortcut
             var panelDraft: [String: GlobalShortcut?] = [:]
@@ -332,12 +329,11 @@ struct SettingsView: View {
         switch selectedCategory {
         case .general:
             themeManager.theme = draftTheme
-            SyncSettings.shared.interval = draftSyncInterval
-            SyncSettings.shared.launchAtLogin = draftLaunchAtLogin
+            LaunchAtLoginController.shared.launchAtLogin = draftLaunchAtLogin
             QuotaSettings.shared.claudeExpirationDate = draftClaudeExpirationDate
             QuotaSettings.shared.codexExpirationDate = draftCodexExpirationDate
-            QuotaSettings.shared.refreshInterval = draftQuotaRefreshInterval
-            store.quotaSettingsDidChange()
+            RefreshSettings.shared.interval = draftRefreshInterval
+            store.quotaProviderSettingsDidChange()
 
         case .shortcuts:
             if let conflict = panelShortcutConflict() {
@@ -435,12 +431,25 @@ struct SettingsView: View {
             let loader = ExtensionInventoryLoader()
             let claudeInventory = loader.load(source: .claude, homeDirectory: homeDirectory)
             let codexInventory = loader.load(source: .codex, homeDirectory: homeDirectory)
+            let cursorInventory = loader.load(source: .cursor, homeDirectory: homeDirectory)
+            let globalInventory = loader.load(source: .global, homeDirectory: homeDirectory)
             await MainActor.run {
                 guard extensionInventoryLoadID == loadID else { return }
                 claudeExtensionInventory = claudeInventory
                 codexExtensionInventory = codexInventory
+                cursorExtensionInventory = cursorInventory
+                globalExtensionInventory = globalInventory
                 isLoadingExtensionInventories = false
             }
+        }
+    }
+
+    private func extensionInventory(for tab: AppSourceTab) -> ExtensionInventory {
+        switch tab {
+        case .claude: claudeExtensionInventory
+        case .codex: codexExtensionInventory
+        case .cursor: cursorExtensionInventory
+        case .global: globalExtensionInventory
         }
     }
 
@@ -485,11 +494,10 @@ struct GeneralSettingsView: View {
     @EnvironmentObject var store: AppStore
 
     @Binding var draftTheme: Theme
-    @Binding var draftSyncInterval: SyncInterval
+    @Binding var draftRefreshInterval: RefreshInterval
     @Binding var draftLaunchAtLogin: Bool
     @Binding var draftClaudeExpirationDate: Date?
     @Binding var draftCodexExpirationDate: Date?
-    @Binding var draftQuotaRefreshInterval: QuotaRefreshInterval
     @State private var showUsageDataRebuildSheet = false
 
     var body: some View {
@@ -512,21 +520,21 @@ struct GeneralSettingsView: View {
 
                 SettingsRow(
                     title: "Launch at Login",
-                    description: SyncSettings.shared.canControlLaunchAtLogin
+                    description: LaunchAtLoginController.shared.canControlLaunchAtLogin
                         ? "Automatically start MonitorAgent when you log in."
                         : "Available only when running MonitorAgent from the installed app."
                 ) {
                     Toggle("", isOn: $draftLaunchAtLogin)
                         .toggleStyle(.switch)
-                        .disabled(!SyncSettings.shared.canControlLaunchAtLogin)
+                        .disabled(!LaunchAtLoginController.shared.canControlLaunchAtLogin)
                 }
 
                 SettingsRow(
-                    title: "Sync Interval",
-                    description: "How often to sync while the panel is open. \"Never\" syncs once when opened."
+                    title: RefreshSettingsCopy.title,
+                    description: RefreshSettingsCopy.description
                 ) {
-                    Picker("", selection: $draftSyncInterval) {
-                        ForEach(SyncInterval.allCases) { interval in
+                    Picker("Refresh Interval", selection: $draftRefreshInterval) {
+                        ForEach(RefreshInterval.allCases) { interval in
                             Text(interval.displayName).tag(interval)
                         }
                     }
@@ -538,8 +546,7 @@ struct GeneralSettingsView: View {
             Section(QuotaSettingsCopy.title) {
                 QuotaSettingsGroup(
                     claudeExpirationDate: $draftClaudeExpirationDate,
-                    codexExpirationDate: $draftCodexExpirationDate,
-                    refreshInterval: $draftQuotaRefreshInterval
+                    codexExpirationDate: $draftCodexExpirationDate
                 )
             }
 
@@ -726,8 +733,11 @@ enum QuotaSettingsCopy {
     static let expirationPickerTitle = "Subscription Expiration"
     static let today = "Today"
     static let clearExpiration = "Clear"
-    static let refreshIntervalTitle = "Refresh Interval"
-    static let refreshIntervalDescription = "Refresh while the panel is open. \"Never\" refreshes once when opened."
+}
+
+enum RefreshSettingsCopy {
+    static let title = "Refresh Interval"
+    static let description = "Refresh usage data and subscription quota while the panel is open. \"Never\" refreshes when opened, at most once per minute."
 }
 
 enum ExpirationDateControlStyle {
@@ -740,7 +750,6 @@ enum ExpirationDateControlStyle {
 private struct QuotaSettingsGroup: View {
     @Binding var claudeExpirationDate: Date?
     @Binding var codexExpirationDate: Date?
-    @Binding var refreshInterval: QuotaRefreshInterval
 
     var body: some View {
         VStack(spacing: 0) {
@@ -755,22 +764,6 @@ private struct QuotaSettingsGroup: View {
                 description: QuotaSettingsCopy.codexDescription,
                 expirationDate: $codexExpirationDate
             )
-            Divider()
-            HStack(spacing: 16) {
-                settingLabel(
-                    title: QuotaSettingsCopy.refreshIntervalTitle,
-                    description: QuotaSettingsCopy.refreshIntervalDescription
-                )
-                Spacer(minLength: 16)
-                Picker("Refresh Interval", selection: $refreshInterval) {
-                    ForEach(QuotaRefreshInterval.allCases) { interval in
-                        Text(interval.displayName).tag(interval)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 100)
-            }
-            .padding(.vertical, 8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1098,10 +1091,12 @@ struct UsageDataRebuildProgressView: View {
 
 // MARK: - App Source Tab
 
-/// Tab selector for Claude Code / Codex within Extensions, Config, and Prompt categories.
+/// Tab selector for supported source applications within settings categories.
 enum AppSourceTab: String, CaseIterable, Identifiable {
     case claude = "Claude Code"
     case codex = "Codex"
+    case cursor = "Cursor"
+    case global = "Global"
 
     var id: String { rawValue }
 }
@@ -1116,10 +1111,11 @@ enum AppSourceTabBarLayout {
 
 struct AppSourceTabBar: View {
     @Binding var selection: AppSourceTab
+    var tabs: [AppSourceTab] = [.claude, .codex]
 
     var body: some View {
         HStack(spacing: AppSourceTabBarLayout.segmentSpacing) {
-            ForEach(AppSourceTab.allCases) { tab in
+            ForEach(tabs) { tab in
                 Button {
                     selection = tab
                 } label: {

@@ -4,30 +4,9 @@ import Security
 protocol QuotaRefreshing: AnyObject {
     func refresh(
         provider: QuotaProviderID,
-        minimumInterval: TimeInterval,
-        force: Bool,
         now: Date,
         completion: @escaping (QuotaSnapshot) -> Void
     )
-}
-
-struct QuotaRefreshThrottle {
-    private var lastAttempts: [QuotaProviderID: Date] = [:]
-
-    mutating func allowsRefresh(
-        provider: QuotaProviderID,
-        minimumInterval: TimeInterval,
-        force: Bool,
-        now: Date
-    ) -> Bool {
-        if !force,
-           let lastAttempt = lastAttempts[provider],
-           now.timeIntervalSince(lastAttempt) < minimumInterval {
-            return false
-        }
-        lastAttempts[provider] = now
-        return true
-    }
 }
 
 final class QuotaService: QuotaRefreshing {
@@ -35,8 +14,7 @@ final class QuotaService: QuotaRefreshing {
 
     private let session: URLSession
     private let queue = DispatchQueue(label: "com.monitoragent.quota-service")
-    private var throttle = QuotaRefreshThrottle()
-    private var inFlight = Set<QuotaProviderID>()
+    private var inFlightCompletions: [QuotaProviderID: [(QuotaSnapshot) -> Void]] = [:]
 
     init(session: URLSession = .shared) {
         self.session = session
@@ -44,27 +22,22 @@ final class QuotaService: QuotaRefreshing {
 
     func refresh(
         provider: QuotaProviderID,
-        minimumInterval: TimeInterval,
-        force: Bool = false,
         now: Date = Date(),
         completion: @escaping (QuotaSnapshot) -> Void
     ) {
         queue.async {
-            if self.inFlight.contains(provider) { return }
-            guard self.throttle.allowsRefresh(
-                provider: provider,
-                minimumInterval: minimumInterval,
-                force: force,
-                now: now
-            ) else {
+            if self.inFlightCompletions[provider] != nil {
+                self.inFlightCompletions[provider]?.append(completion)
                 return
             }
-            self.inFlight.insert(provider)
+            self.inFlightCompletions[provider] = [completion]
 
             let finish: (QuotaSnapshot) -> Void = { snapshot in
                 self.queue.async {
-                    self.inFlight.remove(provider)
-                    DispatchQueue.main.async { completion(snapshot) }
+                    let completions = self.inFlightCompletions.removeValue(forKey: provider) ?? []
+                    DispatchQueue.main.async {
+                        completions.forEach { $0(snapshot) }
+                    }
                 }
             }
 

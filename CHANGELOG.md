@@ -6,6 +6,29 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-30
+
+### Added
+- Add a Cursor main-panel filter backed by the signed-in user's exact usage events, including requests, sessions, tokens, cache hit, activity, and model distribution
+- Add a main-panel refresh button and configurable Refresh Data shortcut, defaulting to `R`, that restart the automatic refresh interval, share a 10-second request cooldown, and animate during manually triggered refreshes
+- Add Cursor MCP Servers plus separate User and Built-in Skills to the MCP & Skill settings inventory
+- Add a Global MCP & Skill tab for Skills in `~/.agents/skills`
+
+### Security
+- Read Cursor's local access token only for bounded, non-redirecting requests to `https://api2.cursor.sh`, without persisting or logging the credential
+
+### Changed
+- Rename the Extensions settings category to MCP & Skill and show MCP Servers before Skills
+- Replace separate Sync Interval and subscription quota timers with one panel-visible Refresh Interval, defaulting to 1 minute, and a non-overlapping refresh cycle for Claude Code, Codex, Cursor, and subscription quota; panel-open refreshes honor the selected interval, while `Never` uses the same 1-minute default for that check
+- Reload Claude Code and Codex results before waiting for the Cursor network refresh
+- Remove the per-provider refresh action from unavailable subscription quota cards in favor of the unified panel refresh
+
+### Fixed
+- Allow a manual refresh to queue after its cooldown while an existing refresh cycle is still running
+- Replace Cursor usage atomically after an account change so records from different accounts cannot mix
+- Advance Cursor's incremental watermark after every successful query and keep overlap counts from accumulating
+- Preserve existing Cursor usage when a rebuild unexpectedly returns no Cursor events
+
 ## [0.6.10] - 2026-07-28
 
 ### Fixed

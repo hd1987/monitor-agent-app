@@ -6,6 +6,7 @@ enum AppFilter: String, CaseIterable, Identifiable {
     case all = "All"
     case claude = "Claude Code"
     case codex = "Codex"
+    case cursor = "Cursor"
 
     var id: String { rawValue }
 
@@ -21,6 +22,7 @@ enum AppFilter: String, CaseIterable, Identifiable {
         case .all: return nil
         case .claude: return ["claude"]
         case .codex: return ["codex"]
+        case .cursor: return ["cursor"]
         }
     }
 }
@@ -236,8 +238,8 @@ struct ModelShare: Identifiable {
 // MARK: - Sync Data
 
 struct ParsedRecord {
-    let requestId: String       // unique key, e.g. "session:msg_01xxx" or "codex:sid:3"
-    let appType: String         // "claude" or "codex"
+    let requestId: String       // unique key, e.g. "session:msg_01xxx", "codex:sid:3", or "cursor:<hash>"
+    let appType: String         // "claude", "codex", or "cursor"
     let model: String
     let inputTokens: Int
     let outputTokens: Int
@@ -360,6 +362,7 @@ struct UsageDataRebuildSummary: Equatable {
     let totalSessions: Int
     let claudeRequests: Int
     let codexRequests: Int
+    let cursorRequests: Int
     let duration: TimeInterval
     let latestActivityPending: Bool
 
@@ -370,6 +373,7 @@ struct UsageDataRebuildSummary: Equatable {
         totalSessions: Int,
         claudeRequests: Int = 0,
         codexRequests: Int = 0,
+        cursorRequests: Int = 0,
         duration: TimeInterval = 0,
         latestActivityPending: Bool = false
     ) {
@@ -379,6 +383,7 @@ struct UsageDataRebuildSummary: Equatable {
         self.totalSessions = totalSessions
         self.claudeRequests = claudeRequests
         self.codexRequests = codexRequests
+        self.cursorRequests = cursorRequests
         self.duration = duration
         self.latestActivityPending = latestActivityPending
     }
@@ -390,8 +395,10 @@ struct UsageDataRebuildSummary: Equatable {
         var lines = [
             "Rebuilt \(totalRequests) \(requestLabel) across \(totalSessions) \(sessionLabel) from \(filesSynced) \(fileLabel)."
         ]
-        if claudeRequests > 0 || codexRequests > 0 {
-            lines.append("Claude Code: \(claudeRequests) requests · Codex: \(codexRequests) requests")
+        if claudeRequests > 0 || codexRequests > 0 || cursorRequests > 0 {
+            lines.append(
+                "Claude Code: \(claudeRequests) requests · Codex: \(codexRequests) requests · Cursor: \(cursorRequests) requests"
+            )
         }
         if duration > 0 {
             lines.append("Completed in \(Self.durationFormatter.string(from: duration) ?? "under 1 second").")

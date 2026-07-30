@@ -68,12 +68,12 @@ Open settings from the right-click menu or `Cmd+,`.
 
 | Page | What it controls |
 |------|------------------|
-| General | Theme, usage sync interval (`10s`, `30s`, `60s`, `Never`), global shortcut for toggling the main panel, subscription quota visibility and refresh interval (`1 min`, `2 min`, `5 min`, `Never`), Launch at Login, local usage data rebuild |
+| General | Theme, Launch at Login, subscription quota visibility, unified usage and quota refresh interval (`1 min`, `2 min`, `5 min`, `Never`), local usage data rebuild |
 | Config | `~/.claude/settings.json` and `~/.codex/config.toml` |
 | Prompt | `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` |
-| Extensions | Read-only User Skill names and configured MCP server states from `~/.claude.json` and `~/.codex/config.toml`, with each section's data source shown in its header |
+| MCP & Skill | Read-only configured MCP server states and Skill names for Claude Code, Codex, Cursor, and Global; Global reads `~/.agents/skills`, Cursor separates `~/.cursor/skills` User Skills from `~/.cursor/skills-cursor` Built-in Skills, and MCP Servers appear before Skills |
 
-Saving an editable page asks for confirmation, applies only the current page, keeps the window open, and shows a success toast. Extensions is read-only and can be refreshed from disk.
+Saving an editable page asks for confirmation, applies only the current page, keeps the window open, and shows a success toast. MCP & Skill is read-only and can be refreshed from disk.
 
 ## How It Works
 
@@ -84,7 +84,7 @@ Monitor Agent reads the JSONL session logs that Claude Code and Codex write loca
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
 | Codex | `~/.codex/sessions/**/rollout-*.jsonl` and `~/.codex/archived_sessions/rollout-*.jsonl` |
 
-Session logs and parsed usage data stay on your machine. The app stores parsed results in `~/.monitor-agent/monitor.db` and syncs incrementally based on the selected sync interval. Opening the panel always triggers an on-demand sync.
+Session logs and parsed usage data stay on your machine. The app stores parsed results in `~/.monitor-agent/monitor.db` and syncs incrementally as part of the unified refresh cycle. Opening the panel always refreshes usage data and enabled subscription quota providers.
 
 Subscription quota data comes from the providers' account usage endpoints. While the panel is open, every enabled provider refreshes at the selected quota interval; closing the panel stops quota refreshes. `Never` refreshes only when the panel opens, with a 2-minute minimum request interval. The top app filter only changes the displayed quota cards.
 
@@ -135,12 +135,12 @@ MIT
 
 | 页面 | 内容 |
 |------|------|
-| General | 主题、用量同步间隔（`10s`、`30s`、`60s`、`Never`）、用于切换主面板的全局快捷键、订阅额度显示和刷新间隔（`1 min`、`2 min`、`5 min`、`Never`）、后台保留、登录启动、本地使用数据重建 |
+| General | 主题、登录启动、订阅额度显示、统一的用量与额度刷新间隔（`1 min`、`2 min`、`5 min`、`Never`）、本地使用数据重建 |
 | Config | `~/.claude/settings.json` 和 `~/.codex/config.toml` |
 | Prompt | `~/.claude/CLAUDE.md` 和 `~/.codex/AGENTS.md` |
-| Extensions | 只读查看 Claude Code 和 Codex 的 User Skill 名称，以及来自 `~/.claude.json` 和 `~/.codex/config.toml` 的 MCP Server 状态，并在各分组标题中显示数据来源 |
+| MCP & Skill | 只读查看 Claude Code、Codex、Cursor 和 Global 的 MCP Server 状态与 Skill 名称；Global 读取 `~/.agents/skills`，Cursor 将 `~/.cursor/skills` User Skills 和 `~/.cursor/skills-cursor` Built-in Skills 分组显示，MCP Servers 显示在 Skills 上方 |
 
-可编辑页面保存前会二次确认，只应用当前页面，保存后窗口保持打开并显示成功提示。Extensions 为只读页面，可从磁盘刷新。
+可编辑页面保存前会二次确认，只应用当前页面，保存后窗口保持打开并显示成功提示。MCP & Skill 为只读页面，可从磁盘刷新。
 
 ### 工作原理
 

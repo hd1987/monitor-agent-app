@@ -7,8 +7,9 @@ final class PanelPresentationStateTests: XCTestCase {
     func testAppFilterCyclesForwardAndBackward() {
         XCTAssertEqual(AppFilter.all.cycled(), .claude)
         XCTAssertEqual(AppFilter.claude.cycled(), .codex)
-        XCTAssertEqual(AppFilter.codex.cycled(), .all)
-        XCTAssertEqual(AppFilter.all.cycled(reverse: true), .codex)
+        XCTAssertEqual(AppFilter.codex.cycled(), .cursor)
+        XCTAssertEqual(AppFilter.cursor.cycled(), .all)
+        XCTAssertEqual(AppFilter.all.cycled(reverse: true), .cursor)
     }
 
     func testPinnedPanelRejectsAutomaticDismissalButAllowsExplicitDismissal() {
@@ -104,5 +105,41 @@ final class PanelPresentationStateTests: XCTestCase {
         panel.sendEvent(escape)
 
         XCTAssertTrue(didHide)
+    }
+
+    func testRefreshPanelShortcutInvokesRefreshOnceAndConsumesRepeats() {
+        let panel = FloatingPanel()
+        var refreshCount = 0
+        panel.onRefreshData = { refreshCount += 1 }
+
+        let refresh = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "r",
+            charactersIgnoringModifiers: "r",
+            isARepeat: false,
+            keyCode: UInt16(kVK_ANSI_R)
+        )!
+        let repeatedRefresh = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "r",
+            charactersIgnoringModifiers: "r",
+            isARepeat: true,
+            keyCode: UInt16(kVK_ANSI_R)
+        )!
+
+        panel.sendEvent(refresh)
+        panel.sendEvent(repeatedRefresh)
+
+        XCTAssertEqual(refreshCount, 1)
     }
 }

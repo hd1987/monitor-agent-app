@@ -227,6 +227,24 @@ final class DatabaseManager {
         }
     }
 
+    func replaceAppRecords(
+        appType: String,
+        records: [ParsedRecord],
+        state: SyncState
+    ) throws {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard let db = dbQueue else { throw DatabaseManagerError.unavailable }
+        try db.write { db in
+            try db.execute(
+                sql: "DELETE FROM request_logs WHERE app_type = ?",
+                arguments: [appType]
+            )
+            try insertRecords(records, in: db)
+            try upsertSyncState(state, in: db)
+        }
+    }
+
     func insertRecords(_ records: [ParsedRecord]) {
         lifecycleLock.lock()
         defer { lifecycleLock.unlock() }

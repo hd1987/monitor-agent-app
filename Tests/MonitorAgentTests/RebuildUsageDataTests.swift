@@ -120,6 +120,39 @@ final class RebuildUsageDataTests: XCTestCase {
         XCTAssertEqual(secondEntered.wait(timeout: .now() + 1), .success)
     }
 
+    func testLocalSyncCompletionDoesNotWaitForCursorNetworkSync() {
+        let database = DatabaseManager(inMemory: true)
+        let cursorSyncer = BlockingCursorUsageSyncer()
+        let callback = DispatchSemaphore(value: 0)
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
+            codexSessionsPath: "/missing-codex-\(UUID().uuidString)",
+            codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)",
+            cursorUsageSyncer: cursorSyncer
+        )
+
+        syncManager.syncOnce(
+            onLocalComplete: { callback.signal() },
+            onCursorComplete: { callback.signal() },
+            completion: {}
+        )
+
+        XCTAssertEqual(callback.wait(timeout: .now() + 1), .success)
+        XCTAssertEqual(cursorSyncer.entered.wait(timeout: .now() + 1), .success)
+
+        syncManager.syncOnce(
+            onLocalComplete: { callback.signal() },
+            onCursorComplete: { callback.signal() },
+            completion: {}
+        )
+        XCTAssertEqual(callback.wait(timeout: .now() + 1), .success)
+        XCTAssertEqual(cursorSyncer.entered.wait(timeout: .now() + 0.05), .timedOut)
+
+        cursorSyncer.release.signal()
+        XCTAssertEqual(callback.wait(timeout: .now() + 1), .success)
+    }
+
     func testIncrementalSyncRestartsFromBeginningAfterFileTruncation() throws {
         let directory = try makeTemporaryDirectory()
         let claudeRoot = directory.appendingPathComponent("claude-projects")
@@ -622,6 +655,94 @@ final class RebuildUsageDataTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temporaryPath))
     }
 
+    func testUsageDataRebuilderPreservesCachedCursorDataWhenRefreshFails() throws {
+        let directory = try makeTemporaryDirectory()
+        let activePath = directory.appendingPathComponent("monitor.db").path
+        let temporaryPath = directory.appendingPathComponent("monitor-rebuild.tmp.db").path
+        let claudeRoot = directory.appendingPathComponent("claude-projects")
+        let codexRoot = directory.appendingPathComponent("codex-sessions")
+        let codexArchiveRoot = directory.appendingPathComponent("codex-archive")
+        try FileManager.default.createDirectory(at: claudeRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexArchiveRoot, withIntermediateDirectories: true)
+        try claudeAssistantLine().write(
+            to: claudeRoot.appendingPathComponent("session.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let activeDatabase = try DatabaseManager(path: activePath)
+        activeDatabase.insertRecords([ParsedRecord(
+            requestId: "cursor:cached",
+            appType: "cursor",
+            model: "cursor-model",
+            inputTokens: 10,
+            outputTokens: 20,
+            cacheReadTokens: 30,
+            cacheCreationTokens: 40,
+            sessionId: "cursor-session",
+            createdAt: 1_783_238_400
+        )])
+        let rebuilder = UsageDataRebuilder(
+            activeDatabase: activeDatabase,
+            temporaryDatabasePath: temporaryPath,
+            claudeProjectsPath: claudeRoot.path,
+            codexSessionsPath: codexRoot.path,
+            codexArchivedSessionsPath: codexArchiveRoot.path,
+            cursorUsageServiceFactory: { _ in FailingCursorUsageSyncer() }
+        )
+
+        XCTAssertThrowsError(try rebuilder.rebuild()) { error in
+            XCTAssertEqual(error as? UsageDataRebuildError, .cursorRefreshFailed)
+        }
+        XCTAssertEqual(activeDatabase.fetchStats(app: .cursor, range: .allTime).totalRequests, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temporaryPath))
+    }
+
+    func testUsageDataRebuilderPreservesCachedCursorDataOnSuccessfulEmptyRefresh() throws {
+        let directory = try makeTemporaryDirectory()
+        let activePath = directory.appendingPathComponent("monitor.db").path
+        let temporaryPath = directory.appendingPathComponent("monitor-rebuild.tmp.db").path
+        let claudeRoot = directory.appendingPathComponent("claude-projects")
+        let codexRoot = directory.appendingPathComponent("codex-sessions")
+        let codexArchiveRoot = directory.appendingPathComponent("codex-archive")
+        try FileManager.default.createDirectory(at: claudeRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexArchiveRoot, withIntermediateDirectories: true)
+        try claudeAssistantLine().write(
+            to: claudeRoot.appendingPathComponent("session.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let activeDatabase = try DatabaseManager(path: activePath)
+        activeDatabase.insertRecords([ParsedRecord(
+            requestId: "cursor:cached",
+            appType: "cursor",
+            model: "cursor-model",
+            inputTokens: 10,
+            outputTokens: 20,
+            cacheReadTokens: 30,
+            cacheCreationTokens: 40,
+            sessionId: "cursor-session",
+            createdAt: 1_783_238_400
+        )])
+        let rebuilder = UsageDataRebuilder(
+            activeDatabase: activeDatabase,
+            temporaryDatabasePath: temporaryPath,
+            claudeProjectsPath: claudeRoot.path,
+            codexSessionsPath: codexRoot.path,
+            codexArchivedSessionsPath: codexArchiveRoot.path,
+            cursorUsageServiceFactory: { _ in EmptyCursorUsageSyncer() }
+        )
+
+        XCTAssertThrowsError(try rebuilder.rebuild()) { error in
+            XCTAssertEqual(error as? UsageDataRebuildError, .cursorRefreshFailed)
+        }
+        XCTAssertEqual(activeDatabase.fetchStats(app: .cursor, range: .allTime).totalRequests, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temporaryPath))
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("MonitorAgentTests-\(UUID().uuidString)", isDirectory: true)
@@ -654,5 +775,28 @@ final class RebuildUsageDataTests: XCTestCase {
             sessionId: "session-\(id)",
             createdAt: 1_783_238_400
         )
+    }
+}
+
+private struct FailingCursorUsageSyncer: CursorUsageSyncing {
+    func sync() throws -> SessionSyncResult {
+        throw CursorUsageError.authenticationRejected
+    }
+}
+
+private struct EmptyCursorUsageSyncer: CursorUsageSyncing {
+    func sync() throws -> SessionSyncResult {
+        SessionSyncResult(filesSynced: 1, recordsSynced: 0)
+    }
+}
+
+private final class BlockingCursorUsageSyncer: CursorUsageSyncing {
+    let entered = DispatchSemaphore(value: 0)
+    let release = DispatchSemaphore(value: 0)
+
+    func sync() throws -> SessionSyncResult {
+        entered.signal()
+        release.wait()
+        return SessionSyncResult(filesSynced: 1, recordsSynced: 0)
     }
 }
