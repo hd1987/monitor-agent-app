@@ -92,6 +92,7 @@ jobs:
           mkdir -p "$APP_DIR" "$RES_DIR"
           cp .build/release/MonitorAgent "$APP_DIR/"
           cp Sources/MonitorAgent/Resources/AppIcon.icns "$RES_DIR/AppIcon.icns"
+          cp -R .build/release/MonitorAgent_MonitorAgent.bundle "$RES_DIR/"
 
           cat > MonitorAgent.app/Contents/Info.plist << EOF
           <?xml version="1.0" encoding="UTF-8"?>
