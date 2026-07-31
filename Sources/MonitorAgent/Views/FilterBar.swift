@@ -49,12 +49,19 @@ struct FilterBar: View {
                     Button {
                         store.appFilter = filter
                     } label: {
-                        Text(filter.rawValue)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Color.primary)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .padding(.horizontal, 10)
+                        HStack(spacing: 5) {
+                            AppIconView(icon: filter.appIcon)
+
+                            if store.appFilter == filter {
+                                Text(filter.rawValue)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
+                                    .transition(.opacity)
+                            }
+                        }
+                        .foregroundStyle(Color.primary)
+                        .padding(.horizontal, store.appFilter == filter ? 10 : 7)
                             .frame(height: MainPanelDesign.headerControlItemHeight)
                             .background(
                                 store.appFilter == filter
@@ -64,6 +71,8 @@ struct FilterBar: View {
                             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                     .buttonStyle(MainPanelPressButtonStyle())
+                    .help(filter.rawValue)
+                    .accessibilityLabel(filter.rawValue)
                 }
             }
             .padding(2)

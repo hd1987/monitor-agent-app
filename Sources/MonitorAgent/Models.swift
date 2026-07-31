@@ -10,6 +10,15 @@ enum AppFilter: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var appIcon: AppIcon {
+        switch self {
+        case .all: return .all
+        case .claude: return .claude
+        case .codex: return .codex
+        case .cursor: return .cursor
+        }
+    }
+
     func cycled(reverse: Bool = false) -> AppFilter {
         guard let index = Self.allCases.firstIndex(of: self) else { return self }
         let offset = reverse ? Self.allCases.count - 1 : 1
