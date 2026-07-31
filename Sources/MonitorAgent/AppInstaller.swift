@@ -68,6 +68,9 @@ enum AppInstaller {
         let contentsDirectory = appURL.appendingPathComponent("Contents", isDirectory: true)
         let infoURL = contentsDirectory.appendingPathComponent("Info.plist")
         let executableURL = contentsDirectory.appendingPathComponent("MacOS/MonitorAgent")
+        let menuBarIconURL = contentsDirectory.appendingPathComponent(
+            "Resources/MonitorAgent_MonitorAgent.bundle/Icons/menubar.svg"
+        )
 
         guard
             let info = NSDictionary(contentsOf: infoURL),
@@ -82,6 +85,7 @@ enum AppInstaller {
         return fileManager.fileExists(atPath: executableURL.path, isDirectory: &isDirectory)
             && !isDirectory.boolValue
             && fileManager.isExecutableFile(atPath: executableURL.path)
+            && fileManager.fileExists(atPath: menuBarIconURL.path)
     }
 
     private static func replaceItem(

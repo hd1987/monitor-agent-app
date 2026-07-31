@@ -110,10 +110,30 @@ final class AppInstallerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: existingMarker.path))
     }
 
+    func testBundleWithoutSwiftPMResourcesPreservesInstalledApp() throws {
+        let directory = try makeTemporaryDirectory()
+        let destination = directory.appendingPathComponent("MonitorAgent.app", isDirectory: true)
+        let existingMarker = destination.appendingPathComponent("existing.txt")
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        try Data("existing".utf8).write(to: existingMarker)
+
+        let installed = AppInstaller.install(
+            zipURL: directory.appendingPathComponent("update.zip"),
+            destinationURL: destination,
+            extractor: { _, stagingDirectory in
+                self.createValidApp(in: stagingDirectory, includeResources: false)
+            }
+        )
+
+        XCTAssertFalse(installed)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: existingMarker.path))
+    }
+
     private func createValidApp(
         in stagingDirectory: URL,
         bundleIdentifier: String = "com.hd1987.monitor-agent",
-        makeExecutable: Bool = true
+        makeExecutable: Bool = true,
+        includeResources: Bool = true
     ) -> Bool {
         let app = stagingDirectory.appendingPathComponent("MonitorAgent.app", isDirectory: true)
         let contents = app.appendingPathComponent("Contents", isDirectory: true)
@@ -127,6 +147,14 @@ final class AppInstallerTests: XCTestCase {
                     [.posixPermissions: 0o755],
                     ofItemAtPath: executable.path
                 )
+            }
+            if includeResources {
+                let iconDirectory = contents.appendingPathComponent(
+                    "Resources/MonitorAgent_MonitorAgent.bundle/Icons",
+                    isDirectory: true
+                )
+                try FileManager.default.createDirectory(at: iconDirectory, withIntermediateDirectories: true)
+                try Data("icon".utf8).write(to: iconDirectory.appendingPathComponent("menubar.svg"))
             }
             let info: NSDictionary = [
                 "CFBundleIdentifier": bundleIdentifier,
