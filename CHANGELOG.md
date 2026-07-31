@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-31
+
 ### Changed
 - Show the supplied Agent and Cursor icons plus the existing Claude Code and Codex icons in the main-panel filter, expanding only the selected filter to include its label
 - Use the supplied Agent icon for All; All, Claude Code, and Codex use the shared template color, while Cursor keeps its original color
