@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Fixed
+- Load packaged icon resources from the installed app bundle instead of the development build path
+
 ## [0.8.1] - 2026-07-31
 
 ### Fixed
