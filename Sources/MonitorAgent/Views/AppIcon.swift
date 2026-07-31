@@ -27,6 +27,21 @@ enum AppIconAsset {
         image.isTemplate = icon != .cursor
         return image
     }
+
+    static func menuBarImage() -> NSImage {
+        guard let url = Bundle.module.url(
+            forResource: "menubar",
+            withExtension: "svg",
+            subdirectory: "Icons"
+        ),
+        let data = try? Data(contentsOf: url),
+        let image = NSImage(data: data) else {
+            return image(for: .all)
+        }
+        image.size = NSSize(width: 18, height: 18)
+        image.isTemplate = true
+        return image
+    }
 }
 
 struct AppIconView: View {

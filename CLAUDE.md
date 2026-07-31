@@ -137,7 +137,7 @@ The reset-credit tip uses a compact width, labels its date column `Expires`, and
 - **Prompt** — TextEditor for `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`; shows "File not found" if missing
 - **MCP & Skill** — Combined read-only Claude Code, Codex, Cursor, and Global inventory; Global lists `~/.agents/skills` without MCP Servers, Cursor separates User and Built-in Skills, MCP Servers appears first where available, and each type uses a System Settings-style grouped panel with its source at top-right and adaptive item cards below
 
-**Icon resource rule:** Store All, Claude Code, Codex, and Cursor SVGs in Sources/MonitorAgent/Resources/Icons. AppIconAsset is the only public icon loader for SwiftUI and AppKit consumers. Replacing an SVG and rebuilding updates every consumer. All, Claude Code, and Codex are template images using the same foreground color; Cursor retains its original color. Claude Code subscription cards use the shared template color.
+**Icon resource rule:** Store All, Claude Code, Codex, Cursor, and menu bar SVGs in Sources/MonitorAgent/Resources/Icons. AppIconAsset is the only public icon loader for SwiftUI and AppKit consumers. Replacing an SVG and rebuilding updates every consumer. All, Claude Code, and Codex are template images using the same foreground color; Cursor retains its original color. Claude Code subscription cards use the shared template color. `menubar.svg` uses the complete `all.svg` Agent artwork with a vertically centered 18-point status-bar viewport; `all.svg` remains the full All Tab icon.
 
 ## Branches
 

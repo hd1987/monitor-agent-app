@@ -36,7 +36,7 @@ Triggered by push to `main`. The workflow (`.github/workflows/release.yml`):
 4. Verifies the selected macOS SDK is 26.5, matching local development builds
 5. Runs `swift build -c release`
 6. Packages `MonitorAgent.app` with `Info.plist` values derived from the tag and changelog (`CFBundleShortVersionString`, `CFBundleVersion`, `MonitorAgentGitCommit`, `MonitorAgentReleaseDate`, `LSUIElement=true`)
-7. Copies `AppIcon.icns` into the app bundle
+7. Copies `AppIcon.icns` and the SwiftPM resource bundle into the app bundle
 8. Ad-hoc code signs the app (`codesign -s -`)
 9. Compresses to `MonitorAgent.zip` via `ditto`
 10. Extracts release notes from `CHANGELOG.md`

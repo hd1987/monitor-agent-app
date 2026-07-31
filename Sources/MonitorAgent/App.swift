@@ -124,7 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
         if let button = statusItem.button {
-            button.image = Self.makeMenuBarIcon()
+            button.image = AppIconAsset.menuBarImage()
             button.action = #selector(togglePanel(_:))
             button.target = self
             button.sendAction(on: [.leftMouseUp])
@@ -480,21 +480,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         forceTerminate()
     }
 
-    /// Build menu bar icon from bundled SVG
-    private static func makeMenuBarIcon() -> NSImage {
-        let svgString = """
-        <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
-        <path d="M236.397714 911.36c0 27.940571 22.674286 50.614857 50.614857 50.614857h449.974858a50.614857 50.614857 0 1 0 0-101.229714H287.012571a50.614857 50.614857 0 0 0-50.614857 50.614857z m506.368-666.989714h50.468572a168.740571 168.740571 0 0 1 168.667428 168.740571v224.914286a168.740571 168.740571 0 0 1-168.740571 168.740571H230.765714A168.740571 168.740571 0 0 1 62.171429 638.025143V413.110857A168.740571 168.740571 0 0 1 230.765714 244.297143h50.468572l-20.553143-123.392a50.614857 50.614857 0 0 1 99.913143-16.676572l22.454857 134.948572 0.658286 5.046857h256.585142l0.585143-5.046857 22.528-134.875429a50.614857 50.614857 0 0 1 99.913143 16.749715l-20.553143 123.172571v0.073143z m-460.214857 236.251428v44.982857a50.614857 50.614857 0 0 0 101.229714 0V480.548571a50.614857 50.614857 0 1 0-101.229714 0z m357.668572 0v44.982857a50.614857 50.614857 0 0 0 101.229714 0V480.548571a50.614857 50.614857 0 0 0-101.229714 0z" fill="#000000"/>
-        </svg>
-        """
-        guard let data = svgString.data(using: .utf8),
-              let image = NSImage(data: data) else {
-            return NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: "Monitor Agent")!
-        }
-        image.size = NSSize(width: 18, height: 18)
-        image.isTemplate = true
-        return image
-    }
 }
 
 enum SettingsWindowToolbar {
