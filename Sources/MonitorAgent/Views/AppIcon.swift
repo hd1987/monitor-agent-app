@@ -9,9 +9,28 @@ enum AppIcon: String, CaseIterable {
 }
 
 enum AppIconAsset {
+    static func installedResourceBundleURL(resourceDirectory: URL?) -> URL? {
+        resourceDirectory?.appendingPathComponent(
+            "MonitorAgent_MonitorAgent.bundle",
+            isDirectory: true
+        )
+    }
+
+    private static func resourceBundle() -> Bundle? {
+        switch DatabaseEnvironment.current {
+        case .production:
+            guard let url = installedResourceBundleURL(resourceDirectory: Bundle.main.resourceURL) else {
+                return nil
+            }
+            return Bundle(path: url.path)
+        case .development:
+            return Bundle.module
+        }
+    }
+
     static func data(for icon: AppIcon) -> Data? {
         let resourceName = icon == .all ? "menubar" : icon.rawValue
-        guard let url = Bundle.module.url(
+        guard let url = resourceBundle()?.url(
             forResource: resourceName,
             withExtension: "svg",
             subdirectory: "Icons"
