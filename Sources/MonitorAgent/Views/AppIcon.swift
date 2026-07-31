@@ -10,8 +10,9 @@ enum AppIcon: String, CaseIterable {
 
 enum AppIconAsset {
     static func data(for icon: AppIcon) -> Data? {
+        let resourceName = icon == .all ? "menubar" : icon.rawValue
         guard let url = Bundle.module.url(
-            forResource: icon.rawValue,
+            forResource: resourceName,
             withExtension: "svg",
             subdirectory: "Icons"
         ) else {
@@ -29,15 +30,7 @@ enum AppIconAsset {
     }
 
     static func menuBarImage() -> NSImage {
-        guard let url = Bundle.module.url(
-            forResource: "menubar",
-            withExtension: "svg",
-            subdirectory: "Icons"
-        ),
-        let data = try? Data(contentsOf: url),
-        let image = NSImage(data: data) else {
-            return image(for: .all)
-        }
+        let image = image(for: .all)
         image.size = NSSize(width: 18, height: 18)
         image.isTemplate = true
         return image

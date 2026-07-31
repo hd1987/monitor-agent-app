@@ -12,6 +12,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 - Centralize reusable app SVGs in the packaged Icons resource bundle with shared SwiftUI and AppKit loading APIs
 - Use the shared Agent SVG for the menu bar icon and include the resource bundle in release builds
 - Use the complete Agent artwork in the 18-point menu bar with a vertically centered viewport
+- Use the Agent graphic in the shared Dock and About application icon
+- Reuse the menu bar Agent SVG for the All filter icon
 
 ## [0.7.0] - 2026-07-30
 
