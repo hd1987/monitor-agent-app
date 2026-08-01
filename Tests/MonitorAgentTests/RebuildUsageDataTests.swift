@@ -94,6 +94,74 @@ final class RebuildUsageDataTests: XCTestCase {
         ])
     }
 
+    func testRoutineSyncSkipsDisabledLocalSources() throws {
+        let directory = try makeTemporaryDirectory()
+        let claudeRoot = directory.appendingPathComponent("claude-projects")
+        let codexRoot = directory.appendingPathComponent("codex-sessions")
+        let codexArchiveRoot = directory.appendingPathComponent("codex-archive")
+        try FileManager.default.createDirectory(at: claudeRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexArchiveRoot, withIntermediateDirectories: true)
+        let claudeFile = claudeRoot.appendingPathComponent("session.jsonl")
+        try claudeAssistantLine().write(to: claudeFile, atomically: true, encoding: .utf8)
+        let database = DatabaseManager(inMemory: true)
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: claudeRoot.path,
+            codexSessionsPath: codexRoot.path,
+            codexArchivedSessionsPath: codexArchiveRoot.path
+        )
+
+        let result = syncManager.syncAllOnce(enabledAgents: [.codex])
+
+        XCTAssertEqual(result, SessionSyncResult())
+        XCTAssertNil(database.getSyncState(for: claudeFile.path))
+    }
+
+    func testRoutineSyncDoesNotInvokeDisabledCursorSource() {
+        let cursorSyncer = CountingCursorUsageSyncer()
+        let syncManager = SessionSyncManager(
+            database: DatabaseManager(inMemory: true),
+            claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
+            codexSessionsPath: "/missing-codex-\(UUID().uuidString)",
+            codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)",
+            cursorUsageSyncer: cursorSyncer
+        )
+
+        _ = syncManager.syncAllOnce(enabledAgents: [.claude, .codex])
+
+        XCTAssertEqual(cursorSyncer.syncCount, 0)
+    }
+
+    func testRoutineSyncStreamsLineAcrossReadChunkBoundary() throws {
+        let directory = try makeTemporaryDirectory()
+        let claudeRoot = directory.appendingPathComponent("claude-projects")
+        let codexRoot = directory.appendingPathComponent("codex-sessions")
+        let codexArchiveRoot = directory.appendingPathComponent("codex-archive")
+        try FileManager.default.createDirectory(at: claudeRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexArchiveRoot, withIntermediateDirectories: true)
+        let sourceFile = claudeRoot.appendingPathComponent("large-line.jsonl")
+        let line = String(repeating: " ", count: 1_048_576) + claudeAssistantLine()
+        try line.write(to: sourceFile, atomically: true, encoding: .utf8)
+        let database = DatabaseManager(inMemory: true)
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: claudeRoot.path,
+            codexSessionsPath: codexRoot.path,
+            codexArchivedSessionsPath: codexArchiveRoot.path
+        )
+
+        let result = syncManager.syncAllOnce(enabledAgents: [.claude])
+
+        XCTAssertEqual(result.recordsSynced, 1)
+        XCTAssertEqual(database.fetchStats(app: .claude, range: .allTime).totalRequests, 1)
+        XCTAssertEqual(
+            database.getSyncState(for: sourceFile.path)?.byteOffset,
+            Int64(line.utf8.count)
+        )
+    }
+
     func testExclusiveSyncOperationsRunSerially() {
         let database = DatabaseManager(inMemory: true)
         let syncManager = SessionSyncManager(database: database)
@@ -797,6 +865,15 @@ private final class BlockingCursorUsageSyncer: CursorUsageSyncing {
     func sync() throws -> SessionSyncResult {
         entered.signal()
         release.wait()
+        return SessionSyncResult(filesSynced: 1, recordsSynced: 0)
+    }
+}
+
+private final class CountingCursorUsageSyncer: CursorUsageSyncing {
+    private(set) var syncCount = 0
+
+    func sync() throws -> SessionSyncResult {
+        syncCount += 1
         return SessionSyncResult(filesSynced: 1, recordsSynced: 0)
     }
 }

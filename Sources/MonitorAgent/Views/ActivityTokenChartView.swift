@@ -153,8 +153,10 @@ struct ActivityTokenChartView: View {
                                     .background(Color.secondary.opacity(0.14))
                                     .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                                     .position(
-                                        x: min(max(nowX, plotAreaFrame.minX + 18), plotAreaFrame.maxX - 18),
-                                        y: plotAreaFrame.minY + 7
+                                        x: nowX + 38 <= plotAreaFrame.maxX
+                                            ? nowX + 20
+                                            : nowX - 20,
+                                        y: plotAreaFrame.minY + 10
                                     )
                                     .allowsHitTesting(false)
                             }

@@ -1,5 +1,34 @@
 import Foundation
 
+// MARK: - Agent
+
+enum AgentID: String, CaseIterable, Identifiable {
+    case claude
+    case codex
+    case cursor
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .claude: return "Claude Code"
+        case .codex: return "Codex"
+        case .cursor: return "Cursor"
+        }
+    }
+
+    var appType: String { rawValue }
+
+    var appFilter: AppFilter {
+        switch self {
+        case .claude: return .claude
+        case .codex: return .codex
+        case .cursor: return .cursor
+        }
+    }
+
+}
+
 // MARK: - Filter
 
 enum AppFilter: String, CaseIterable, Identifiable {
@@ -20,20 +49,22 @@ enum AppFilter: String, CaseIterable, Identifiable {
     }
 
     func cycled(reverse: Bool = false) -> AppFilter {
-        guard let index = Self.allCases.firstIndex(of: self) else { return self }
-        let offset = reverse ? Self.allCases.count - 1 : 1
-        return Self.allCases[(index + offset) % Self.allCases.count]
+        cycled(in: Self.allCases, reverse: reverse)
     }
 
-    /// Map to db `app_type` values; nil means no filter
-    var dbValues: [String]? {
-        switch self {
-        case .all: return nil
-        case .claude: return ["claude"]
-        case .codex: return ["codex"]
-        case .cursor: return ["cursor"]
-        }
+    func cycled(in filters: [AppFilter], reverse: Bool = false) -> AppFilter {
+        guard !filters.isEmpty else { return .all }
+        guard let index = filters.firstIndex(of: self) else { return filters[0] }
+        let offset = reverse ? filters.count - 1 : 1
+        return filters[(index + offset) % filters.count]
     }
+
+    static func available(for enabledAgents: Set<AgentID>) -> [AppFilter] {
+        [.all] + AgentID.allCases
+            .filter(enabledAgents.contains)
+            .map(\.appFilter)
+    }
+
 }
 
 struct TimeBounds: Equatable {

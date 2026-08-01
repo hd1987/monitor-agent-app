@@ -220,6 +220,36 @@ final class CursorUsageServiceTests: XCTestCase {
         XCTAssertNil(database.getSyncState(for: CursorUsageService.syncStateKey))
     }
 
+    func testCancellationStopsActiveRequestBeforeDatabaseCommit() {
+        let database = DatabaseManager(inMemory: true)
+        let transport = BlockingCancellableCursorTransport()
+        let cancellation = AgentSyncCancellation(enabledAgents: Set(AgentID.allCases))
+        let service = CursorUsageService(
+            database: database,
+            authenticationReader: CursorAuthenticationStub(token: "token"),
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_785_377_000) }
+        )
+        let completed = expectation(description: "Cancelled Cursor sync completes")
+
+        DispatchQueue.global().async {
+            do {
+                _ = try service.sync(cancellation: cancellation)
+                XCTFail("Cursor sync should be cancelled")
+            } catch {
+                XCTAssertEqual(error as? CursorUsageError, .cancelled)
+            }
+            completed.fulfill()
+        }
+        wait(for: [transport.usageRequestStarted], timeout: 1)
+
+        cancellation.disableAgents(notIn: [.claude, .codex])
+
+        wait(for: [completed], timeout: 1)
+        XCTAssertEqual(database.fetchStats(app: .cursor, range: .allTime).totalRequests, 0)
+        XCTAssertNil(database.getSyncState(for: CursorUsageService.syncStateKey))
+    }
+
     private func response(statusCode: Int = 200, body: String) -> CursorHTTPResponseStub {
         CursorHTTPResponseStub(statusCode: statusCode, data: Data(body.utf8))
     }
@@ -288,5 +318,42 @@ private final class CursorTransportStub: CursorHTTPTransport {
             headerFields: nil
         )!
         return (next.data, response)
+    }
+}
+
+private final class BlockingCancellableCursorTransport: CancellableCursorHTTPTransport {
+    let usageRequestStarted = XCTestExpectation(description: "Cursor usage request started")
+
+    func send(_ request: URLRequest) throws -> (Data, HTTPURLResponse) {
+        XCTFail("CursorUsageService should use the cancellable transport path")
+        throw CursorUsageError.requestFailed
+    }
+
+    func send(
+        _ request: URLRequest,
+        isCancelled: @escaping () -> Bool
+    ) throws -> (Data, HTTPURLResponse) {
+        if request.url?.path == "/aiserver.v1.DashboardService/GetMe" {
+            return response(for: request, body: #"{"userId":42}"#)
+        }
+
+        usageRequestStarted.fulfill()
+        while !isCancelled() {
+            Thread.sleep(forTimeInterval: 0.001)
+        }
+        throw CursorUsageError.cancelled
+    }
+
+    private func response(
+        for request: URLRequest,
+        body: String
+    ) -> (Data, HTTPURLResponse) {
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        return (Data(body.utf8), response)
     }
 }

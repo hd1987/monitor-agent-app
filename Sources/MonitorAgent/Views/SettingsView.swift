@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 // MARK: - Settings Category
@@ -55,9 +56,9 @@ enum SettingsWindowLayout {
 
 enum UsageDataRebuildCopy {
     static let buttonTitle = "Rebuild Local Usage Data"
-    static let description = "Rebuilds Monitor Agent's local usage database from Claude Code and Codex session logs. Original session logs and settings will not be changed."
+    static let description = "Rebuilds all supported usage sources, regardless of the Monitored Agents selection. Original source data and settings will not be changed."
     static let confirmationTitle = "Rebuild Local Usage Data?"
-    static let confirmationMessage = "Monitor Agent will rebuild its local usage database from your Claude Code and Codex session logs. Your original logs and settings will not be changed.\n\nClaude Code and Codex can continue running during the rebuild. New activity will be synchronized before completion.\n\nThe current database will remain in use unless the rebuild completes successfully."
+    static let confirmationMessage = "Monitor Agent will rebuild all supported usage sources, including sources disabled under Monitored Agents. Your original source data and settings will not be changed.\n\nClaude Code, Codex, and Cursor can continue running during the rebuild. New activity will be synchronized before completion.\n\nThe current database will remain in use unless the rebuild completes successfully."
     static let runningMessage = "Rebuilding local usage data..."
     static let successTitle = "Local usage data rebuilt successfully."
     static let failureTitle = "Rebuild failed. Your existing usage data was not changed."
@@ -77,6 +78,7 @@ struct SettingsView: View {
     // General drafts
     @State private var draftTheme: Theme = .system
     @State private var draftRefreshInterval: RefreshInterval = .defaultValue
+    @State private var draftEnabledAgents = Set(AgentID.allCases)
     @State private var draftGlobalShortcut: GlobalShortcut?
     @State private var draftPanelShortcuts: [String: GlobalShortcut?] = [:]
     @State private var draftLaunchAtLogin: Bool = false
@@ -229,6 +231,7 @@ struct SettingsView: View {
             GeneralSettingsView(
                 draftTheme: $draftTheme,
                 draftRefreshInterval: $draftRefreshInterval,
+                draftEnabledAgents: $draftEnabledAgents,
                 draftLaunchAtLogin: $draftLaunchAtLogin,
                 draftClaudeExpirationDate: $draftClaudeExpirationDate,
                 draftCodexExpirationDate: $draftCodexExpirationDate
@@ -285,6 +288,7 @@ struct SettingsView: View {
         case .general:
             draftTheme = themeManager.theme
             draftRefreshInterval = RefreshSettings.shared.interval
+            draftEnabledAgents = store.enabledAgents
             draftLaunchAtLogin = LaunchAtLoginController.shared.launchAtLogin
             draftClaudeExpirationDate = QuotaSettings.shared.claudeExpirationDate
             draftCodexExpirationDate = QuotaSettings.shared.codexExpirationDate
@@ -332,6 +336,7 @@ struct SettingsView: View {
             LaunchAtLoginController.shared.launchAtLogin = draftLaunchAtLogin
             QuotaSettings.shared.claudeExpirationDate = draftClaudeExpirationDate
             QuotaSettings.shared.codexExpirationDate = draftCodexExpirationDate
+            store.updateEnabledAgents(draftEnabledAgents)
             RefreshSettings.shared.interval = draftRefreshInterval
             store.quotaProviderSettingsDidChange()
 
@@ -495,6 +500,7 @@ struct GeneralSettingsView: View {
 
     @Binding var draftTheme: Theme
     @Binding var draftRefreshInterval: RefreshInterval
+    @Binding var draftEnabledAgents: Set<AgentID>
     @Binding var draftLaunchAtLogin: Bool
     @Binding var draftClaudeExpirationDate: Date?
     @Binding var draftCodexExpirationDate: Date?
@@ -543,10 +549,21 @@ struct GeneralSettingsView: View {
                 }
             }
 
+            Section {
+                SettingsRow(
+                    title: MonitoringSettingsCopy.title,
+                    description: MonitoringSettingsCopy.description
+                ) {
+                    AgentMultiSelectControl(selection: $draftEnabledAgents)
+                        .frame(width: AgentMultiSelectControlLayout.width)
+                }
+            }
+
             Section(QuotaSettingsCopy.title) {
                 QuotaSettingsGroup(
                     claudeExpirationDate: $draftClaudeExpirationDate,
-                    codexExpirationDate: $draftCodexExpirationDate
+                    codexExpirationDate: $draftCodexExpirationDate,
+                    enabledAgents: draftEnabledAgents
                 )
             }
 
@@ -740,6 +757,189 @@ enum RefreshSettingsCopy {
     static let description = "Refresh usage data and subscription quota while the panel is open. \"Never\" refreshes when opened, at most once per minute."
 }
 
+enum MonitoringSettingsCopy {
+    static let title = "Monitored Agents"
+    static let description = "Choose which Agents MonitorAgent collects and displays. Select any combination."
+}
+
+enum AgentMultiSelectControlLayout {
+    static let width: CGFloat = 300
+    static let itemHeight: CGFloat = 28
+    static let itemSpacing: CGFloat = 6
+    static let itemCornerRadius: CGFloat = 7
+
+    static func trailingOffset(containerWidth: CGFloat, contentWidth: CGFloat) -> CGFloat {
+        max(0, containerWidth - contentWidth)
+    }
+
+    static func wrappingLayout(
+        itemSizes: [CGSize],
+        proposedWidth: CGFloat?,
+        spacing: CGFloat = itemSpacing
+    ) -> AgentWrappingLayoutResult {
+        let availableWidth = proposedWidth ?? .infinity
+        var points: [CGPoint] = []
+        var position = CGPoint.zero
+        var rowHeight: CGFloat = 0
+        var contentWidth: CGFloat = 0
+        var rowStartIndex = 0
+
+        func alignRowTrailing(startingAt startIndex: Int, rowWidth: CGFloat) {
+            guard availableWidth.isFinite, startIndex < points.count else { return }
+            let offset = trailingOffset(
+                containerWidth: availableWidth,
+                contentWidth: rowWidth
+            )
+            for index in startIndex..<points.count {
+                points[index].x += offset
+            }
+        }
+
+        for size in itemSizes {
+            if position.x > 0, position.x + size.width > availableWidth {
+                alignRowTrailing(
+                    startingAt: rowStartIndex,
+                    rowWidth: position.x - spacing
+                )
+                rowStartIndex = points.count
+                position.x = 0
+                position.y += rowHeight + spacing
+                rowHeight = 0
+            }
+            points.append(position)
+            position.x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+            contentWidth = max(contentWidth, position.x - spacing)
+        }
+
+        alignRowTrailing(
+            startingAt: rowStartIndex,
+            rowWidth: max(0, position.x - spacing)
+        )
+
+        let contentHeight = itemSizes.isEmpty ? 0 : position.y + rowHeight
+        return AgentWrappingLayoutResult(
+            size: CGSize(
+                width: proposedWidth ?? contentWidth,
+                height: contentHeight
+            ),
+            points: points
+        )
+    }
+}
+
+struct AgentWrappingLayoutResult: Equatable {
+    let size: CGSize
+    let points: [CGPoint]
+}
+
+struct AgentMultiSelectControl: View {
+    @Binding var selection: Set<AgentID>
+
+    var body: some View {
+        AgentWrappingLayout(spacing: AgentMultiSelectControlLayout.itemSpacing) {
+            ForEach(AgentID.allCases) { agent in
+                let isSelected = selection.contains(agent)
+                Button {
+                    selection = Self.toggling(agent, in: selection)
+                } label: {
+                    HStack(spacing: 5) {
+                        AppIconView(icon: agent.appFilter.appIcon, size: 13)
+                        Text(agent.displayName)
+                            .font(.system(size: 11, weight: .medium))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                    .foregroundStyle(
+                        isSelected
+                            ? UtilityWindowDesign.selectedControlText
+                            : Color.primary
+                    )
+                    .padding(.horizontal, 10)
+                    .frame(height: AgentMultiSelectControlLayout.itemHeight)
+                    .background(isSelected ? Color.accentColor : UtilityWindowDesign.groupedSurfaceFill)
+                    .clipShape(
+                        RoundedRectangle(
+                            cornerRadius: AgentMultiSelectControlLayout.itemCornerRadius,
+                            style: .continuous
+                        )
+                    )
+                    .overlay {
+                        if !isSelected {
+                            RoundedRectangle(
+                                cornerRadius: AgentMultiSelectControlLayout.itemCornerRadius,
+                                style: .continuous
+                            )
+                            .stroke(
+                                Color(nsColor: .separatorColor).opacity(0.28),
+                                lineWidth: 0.5
+                            )
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(UtilityWindowPressButtonStyle())
+                .help(agent.displayName)
+                .accessibilityLabel(agent.displayName)
+                .accessibilityValue(isSelected ? "Selected" : "Not selected")
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
+        .frame(width: AgentMultiSelectControlLayout.width, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(MonitoringSettingsCopy.title)
+    }
+
+    static func toggling(_ agent: AgentID, in selection: Set<AgentID>) -> Set<AgentID> {
+        var updatedSelection = selection
+        if updatedSelection.contains(agent) {
+            updatedSelection.remove(agent)
+        } else {
+            updatedSelection.insert(agent)
+        }
+        return updatedSelection
+    }
+}
+
+private struct AgentWrappingLayout: Layout {
+    let spacing: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        layout(subviews: subviews, width: proposal.width).size
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        let result = layout(subviews: subviews, width: bounds.width)
+        for (index, point) in result.points.enumerated() {
+            subviews[index].place(
+                at: CGPoint(x: bounds.minX + point.x, y: bounds.minY + point.y),
+                anchor: .topLeading,
+                proposal: .unspecified
+            )
+        }
+    }
+
+    private func layout(
+        subviews: Subviews,
+        width proposedWidth: CGFloat?
+    ) -> AgentWrappingLayoutResult {
+        AgentMultiSelectControlLayout.wrappingLayout(
+            itemSizes: subviews.map { $0.sizeThatFits(.unspecified) },
+            proposedWidth: proposedWidth,
+            spacing: spacing
+        )
+    }
+}
+
 enum ExpirationDateControlStyle {
     static let width: CGFloat = 140
     static let height: CGFloat = 28
@@ -750,19 +950,22 @@ enum ExpirationDateControlStyle {
 private struct QuotaSettingsGroup: View {
     @Binding var claudeExpirationDate: Date?
     @Binding var codexExpirationDate: Date?
+    let enabledAgents: Set<AgentID>
 
     var body: some View {
         VStack(spacing: 0) {
             quotaRow(
                 title: QuotaSettingsCopy.claudeTitle,
                 description: QuotaSettingsCopy.claudeDescription,
-                expirationDate: $claudeExpirationDate
+                expirationDate: $claudeExpirationDate,
+                isEnabled: enabledAgents.contains(.claude)
             )
             Divider()
             quotaRow(
                 title: QuotaSettingsCopy.codexTitle,
                 description: QuotaSettingsCopy.codexDescription,
-                expirationDate: $codexExpirationDate
+                expirationDate: $codexExpirationDate,
+                isEnabled: enabledAgents.contains(.codex)
             )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -771,14 +974,22 @@ private struct QuotaSettingsGroup: View {
     private func quotaRow(
         title: String,
         description: String,
-        expirationDate: Binding<Date?>
+        expirationDate: Binding<Date?>,
+        isEnabled: Bool
     ) -> some View {
         HStack(spacing: 16) {
-            settingLabel(title: title, description: description)
+            settingLabel(
+                title: title,
+                description: isEnabled
+                    ? description
+                    : "Enable \(title) monitoring to configure subscription quota."
+            )
             Spacer(minLength: 16)
             ExpirationDateControl(expirationDate: expirationDate)
+                .disabled(!isEnabled)
         }
         .padding(.vertical, 8)
+        .opacity(isEnabled ? 1 : 0.55)
     }
 
     private func settingLabel(title: String, description: String) -> some View {

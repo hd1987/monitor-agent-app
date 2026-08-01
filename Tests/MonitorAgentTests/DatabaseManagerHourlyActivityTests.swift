@@ -21,6 +21,39 @@ final class DatabaseManagerHourlyActivityTests: XCTestCase {
         XCTAssertEqual(usage[10], HourlyTokenUsage(hour: 10, requestCount: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0))
     }
 
+    func testQueriesExcludeCachedRecordsFromDisabledAgents() {
+        let database = DatabaseManager(inMemory: true)
+        let day = localDate(year: 2026, month: 6, day: 20)
+        let olderDay = localDate(year: 2025, month: 6, day: 20)
+        database.insertRecords([
+            record(id: "claude", app: "claude", input: 10, output: 1, cacheRead: 0, createdAt: day, hour: 9),
+            record(id: "codex", app: "codex", input: 20, output: 2, cacheRead: 0, createdAt: olderDay, hour: 10),
+            record(id: "cursor", app: "cursor", input: 30, output: 3, cacheRead: 0, createdAt: day, hour: 11),
+        ])
+
+        let enabledAgents: Set<AgentID> = [.claude]
+        let stats = database.fetchStats(
+            app: .all,
+            range: .allTime,
+            enabledAgents: enabledAgents
+        )
+        let hourly = database.fetchHourlyTokenUsage(
+            app: .all,
+            date: "2026-06-20",
+            enabledAgents: enabledAgents
+        )
+
+        XCTAssertEqual(stats.totalRequests, 1)
+        XCTAssertEqual(stats.inputTokens, 10)
+        XCTAssertEqual(hourly[9].requestCount, 1)
+        XCTAssertEqual(hourly[11].requestCount, 0)
+        XCTAssertEqual(database.availableYears(enabledAgents: enabledAgents), [2026])
+        XCTAssertEqual(
+            database.fetchStats(app: .all, range: .allTime, enabledAgents: []).totalRequests,
+            0
+        )
+    }
+
     private func record(
         id: String,
         app: String,

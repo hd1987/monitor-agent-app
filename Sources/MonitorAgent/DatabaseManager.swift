@@ -337,15 +337,54 @@ final class DatabaseManager {
 
     // MARK: - Query Helpers
 
-    private func whereClause(app: AppFilter, range: TimeRange) -> (sql: String, args: [any DatabaseValueConvertible]) {
+    private func appValues(
+        for app: AppFilter,
+        enabledAgents: Set<AgentID>
+    ) -> [String] {
+        switch app {
+        case .all:
+            return AgentID.allCases
+                .filter(enabledAgents.contains)
+                .map(\.appType)
+        case .claude:
+            return enabledAgents.contains(.claude) ? [AgentID.claude.appType] : []
+        case .codex:
+            return enabledAgents.contains(.codex) ? [AgentID.codex.appType] : []
+        case .cursor:
+            return enabledAgents.contains(.cursor) ? [AgentID.cursor.appType] : []
+        }
+    }
+
+    private func appendAppCondition(
+        app: AppFilter,
+        enabledAgents: Set<AgentID>,
+        conditions: inout [String],
+        args: inout [any DatabaseValueConvertible]
+    ) {
+        let values = appValues(for: app, enabledAgents: enabledAgents)
+        guard !values.isEmpty else {
+            conditions.append("0")
+            return
+        }
+        let placeholders = values.map { _ in "?" }.joined(separator: ", ")
+        conditions.append("app_type IN (\(placeholders))")
+        args.append(contentsOf: values)
+    }
+
+    private func whereClause(
+        app: AppFilter,
+        range: TimeRange,
+        enabledAgents: Set<AgentID>
+    ) -> (sql: String, args: [any DatabaseValueConvertible]) {
         var conditions: [String] = []
         var args: [any DatabaseValueConvertible] = []
 
-        if let dbValues = app.dbValues {
-            let placeholders = dbValues.map { _ in "?" }.joined(separator: ", ")
-            conditions.append("app_type IN (\(placeholders))")
-            args.append(contentsOf: dbValues)
-        }
+        appendAppCondition(
+            app: app,
+            enabledAgents: enabledAgents,
+            conditions: &conditions,
+            args: &args
+        )
 
         let bounds = range.bounds()
         if let start = bounds.start {
@@ -363,11 +402,15 @@ final class DatabaseManager {
 
     // MARK: - Queries
 
-    func fetchStats(app: AppFilter, range: TimeRange) -> UsageStats {
+    func fetchStats(
+        app: AppFilter,
+        range: TimeRange,
+        enabledAgents: Set<AgentID> = Set(AgentID.allCases)
+    ) -> UsageStats {
         lifecycleLock.lock()
         defer { lifecycleLock.unlock() }
         guard let db = dbQueue else { return UsageStats() }
-        let w = whereClause(app: app, range: range)
+        let w = whereClause(app: app, range: range, enabledAgents: enabledAgents)
 
         return (try? db.read { db in
             let row = try Row.fetchOne(db, sql: """
@@ -394,7 +437,12 @@ final class DatabaseManager {
     }
 
     /// Fetch heatmap data for a given date range
-    func fetchHeatmap(app: AppFilter, from startDate: Date, to endDate: Date) -> [DayActivity] {
+    func fetchHeatmap(
+        app: AppFilter,
+        from startDate: Date,
+        to endDate: Date,
+        enabledAgents: Set<AgentID> = Set(AgentID.allCases)
+    ) -> [DayActivity] {
         lifecycleLock.lock()
         defer { lifecycleLock.unlock() }
         guard let db = dbQueue else { return [] }
@@ -405,11 +453,12 @@ final class DatabaseManager {
         var conditions = ["created_at >= ?", "created_at < ?"]
         var args: [any DatabaseValueConvertible] = [startTs, endTs]
 
-        if let dbValues = app.dbValues {
-            let placeholders = dbValues.map { _ in "?" }.joined(separator: ", ")
-            conditions.append("app_type IN (\(placeholders))")
-            args.append(contentsOf: dbValues)
-        }
+        appendAppCondition(
+            app: app,
+            enabledAgents: enabledAgents,
+            conditions: &conditions,
+            args: &args
+        )
 
         let whereSQL = "WHERE " + conditions.joined(separator: " AND ")
 
@@ -423,7 +472,11 @@ final class DatabaseManager {
         }) ?? []
     }
 
-    func fetchHourlyTokenUsage(app: AppFilter, date: String) -> [HourlyTokenUsage] {
+    func fetchHourlyTokenUsage(
+        app: AppFilter,
+        date: String,
+        enabledAgents: Set<AgentID> = Set(AgentID.allCases)
+    ) -> [HourlyTokenUsage] {
         lifecycleLock.lock()
         defer { lifecycleLock.unlock() }
         guard let db = dbQueue else { return [] }
@@ -445,11 +498,12 @@ final class DatabaseManager {
             Int(endDate.timeIntervalSince1970),
         ]
 
-        if let dbValues = app.dbValues {
-            let placeholders = dbValues.map { _ in "?" }.joined(separator: ", ")
-            conditions.append("app_type IN (\(placeholders))")
-            args.append(contentsOf: dbValues)
-        }
+        appendAppCondition(
+            app: app,
+            enabledAgents: enabledAgents,
+            conditions: &conditions,
+            args: &args
+        )
 
         let whereSQL = "WHERE " + conditions.joined(separator: " AND ")
         var values = (0..<24).map {
@@ -488,11 +542,15 @@ final class DatabaseManager {
         return values
     }
 
-    func fetchModelDistribution(app: AppFilter, range: TimeRange) -> [ModelShare] {
+    func fetchModelDistribution(
+        app: AppFilter,
+        range: TimeRange,
+        enabledAgents: Set<AgentID> = Set(AgentID.allCases)
+    ) -> [ModelShare] {
         lifecycleLock.lock()
         defer { lifecycleLock.unlock() }
         guard let db = dbQueue else { return [] }
-        let w = whereClause(app: app, range: range)
+        let w = whereClause(app: app, range: range, enabledAgents: enabledAgents)
 
         return (try? db.read { db in
             let rows = try Row.fetchAll(db, sql: """
@@ -519,15 +577,24 @@ final class DatabaseManager {
         }) ?? []
     }
 
-    func availableYears() -> [Int] {
+    func availableYears(
+        enabledAgents: Set<AgentID> = Set(AgentID.allCases)
+    ) -> [Int] {
         lifecycleLock.lock()
         defer { lifecycleLock.unlock() }
         guard let db = dbQueue else { return [] }
+        let values = AgentID.allCases
+            .filter(enabledAgents.contains)
+            .map(\.appType)
+        guard !values.isEmpty else { return [] }
+        let placeholders = values.map { _ in "?" }.joined(separator: ", ")
         return (try? db.read { db in
             let rows = try Row.fetchAll(db, sql: """
                 SELECT DISTINCT CAST(strftime('%Y', created_at, 'unixepoch', 'localtime') AS INTEGER) AS yr
-                FROM request_logs ORDER BY yr DESC
-                """)
+                FROM request_logs
+                WHERE app_type IN (\(placeholders))
+                ORDER BY yr DESC
+                """, arguments: StatementArguments(values))
             return rows.map { $0["yr"] as Int }
         }) ?? []
     }
