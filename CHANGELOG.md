@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-08-01
+
 ### Fixed
 - Route the update window's native close action through cancellation while blocking closure during installation
 - Prevent overlapping update operations and fail visibly when unique archive staging fails
