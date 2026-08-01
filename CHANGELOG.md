@@ -6,6 +6,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-01
+
+### Added
+- Add a Monitored Agents setting for enabling or disabling Claude Code, Codex, and Cursor across routine refreshes, panel filters, aggregates, and subscription quota requests while preserving cached data
+
+### Fixed
+- Place the Activity hourly chart's `Now` label beside its dashed current-hour guide
+
 ## [0.8.4] - 2026-08-01
 
 ### Changed
