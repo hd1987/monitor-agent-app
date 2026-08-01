@@ -6,6 +6,7 @@ enum ActivityTokenChartLayout {
     static let chartHeight: CGFloat = 128
     static let defaultTooltipWidth: CGFloat = 120
     static let chartTooltipWidth: CGFloat = 150
+    static let chartTooltipGap: CGFloat = 8
     static let monthLabelWidth: CGFloat = 24
     static let monthLabelHeight: CGFloat = 11
     static let hourAxisMarkInterval = 3
@@ -38,8 +39,17 @@ enum ActivityTokenChartLayout {
         return String(format: "%02d:00-%02d:00", startHour, endHour)
     }
 
-    static func tooltipXOffset(anchorX: CGFloat, tooltipWidth: CGFloat, availableWidth: CGFloat) -> CGFloat {
-        let proposedOffset = anchorX - tooltipWidth / 2
+    static func tooltipXOffset(
+        anchorX: CGFloat,
+        tooltipWidth: CGFloat,
+        availableWidth: CGFloat,
+        gap: CGFloat = chartTooltipGap
+    ) -> CGFloat {
+        let rightOffset = anchorX + gap
+        let leftOffset = anchorX - gap - tooltipWidth
+        let proposedOffset = leftOffset >= 0
+            ? leftOffset
+            : rightOffset
         let maxOffset = max(0, availableWidth - tooltipWidth)
         return min(max(0, proposedOffset), maxOffset)
     }
@@ -76,8 +86,7 @@ enum ActivityTokenChartLayout {
         }
 
         let hour = calendar.component(.hour, from: now)
-        let minute = calendar.component(.minute, from: now)
-        return min(Double(lastChartHour) + 0.99, Double(hour) + Double(minute) / 60)
+        return Double(min(max(0, hour), lastChartHour))
     }
 
     static func heatmapThresholds(for counts: [Int]) -> [Int] {

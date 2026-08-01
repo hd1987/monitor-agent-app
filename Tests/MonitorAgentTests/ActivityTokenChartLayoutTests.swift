@@ -36,13 +36,24 @@ final class ActivityTokenChartLayoutTests: XCTestCase {
         XCTAssertEqual(ActivityTokenChartLayout.hourRangeLabel(for: 23), "23:00-00:00")
     }
 
-    func testTooltipOffsetStaysInsideRightEdge() {
+    func testTooltipFlipsToRightOfGuideNearLeftEdge() {
+        let offset = ActivityTokenChartLayout.tooltipXOffset(
+            anchorX: 100,
+            tooltipWidth: 150,
+            availableWidth: 588
+        )
+
+        XCTAssertEqual(offset, 108)
+    }
+
+    func testTooltipAppearsToLeftOfGuideWhenSpaceAllows() {
         let offset = ActivityTokenChartLayout.tooltipXOffset(
             anchorX: 588,
             tooltipWidth: 160,
             availableWidth: 588
         )
 
+        XCTAssertEqual(offset, 420)
         XCTAssertLessThanOrEqual(offset + 160, 588)
     }
 
@@ -110,7 +121,7 @@ final class ActivityTokenChartLayoutTests: XCTestCase {
         XCTAssertEqual(visible.map(\.hour), Array(0...23))
     }
 
-    func testCurrentHourPositionIncludesMinutesForToday() {
+    func testCurrentHourPositionAlignsWithFinalHourlyBucketForToday() {
         let calendar = Calendar(identifier: .gregorian)
         let now = calendar.date(from: DateComponents(
             year: 2026,
@@ -126,7 +137,7 @@ final class ActivityTokenChartLayoutTests: XCTestCase {
                 now: now,
                 calendar: calendar
             ),
-            10.5
+            10
         )
         XCTAssertNil(
             ActivityTokenChartLayout.currentHourPosition(

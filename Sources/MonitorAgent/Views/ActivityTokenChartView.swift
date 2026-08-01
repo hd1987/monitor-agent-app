@@ -49,6 +49,16 @@ struct ActivityTokenChartView: View {
         return visibleUsage.first { $0.hour == hoveredHour }
     }
 
+    private var hoveredPoints: [TokenSeriesPoint] {
+        guard let item = hoveredUsage else { return [] }
+        return [
+            TokenSeriesPoint(metric: "Input Tokens", hour: item.hour, value: Double(item.inputTokens)),
+            TokenSeriesPoint(metric: "Output Tokens", hour: item.hour, value: Double(item.outputTokens)),
+            TokenSeriesPoint(metric: "Cache Read", hour: item.hour, value: Double(item.cacheReadTokens)),
+            TokenSeriesPoint(metric: "Cache Creation", hour: item.hour, value: Double(item.cacheCreationTokens)),
+        ].filter { !hiddenMetrics.contains($0.metric) }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -59,12 +69,22 @@ struct ActivityTokenChartView: View {
             }
 
             Chart(points) { point in
+                AreaMark(
+                    x: .value("Hour", point.hour),
+                    yStart: .value("Baseline", 0),
+                    yEnd: .value("Tokens", point.value)
+                )
+                .interpolationMethod(.catmullRom)
+                .foregroundStyle(by: .value("Metric", point.metric))
+                .opacity(0.12)
+
                 LineMark(
                     x: .value("Hour", point.hour),
                     y: .value("Tokens", point.value)
                 )
                 .interpolationMethod(.catmullRom)
                 .foregroundStyle(by: .value("Metric", point.metric))
+                .lineStyle(StrokeStyle(lineWidth: 1.5))
             }
             .chartForegroundStyleScale([
                 "Input Tokens": ActivityTokenPalette.input,
@@ -76,9 +96,7 @@ struct ActivityTokenChartView: View {
             .chartYScale(domain: 0...maxValue)
             .chartXAxis {
                 AxisMarks(values: ActivityTokenChartLayout.hourAxisMarks) { value in
-                    AxisGridLine()
-                    AxisTick()
-                    AxisValueLabel {
+                    AxisValueLabel(anchor: .top) {
                         if let hour = value.as(Int.self) {
                             Text(ActivityTokenChartLayout.hourAxisLabel(for: hour))
                                 .foregroundStyle(theme.panelSecondaryForeground)
@@ -119,18 +137,24 @@ struct ActivityTokenChartView: View {
                                     )
                                     .allowsHitTesting(false)
 
-                                Rectangle()
-                                    .fill(Color.secondary.opacity(0.45))
-                                    .frame(width: 1, height: plotAreaFrame.height)
-                                    .position(x: nowX, y: plotAreaFrame.midY)
+                                verticalGuide(
+                                    from: plotAreaFrame.minY,
+                                    to: plotAreaFrame.maxY,
+                                    x: nowX,
+                                    color: Color.secondary.opacity(0.45)
+                                )
                                     .allowsHitTesting(false)
 
                                 Text("Now")
                                     .font(.system(size: 8, weight: .medium))
-                                    .foregroundStyle(theme.panelSecondaryForeground)
+                                    .foregroundStyle(.primary.opacity(0.82))
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(Color.secondary.opacity(0.14))
+                                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                                     .position(
-                                        x: min(nowX + 14, plotAreaFrame.maxX - 14),
-                                        y: plotAreaFrame.minY + 6
+                                        x: min(max(nowX, plotAreaFrame.minX + 18), plotAreaFrame.maxX - 18),
+                                        y: plotAreaFrame.minY + 7
                                     )
                                     .allowsHitTesting(false)
                             }
@@ -155,17 +179,22 @@ struct ActivityTokenChartView: View {
                                     availableWidth: geometry.size.width
                                 )
 
-                                Rectangle()
-                                    .fill(Color.secondary.opacity(0.35))
-                                    .frame(width: 1, height: plotAreaFrame.height)
-                                    .position(x: anchorX, y: plotAreaFrame.midY)
-                                    .allowsHitTesting(false)
+                                ForEach(hoveredPoints) { point in
+                                    if let plotY = proxy.position(forY: point.value) {
+                                        chartIntersectionMarker(color: metricColor(for: point.metric))
+                                            .position(
+                                                x: anchorX,
+                                                y: plotAreaFrame.minY + plotY
+                                            )
+                                            .allowsHitTesting(false)
+                                    }
+                                }
 
                                 chartTooltip(for: hoveredUsage)
                                     .frame(width: ActivityTokenChartLayout.chartTooltipWidth, alignment: .leading)
                                     .position(
                                         x: tooltipOffset + ActivityTokenChartLayout.chartTooltipWidth / 2,
-                                        y: plotAreaFrame.minY + 34
+                                        y: plotAreaFrame.minY + 47
                                     )
                                     .allowsHitTesting(false)
                             }
@@ -244,6 +273,15 @@ struct ActivityTokenChartView: View {
             Text(ActivityTokenChartLayout.hourRangeLabel(for: item.hour))
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(theme.tooltipForeground)
+
+            Text("Hourly breakdown")
+                .font(.system(size: 9))
+                .foregroundStyle(theme.tooltipForeground.opacity(0.62))
+
+            Divider()
+                .overlay(theme.tooltipForeground.opacity(0.14))
+                .padding(.vertical, 1)
+
             requestRow(value: item.requestCount)
             tokenRow(label: "Input", color: ActivityTokenPalette.input, value: item.inputTokens)
             tokenRow(label: "Output", color: ActivityTokenPalette.output, value: item.outputTokens)
@@ -253,6 +291,38 @@ struct ActivityTokenChartView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .mainPanelTooltipSurface()
+    }
+
+    private func verticalGuide(from minY: CGFloat, to maxY: CGFloat, x: CGFloat, color: Color) -> some View {
+        Path { path in
+            path.move(to: CGPoint(x: x, y: minY))
+            path.addLine(to: CGPoint(x: x, y: maxY))
+        }
+        .stroke(color, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+    }
+
+    private func chartIntersectionMarker(color: Color) -> some View {
+        ZStack {
+            Circle()
+                .fill(color.opacity(0.16))
+                .frame(width: 16, height: 16)
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+                .overlay {
+                    Circle()
+                        .stroke(Color.white.opacity(0.95), lineWidth: 1.25)
+                }
+        }
+    }
+
+    private func metricColor(for metric: String) -> Color {
+        switch metric {
+        case "Input Tokens": ActivityTokenPalette.input
+        case "Output Tokens": ActivityTokenPalette.output
+        case "Cache Read": ActivityTokenPalette.cacheRead
+        default: ActivityTokenPalette.cacheCreation
+        }
     }
 
     private func requestRow(value: Int) -> some View {
