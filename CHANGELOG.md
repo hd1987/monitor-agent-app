@@ -6,6 +6,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Fixed
+- Prevent overlapping update operations and fail visibly when unique archive staging fails
+- Prevent stale hourly Activity loads from overwriting results after the app filter changes
+- Ignore Codex token events without per-turn usage instead of recording cumulative totals
+- Build release artifacts and metadata from the exact release tag
+- Correct Cursor, refresh lifecycle, shortcut, and database-path documentation
+
 ## [0.8.2] - 2026-07-31
 
 ### Fixed

@@ -2,6 +2,46 @@ import XCTest
 @testable import MonitorAgent
 
 final class UpdateCheckMessageTests: XCTestCase {
+    func testUpdateDownloadStagerUsesUniqueDestinationAndMovesDownloadedFile() throws {
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: directory) }
+
+        let source = directory.appendingPathComponent("download.tmp")
+        let contents = Data("archive".utf8)
+        try contents.write(to: source)
+        let identifier = UUID(uuidString: "12345678-1234-1234-1234-123456789ABC")!
+
+        let destination = try UpdateDownloadStager.stage(
+            downloadedFile: source,
+            in: directory,
+            fileManager: fileManager,
+            identifier: identifier
+        )
+
+        XCTAssertEqual(destination.lastPathComponent, "MonitorAgent-update-12345678-1234-1234-1234-123456789ABC.zip")
+        XCTAssertFalse(fileManager.fileExists(atPath: source.path))
+        XCTAssertEqual(try Data(contentsOf: destination), contents)
+    }
+
+    func testUpdateDownloadStagerThrowsWhenDownloadedFileIsMissing() throws {
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: directory) }
+
+        XCTAssertThrowsError(
+            try UpdateDownloadStager.stage(
+                downloadedFile: directory.appendingPathComponent("missing.tmp"),
+                in: directory,
+                fileManager: fileManager
+            )
+        )
+    }
+
     func testNewVersionDialogStateSeparatesMetadataAndReleaseNotes() {
         let state = UpdateCheckDialogState.newVersion(
             tagName: "v0.2.16",

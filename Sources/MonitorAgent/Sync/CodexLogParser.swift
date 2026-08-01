@@ -76,24 +76,13 @@ enum CodexLogParser {
             if totalIn == context.lastTotalIn && totalOut == context.lastTotalOut {
                 return nil
             }
-            context.lastTotalIn = totalIn
-            context.lastTotalOut = totalOut
-            context.turnCount += 1
 
-            // Extract per-turn usage from last_token_usage if available, else derive delta
-            let rawInputTokens: Int
-            let outputTokens: Int
-            let cacheRead: Int
-
-            if let lastUsage = info["last_token_usage"] as? [String: Any] {
-                rawInputTokens = lastUsage["input_tokens"] as? Int ?? 0
-                outputTokens = lastUsage["output_tokens"] as? Int ?? 0
-                cacheRead = lastUsage["cached_input_tokens"] as? Int ?? 0
-            } else {
-                rawInputTokens = totalIn
-                outputTokens = totalOut
-                cacheRead = totalUsage["cached_input_tokens"] as? Int ?? 0
+            guard let lastUsage = info["last_token_usage"] as? [String: Any] else {
+                return nil
             }
+            let rawInputTokens = lastUsage["input_tokens"] as? Int ?? 0
+            let outputTokens = lastUsage["output_tokens"] as? Int ?? 0
+            let cacheRead = lastUsage["cached_input_tokens"] as? Int ?? 0
             let inputTokens = max(rawInputTokens - cacheRead, 0)
 
             guard let timestamp = json["timestamp"] as? String,
@@ -102,8 +91,9 @@ enum CodexLogParser {
             }
 
             let sid = context.sessionId ?? "unknown"
-            return ParsedRecord(
-                requestId: "codex:\(sid):\(context.turnCount)",
+            let nextTurnCount = context.turnCount + 1
+            let record = ParsedRecord(
+                requestId: "codex:\(sid):\(nextTurnCount)",
                 appType: "codex",
                 model: context.currentModel,
                 inputTokens: inputTokens,
@@ -113,6 +103,10 @@ enum CodexLogParser {
                 sessionId: sid,
                 createdAt: createdAt
             )
+            context.lastTotalIn = totalIn
+            context.lastTotalOut = totalOut
+            context.turnCount = nextTurnCount
+            return record
 
         default:
             return nil
