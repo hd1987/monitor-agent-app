@@ -6,6 +6,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-02
+
+### Added
+- Let an already-open Activity detail follow multi-day filters, aggregating one to three days by hour, up to 90 days by day, up to 540 days by week, and longer history by month while closed details stay closed
+
+### Changed
+- Widen the multi-day Activity tooltip so its date range stays on one line
+- Show nine evenly distributed X-axis labels for non-hourly Activity ranges with at least nine aggregate points
+- Avoid repeating the date before the end time in multi-day hourly Activity tooltips
+- Show only evenly distributed hour labels on multi-day hourly Activity X-axes
+- Use six-hour ticks for two-day Activity ranges and eight-hour ticks for three-day ranges, including the final midnight boundary only after the range completes
+- Place the Activity chart type immediately after its top-left date title
+- Remove the redundant aggregation-type subtitle from Activity tooltips
+
+### Fixed
+- Reuse one time boundary for Activity range filtering and aggregation
+- Avoid duplicate Activity detail queries after date-filter changes
+- Clamp partial weekly Activity tooltip dates to the selected range
+
 ## [0.9.0] - 2026-08-01
 
 ### Added

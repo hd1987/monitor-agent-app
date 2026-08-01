@@ -245,15 +245,7 @@ struct FilterBar: View {
     private func presetButton(for range: TimeRange) -> some View {
         Button {
             withTransaction(Transaction(animation: nil)) {
-                if range == .today {
-                    if store.selectedActivityDate != nil {
-                        store.selectActivityDate(Date())
-                    } else {
-                        store.setTimeRangeFromFilter(.today)
-                    }
-                } else {
-                    store.setTimeRangeFromFilter(range)
-                }
+                store.setTimeRangeFromFilter(range)
                 calendarSelection = CalendarRangeSelection()
             }
         } label: {
@@ -299,19 +291,14 @@ struct FilterBar: View {
     }
 
     private func selectCalendarDate(_ date: Date) {
-        let keepsActivityChartOpen = store.selectedActivityDate != nil
         calendarSelection.select(date)
         guard let start = calendarSelection.start, let end = calendarSelection.end else { return }
         let calendar = Calendar.current
         withTransaction(Transaction(animation: nil)) {
             if calendar.isDate(start, inSameDayAs: end) {
-                if keepsActivityChartOpen {
-                    store.selectActivityDate(start, calendar: calendar)
-                } else {
-                    store.setTimeRangeFromFilter(
-                        TimeRange.singleDaySelection(for: start, calendar: calendar)
-                    )
-                }
+                store.setTimeRangeFromFilter(
+                    TimeRange.singleDaySelection(for: start, calendar: calendar)
+                )
             } else {
                 store.setTimeRangeFromFilter(.custom(start: start, end: end))
             }

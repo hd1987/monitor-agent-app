@@ -28,7 +28,7 @@
 - **Time range** — Today, 7 Days, 30 Days, All Time, or a custom calendar selection
 - **Stats at a glance** — Requests, Sessions, Input Tokens, Output Tokens, Cache Read, Cache Hit Rate
 - **Activity heatmap** — trailing-365-day default view, per-year view, hover tooltips, and click-to-filter days
-- **Hourly token drill-down** — click any Activity day to inspect requests, Input Tokens, Output Tokens, Cache Read, and Cache Creation by hour
+- **Adaptive token drill-down** — keep an open Activity detail across date filters, using hours for up to 3 days, days for up to 90 days, weeks for up to 540 days, and months for longer history
 - **Model distribution** — stacked bar showing usage across the top models
 - **Settings editor** — update app preferences, Claude Code / Codex config files, and prompt files from one window
 - **MCP & Skill inventory** — inspect MCP servers and Skills for Claude Code, Codex, Cursor, and Global sources
@@ -118,7 +118,7 @@ MIT
 - **时间范围** — 今日、7 天、30 天、全部，或日历自定义范围
 - **核心指标** — 请求数、会话数、输入 Token、输出 Token、缓存读取、缓存命中率
 - **活动热力图** — 默认展示最近 365 天，也可切换年份；悬停显示详情，点击有数据日期可筛选
-- **小时级 Token 图表** — 点击 Activity 中任意日期，查看请求数、输入、输出、缓存读取和缓存创建的小时分布
+- **自适应 Token 图表** — 已展开的 Activity 详情会跟随日期筛选：3 天内按小时、90 天内按天、540 天内按周、更长历史按月展示
 - **模型分布** — 堆叠比例条展示各模型使用占比
 - **设置编辑器** — 在同一个窗口管理应用设置、Claude Code / Codex 配置和提示词文件
 - **MCP & Skill 清单** — 查看 Claude Code、Codex、Cursor 和 Global 来源的 MCP Servers 与 Skills

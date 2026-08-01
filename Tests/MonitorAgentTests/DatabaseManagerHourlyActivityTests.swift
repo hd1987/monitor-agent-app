@@ -54,6 +54,125 @@ final class DatabaseManagerHourlyActivityTests: XCTestCase {
         )
     }
 
+    func testFetchActivityRangeTokenUsageAggregatesByDayAndFillsMissingDays() {
+        let database = DatabaseManager(inMemory: true)
+        let start = localDate(year: 2026, month: 6, day: 1)
+        let end = localDate(year: 2026, month: 6, day: 4)
+        database.insertRecords([
+            record(id: "first", app: "claude", input: 100, output: 10, cacheRead: 5, createdAt: start, hour: 9),
+            record(id: "last", app: "claude", input: 300, output: 30, cacheRead: 15, createdAt: end, hour: 11),
+        ])
+
+        let series = database.fetchActivityRangeTokenUsage(
+            app: .claude,
+            range: .custom(start: start, end: end)
+        )
+
+        XCTAssertEqual(series.aggregation, .day)
+        XCTAssertEqual(dateStrings(series.usage.map(\.periodStart)), ["2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04"])
+        XCTAssertEqual(series.usage.map(\.requestCount), [1, 0, 0, 1])
+        XCTAssertEqual(series.usage.map(\.inputTokens), [100, 0, 0, 300])
+    }
+
+    func testFetchActivityRangeTokenUsageKeepsBoundedEmptyDaysVisible() {
+        let database = DatabaseManager(inMemory: true)
+        let start = localDate(year: 2026, month: 6, day: 1)
+        let end = localDate(year: 2026, month: 6, day: 4)
+
+        let series = database.fetchActivityRangeTokenUsage(
+            app: .claude,
+            range: .custom(start: start, end: end)
+        )
+
+        XCTAssertEqual(series.aggregation, .day)
+        XCTAssertEqual(dateStrings(series.usage.map(\.periodStart)), ["2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04"])
+        XCTAssertTrue(series.usage.allSatisfy { $0.requestCount == 0 && $0.inputTokens == 0 })
+    }
+
+    func testFetchActivityRangeTokenUsageUsesContinuousHoursForThreeDays() {
+        let database = DatabaseManager(inMemory: true)
+        let start = localDate(year: 2026, month: 6, day: 1)
+        let end = localDate(year: 2026, month: 6, day: 3)
+        database.insertRecords([
+            record(id: "first", app: "claude", input: 100, output: 10, cacheRead: 5, createdAt: start, hour: 9),
+            record(id: "last", app: "claude", input: 300, output: 30, cacheRead: 15, createdAt: end, hour: 23),
+        ])
+
+        let series = database.fetchActivityRangeTokenUsage(
+            app: .claude,
+            range: .custom(start: start, end: end)
+        )
+
+        XCTAssertEqual(series.aggregation, .hour)
+        XCTAssertEqual(series.usage.count, 72)
+        XCTAssertEqual(series.usage[9].inputTokens, 100)
+        XCTAssertEqual(series.usage[71].inputTokens, 300)
+    }
+
+    func testMultiDayHourlyUsageStopsAfterCurrentHour() {
+        let database = DatabaseManager(inMemory: true)
+        let start = localDate(year: 2026, month: 6, day: 1)
+        let end = localDate(year: 2026, month: 6, day: 3)
+        let now = Calendar.current.date(byAdding: DateComponents(day: 2, hour: 10, minute: 30), to: start)!
+
+        let series = database.fetchActivityRangeTokenUsage(
+            app: .claude,
+            range: .custom(start: start, end: end),
+            now: now
+        )
+
+        XCTAssertEqual(series.aggregation, .hour)
+        XCTAssertEqual(series.usage.count, 59)
+        XCTAssertEqual(Calendar.current.component(.hour, from: series.usage.last!.periodStart), 10)
+    }
+
+    func testActivityRangeQueryUsesInjectedNowForFilteringAndBuckets() {
+        let database = DatabaseManager(inMemory: true)
+        let calendar = Calendar.current
+        let now = localDate(year: 2001, month: 6, day: 20)
+        let rangeStart = calendar.date(byAdding: .day, value: -6, to: now)!
+        database.insertRecords([
+            record(id: "first", app: "claude", input: 100, output: 10, cacheRead: 5, createdAt: rangeStart, hour: 9),
+        ])
+
+        let series = database.fetchActivityRangeTokenUsage(
+            app: .claude,
+            range: .last7,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(series.aggregation, .day)
+        XCTAssertEqual(series.usage.count, 7)
+        XCTAssertEqual(series.usage.first?.requestCount, 1)
+        XCTAssertEqual(series.usage.first?.inputTokens, 100)
+    }
+
+    func testFetchActivityRangeTokenUsageChoosesWeekAndMonthForLongRanges() {
+        let database = DatabaseManager(inMemory: true)
+        let first = localDate(year: 2024, month: 1, day: 1)
+        let last = localDate(year: 2026, month: 2, day: 1)
+        database.insertRecords([
+            record(id: "first", app: "claude", input: 100, output: 10, cacheRead: 5, createdAt: first, hour: 9),
+            record(id: "last", app: "claude", input: 300, output: 30, cacheRead: 15, createdAt: last, hour: 11),
+        ])
+
+        let weekly = database.fetchActivityRangeTokenUsage(
+            app: .claude,
+            range: .custom(
+                start: first,
+                end: Calendar.current.date(byAdding: .day, value: 120, to: first)!
+            )
+        )
+        let monthly = database.fetchActivityRangeTokenUsage(app: .claude, range: .allTime)
+
+        XCTAssertEqual(weekly.aggregation, .week)
+        XCTAssertFalse(weekly.usage.isEmpty)
+        XCTAssertEqual(monthly.aggregation, .month)
+        XCTAssertEqual(monthly.usage.first.map { dateStrings([$0.periodStart])[0] }, "2024-01-01")
+        XCTAssertEqual(monthly.usage.last.map { dateStrings([$0.periodStart])[0] }, "2026-02-01")
+    }
+
     private func record(
         id: String,
         app: String,
@@ -82,5 +201,12 @@ final class DatabaseManagerHourlyActivityTests: XCTestCase {
 
     private func localDate(year: Int, month: Int, day: Int) -> Date {
         Calendar.current.date(from: DateComponents(year: year, month: month, day: day))!
+    }
+
+    private func dateStrings(_ dates: [Date]) -> [String] {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return dates.map(formatter.string(from:))
     }
 }

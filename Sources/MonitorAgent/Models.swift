@@ -267,6 +267,38 @@ struct HourlyTokenUsage: Identifiable, Equatable {
     }
 }
 
+enum ActivityTokenAggregation: String, Equatable {
+    case hour
+    case day
+    case week
+    case month
+
+    static func forDayCount(_ dayCount: Int) -> ActivityTokenAggregation {
+        let normalizedDayCount = max(1, dayCount)
+        if normalizedDayCount <= 3 { return .hour }
+        if normalizedDayCount <= 90 { return .day }
+        if normalizedDayCount <= 540 { return .week }
+        return .month
+    }
+}
+
+struct ActivityRangeTokenUsage: Identifiable, Equatable {
+    let periodStart: Date
+    let requestCount: Int
+    let inputTokens: Int64
+    let outputTokens: Int64
+    let cacheReadTokens: Int64
+    let cacheCreationTokens: Int64
+    var id: Date { periodStart }
+}
+
+struct ActivityRangeTokenSeries: Equatable {
+    let aggregation: ActivityTokenAggregation
+    let usage: [ActivityRangeTokenUsage]
+
+    static let empty = ActivityRangeTokenSeries(aggregation: .day, usage: [])
+}
+
 struct ModelShare: Identifiable {
     let model: String
     let requests: Int

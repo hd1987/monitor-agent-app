@@ -391,6 +391,156 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         XCTAssertEqual(store.selectedActivityDate, "2026-07-09")
     }
 
+    func testSelectingMultiDayFilterPresentsAggregatedActivityDetail() {
+        let expectedSeries = ActivityRangeTokenSeries(
+            aggregation: .day,
+            usage: [
+                ActivityRangeTokenUsage(
+                    periodStart: date(year: 2026, month: 7, day: 3),
+                    requestCount: 2,
+                    inputTokens: 100,
+                    outputTokens: 20,
+                    cacheReadTokens: 10,
+                    cacheCreationTokens: 5
+                )
+            ]
+        )
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            observeRefreshIntervalChanges: false,
+            activityRangeTokenUsageLoader: { _, _, _, range in
+                XCTAssertEqual(range, .last7)
+                return expectedSeries
+            }
+        )
+
+        store.selectActivityDate("2026-07-08")
+        store.setTimeRangeFromFilter(.last7)
+
+        let loaded = expectation(description: "multi-day Activity usage loads")
+        waitUntil(attemptsRemaining: 50) {
+            store.activityRangeTokenSeries == expectedSeries && !store.isActivityRangeTokenUsageLoading
+        } completion: {
+            XCTAssertEqual(store.timeRange, .last7)
+            XCTAssertEqual(store.activityDetailRange, .last7)
+            XCTAssertNil(store.selectedActivityDate)
+            XCTAssertTrue(store.isActivityDetailPresented)
+            loaded.fulfill()
+        }
+        wait(for: [loaded], timeout: 1)
+    }
+
+    func testSelectingMultiDayFilterLoadsActivityDetailOnce() {
+        let loadCountLock = NSLock()
+        var loadCount = 0
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            observeRefreshIntervalChanges: false,
+            activityRangeTokenUsageLoader: { _, _, _, _ in
+                loadCountLock.lock()
+                loadCount += 1
+                loadCountLock.unlock()
+                return .empty
+            }
+        )
+
+        store.selectActivityDate("2026-07-08")
+        store.setTimeRangeFromFilter(.last7)
+
+        let reloadSettled = expectation(description: "debounced Activity detail reload settles")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            loadCountLock.lock()
+            let finalLoadCount = loadCount
+            loadCountLock.unlock()
+            XCTAssertEqual(finalLoadCount, 1)
+            reloadSettled.fulfill()
+        }
+        wait(for: [reloadSettled], timeout: 1)
+    }
+
+    func testSelectingDateFilterKeepsClosedActivityDetailClosed() {
+        let rangeLoadStarted = expectation(description: "range detail should not load")
+        rangeLoadStarted.isInverted = true
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            observeRefreshIntervalChanges: false,
+            activityRangeTokenUsageLoader: { _, _, _, _ in
+                rangeLoadStarted.fulfill()
+                return .empty
+            }
+        )
+
+        store.setTimeRangeFromFilter(.last7)
+
+        XCTAssertEqual(store.timeRange, .last7)
+        XCTAssertNil(store.activityDetailRange)
+        XCTAssertNil(store.selectedActivityDate)
+        XCTAssertFalse(store.isActivityDetailPresented)
+        wait(for: [rangeLoadStarted], timeout: 0.2)
+    }
+
+    func testStaleRangeLoadCannotOverwriteNewAppFilter() {
+        let oldLoadStarted = expectation(description: "old range load starts")
+        let releaseOldLoad = DispatchSemaphore(value: 0)
+        let oldSeries = ActivityRangeTokenSeries(
+            aggregation: .day,
+            usage: [ActivityRangeTokenUsage(
+                periodStart: date(year: 2026, month: 7, day: 1),
+                requestCount: 1,
+                inputTokens: 100,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                cacheCreationTokens: 0
+            )]
+        )
+        let currentSeries = ActivityRangeTokenSeries(
+            aggregation: .day,
+            usage: [ActivityRangeTokenUsage(
+                periodStart: date(year: 2026, month: 7, day: 2),
+                requestCount: 1,
+                inputTokens: 200,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                cacheCreationTokens: 0
+            )]
+        )
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            observeRefreshIntervalChanges: false,
+            activityRangeTokenUsageLoader: { _, app, _, _ in
+                if app == .all {
+                    oldLoadStarted.fulfill()
+                    _ = releaseOldLoad.wait(timeout: .now() + 1)
+                    return oldSeries
+                }
+                return currentSeries
+            }
+        )
+        store.selectActivityDate("2026-07-08")
+        store.setTimeRangeFromFilter(.last7)
+        wait(for: [oldLoadStarted], timeout: 1)
+
+        store.appFilter = .cursor
+        store.reload()
+
+        let currentLoadFinished = expectation(description: "current range load finishes")
+        waitUntil(attemptsRemaining: 50) {
+            store.activityRangeTokenSeries == currentSeries && !store.isActivityRangeTokenUsageLoading
+        } completion: {
+            currentLoadFinished.fulfill()
+        }
+        wait(for: [currentLoadFinished], timeout: 1)
+
+        releaseOldLoad.signal()
+        let staleLoadFinished = expectation(description: "stale range load finishes")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            XCTAssertEqual(store.activityRangeTokenSeries, currentSeries)
+            XCTAssertFalse(store.isActivityRangeTokenUsageLoading)
+            staleLoadFinished.fulfill()
+        }
+        wait(for: [staleLoadFinished], timeout: 1)
+    }
+
     func testSelectActivityDateFromDateUsesCanonicalCalendarDay() {
         let now = date(year: 2026, month: 7, day: 9, hour: 10)
         let store = AppStore(

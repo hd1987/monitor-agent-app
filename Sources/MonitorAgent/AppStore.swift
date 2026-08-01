@@ -9,6 +9,13 @@ typealias HourlyTokenUsageLoader = (
     String
 ) -> [HourlyTokenUsage]
 
+typealias ActivityRangeTokenUsageLoader = (
+    DatabaseManager,
+    AppFilter,
+    Set<AgentID>,
+    TimeRange
+) -> ActivityRangeTokenSeries
+
 private final class RefreshCycleParticipant {
     private let lock = NSLock()
     private var isFinished = false
@@ -40,6 +47,9 @@ final class AppStore: ObservableObject {
     @Published var selectedActivityDate: String?
     @Published var hourlyTokenUsage: [HourlyTokenUsage] = []
     @Published var isHourlyTokenUsageLoading = false
+    @Published var activityDetailRange: TimeRange?
+    @Published var activityRangeTokenSeries: ActivityRangeTokenSeries = .empty
+    @Published var isActivityRangeTokenUsageLoading = false
     @Published var modelDistribution: [ModelShare] = []
     @Published var availableYears: [Int] = []
     @Published var isRebuildingUsageData = false
@@ -62,6 +72,7 @@ final class AppStore: ObservableObject {
     private let quotaSettings: QuotaSettings
     private let refreshCoordinator: PanelRefreshCoordinator
     private let hourlyTokenUsageLoader: HourlyTokenUsageLoader
+    private let activityRangeTokenUsageLoader: ActivityRangeTokenUsageLoader
     private var activeDay: Date
     private var cancellables = Set<AnyCancellable>()
     private var usageDataRebuildCancellation: UsageDataRebuildCancellation?
@@ -84,6 +95,9 @@ final class AppStore: ObservableObject {
         currentDateProvider: @escaping () -> Date = Date.init,
         hourlyTokenUsageLoader: @escaping HourlyTokenUsageLoader = { database, app, agents, date in
             database.fetchHourlyTokenUsage(app: app, date: date, enabledAgents: agents)
+        },
+        activityRangeTokenUsageLoader: @escaping ActivityRangeTokenUsageLoader = { database, app, agents, range in
+            database.fetchActivityRangeTokenUsage(app: app, range: range, enabledAgents: agents)
         }
     ) {
         self.db = database
@@ -99,6 +113,7 @@ final class AppStore: ObservableObject {
         self.quotaSettings = quotaSettings
         self.refreshCoordinator = refreshCoordinator
         self.hourlyTokenUsageLoader = hourlyTokenUsageLoader
+        self.activityRangeTokenUsageLoader = activityRangeTokenUsageLoader
         self.activeDay = Calendar.current.startOfDay(for: currentDateProvider())
         refreshCoordinator.setRefreshStateHandler { [weak self] isRefreshing, isManual in
             self?.isRefreshInProgress = isRefreshing
@@ -133,6 +148,7 @@ final class AppStore: ObservableObject {
 
     var availableAppFilters: [AppFilter] { AppFilter.available(for: enabledAgents) }
     var hasEnabledAgents: Bool { !enabledAgents.isEmpty }
+    var isActivityDetailPresented: Bool { activityDetailRange != nil }
 
     func updateEnabledAgents(_ enabledAgents: Set<AgentID>) {
         monitoringSettings.enabledAgents = enabledAgents
@@ -405,12 +421,16 @@ final class AppStore: ObservableObject {
         let timeRange = timeRange
         let heatmapMode = heatmapMode
         let selectedActivityDate = selectedActivityDate
+        let activityDetailRange = activityDetailRange
         let reloadGeneration = reloadGeneration
         let hourlyLoadGeneration = hourlyLoadGeneration
         let db = db
         let hourlyTokenUsageLoader = hourlyTokenUsageLoader
+        let activityRangeTokenUsageLoader = activityRangeTokenUsageLoader
         if selectedActivityDate != nil {
             isHourlyTokenUsageLoading = true
+        } else if activityDetailRange != nil {
+            isActivityRangeTokenUsageLoading = true
         }
 
         DispatchQueue.global(qos: .userInitiated).async {
@@ -445,6 +465,11 @@ final class AppStore: ObservableObject {
             let hourly = selectedActivityDate.map {
                 hourlyTokenUsageLoader(db, appFilter, enabledAgents, $0)
             } ?? []
+            let ranged = activityDetailRange.flatMap { range in
+                selectedActivityDate == nil
+                    ? activityRangeTokenUsageLoader(db, appFilter, enabledAgents, range)
+                    : nil
+            } ?? .empty
             let m = db.fetchModelDistribution(
                 app: appFilter,
                 range: timeRange,
@@ -459,6 +484,7 @@ final class AppStore: ObservableObject {
                     self.timeRange == timeRange,
                     self.heatmapMode == heatmapMode,
                     self.selectedActivityDate == selectedActivityDate,
+                    self.activityDetailRange == activityDetailRange,
                     self.reloadGeneration == reloadGeneration,
                     self.hourlyLoadGeneration == hourlyLoadGeneration
                 else {
@@ -469,6 +495,8 @@ final class AppStore: ObservableObject {
                 self.heatmap = h
                 self.hourlyTokenUsage = hourly
                 self.isHourlyTokenUsageLoading = false
+                self.activityRangeTokenSeries = ranged
+                self.isActivityRangeTokenUsageLoading = false
                 self.modelDistribution = m
                 self.availableYears = years
                 if case .year(let selectedYear) = self.heatmapMode,
@@ -483,9 +511,12 @@ final class AppStore: ObservableObject {
         guard let range = TimeRange.activityDay(date, now: currentDateProvider()) else { return }
 
         selectedActivityDate = date
+        activityDetailRange = range
         timeRange = range
         hourlyTokenUsage = []
+        activityRangeTokenSeries = .empty
         isHourlyTokenUsageLoading = true
+        isActivityRangeTokenUsageLoading = false
         loadHourlyTokenUsage(for: date)
     }
 
@@ -499,15 +530,44 @@ final class AppStore: ObservableObject {
     }
 
     func setTimeRangeFromFilter(_ range: TimeRange) {
-        clearSelectedActivityDate()
+        let keepsActivityDetailPresented = isActivityDetailPresented
+        let selectedDate = activityDateString(for: range)
+        hourlyLoadGeneration += 1
+        selectedActivityDate = keepsActivityDetailPresented ? selectedDate : nil
+        hourlyTokenUsage = []
+        isHourlyTokenUsageLoading = keepsActivityDetailPresented && selectedDate != nil
+        activityDetailRange = keepsActivityDetailPresented ? range : nil
+        activityRangeTokenSeries = .empty
+        isActivityRangeTokenUsageLoading = keepsActivityDetailPresented && selectedDate == nil
         timeRange = range
+    }
+
+    private func activityDateString(for range: TimeRange) -> String? {
+        let date: Date
+        switch range {
+        case .today:
+            date = currentDateProvider()
+        case .custom(let start, let end):
+            guard Calendar.current.isDate(start, inSameDayAs: end) else { return nil }
+            date = start
+        case .last7, .last30, .allTime:
+            return nil
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 
     func clearSelectedActivityDate() {
         hourlyLoadGeneration += 1
         selectedActivityDate = nil
+        activityDetailRange = nil
         hourlyTokenUsage = []
         isHourlyTokenUsageLoading = false
+        activityRangeTokenSeries = .empty
+        isActivityRangeTokenUsageLoading = false
     }
 
     private func loadHourlyTokenUsage(for date: String) {
