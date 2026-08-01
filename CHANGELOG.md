@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-08-01
+
 ### Changed
 - Refine the Activity hourly chart with translucent area fills, a dashed current-time guide, intersection markers, and a structured hourly breakdown tooltip
 
