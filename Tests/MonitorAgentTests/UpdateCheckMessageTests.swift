@@ -2,6 +2,13 @@ import XCTest
 @testable import MonitorAgent
 
 final class UpdateCheckMessageTests: XCTestCase {
+    func testUpdateWindowClosePolicyBlocksOnlyInstallation() {
+        XCTAssertTrue(UpdateWindowClosePolicy.allowsClose(operationState: .idle))
+        XCTAssertTrue(UpdateWindowClosePolicy.allowsClose(operationState: .checking))
+        XCTAssertTrue(UpdateWindowClosePolicy.allowsClose(operationState: .downloading))
+        XCTAssertFalse(UpdateWindowClosePolicy.allowsClose(operationState: .installing))
+    }
+
     func testUpdateDownloadStagerUsesUniqueDestinationAndMovesDownloadedFile() throws {
         let fileManager = FileManager.default
         let directory = fileManager.temporaryDirectory

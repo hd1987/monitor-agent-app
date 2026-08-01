@@ -7,6 +7,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 ## [Unreleased]
 
 ### Fixed
+- Route the update window's native close action through cancellation while blocking closure during installation
 - Prevent overlapping update operations and fail visibly when unique archive staging fails
 - Prevent stale hourly Activity loads from overwriting results after the app filter changes
 - Ignore Codex token events without per-turn usage instead of recording cumulative totals

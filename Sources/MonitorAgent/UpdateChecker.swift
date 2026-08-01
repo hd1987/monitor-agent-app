@@ -14,6 +14,12 @@ enum UpdateOperationState: Equatable {
     case installing
 }
 
+enum UpdateWindowClosePolicy {
+    static func allowsClose(operationState: UpdateOperationState) -> Bool {
+        operationState != .installing
+    }
+}
+
 enum UpdateDownloadStager {
     static func stage(
         downloadedFile: URL,
@@ -56,7 +62,7 @@ enum RestartLauncher {
 }
 
 /// Checks GitHub Releases for new versions, downloads and installs updates.
-final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
+final class UpdateChecker: NSObject, URLSessionDownloadDelegate, NSWindowDelegate {
     static let shared = UpdateChecker()
 
     private let repo = "hd1987/monitor-agent-app"
@@ -156,6 +162,7 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
         hostingView?.rootView = UpdateCheckView(state: state) { [weak self] action in
             self?.perform(action)
         }
+        updateWindowCloseAvailability()
 
         if let fittingSize = hostingView?.fittingSize {
             window?.setContentSize(NSSize(width: max(460, fittingSize.width), height: fittingSize.height))
@@ -181,6 +188,7 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
         win.level = .normal
         win.hidesOnDeactivate = false
         win.isMovableByWindowBackground = true
+        win.delegate = self
 
         win.appearance = ThemeManager.shared.nsAppearance
 
@@ -216,6 +224,19 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
     }
 
     private func closeWindow() { window?.orderOut(nil) }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard UpdateWindowClosePolicy.allowsClose(operationState: operationState) else {
+            return false
+        }
+        close()
+        return false
+    }
+
+    private func updateWindowCloseAvailability() {
+        window?.standardWindowButton(.closeButton)?.isEnabled =
+            UpdateWindowClosePolicy.allowsClose(operationState: operationState)
+    }
 
     // MARK: - Download
 
