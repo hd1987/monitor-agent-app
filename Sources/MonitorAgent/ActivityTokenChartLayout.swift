@@ -6,6 +6,7 @@ enum ActivityTokenChartLayout {
     static let chartHeight: CGFloat = 128
     static let defaultTooltipWidth: CGFloat = 120
     static let chartTooltipWidth: CGFloat = 150
+    static let rangeChartTooltipWidth: CGFloat = 170
     static let chartTooltipGap: CGFloat = 8
     static let monthLabelWidth: CGFloat = 24
     static let monthLabelHeight: CGFloat = 11
@@ -17,6 +18,10 @@ enum ActivityTokenChartLayout {
 
     static func hourAxisLabel(for hour: Int) -> String {
         "\(hour)h"
+    }
+
+    static func rangeHourAxisLabel(for date: Date, calendar: Calendar = .current) -> String {
+        "\(calendar.component(.hour, from: date))h"
     }
 
     static func tokenAxisLabel(for value: Double) -> String {
@@ -37,6 +42,41 @@ enum ActivityTokenChartLayout {
         let startHour = min(max(0, hour), lastChartHour)
         let endHour = (startHour + 1) % 24
         return String(format: "%02d:00-%02d:00", startHour, endHour)
+    }
+
+    static func rangeHourLabel(for start: Date, calendar: Calendar = .current) -> String {
+        let end = calendar.date(byAdding: .hour, value: 1, to: start)!
+        let startFormatter = DateFormatter()
+        startFormatter.locale = Locale(identifier: "en_US_POSIX")
+        startFormatter.calendar = calendar
+        startFormatter.dateFormat = "MMM d, yyyy HH:mm"
+        let endFormatter = DateFormatter()
+        endFormatter.locale = Locale(identifier: "en_US_POSIX")
+        endFormatter.calendar = calendar
+        endFormatter.dateFormat = "HH:mm"
+        return "\(startFormatter.string(from: start)) - \(endFormatter.string(from: end))"
+    }
+
+    static func weekLabelBounds(
+        for periodStart: Date,
+        range: TimeRange,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> (start: Date, end: Date) {
+        let periodEnd = calendar.date(byAdding: .day, value: 6, to: periodStart)!
+        let bounds = range.bounds(now: now, calendar: calendar)
+        let rangeStart = bounds.start.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+        let rangeEnd = bounds.end.flatMap {
+            calendar.date(
+                byAdding: .day,
+                value: -1,
+                to: Date(timeIntervalSince1970: TimeInterval($0))
+            )
+        }
+        return (
+            start: rangeStart.map { max(periodStart, $0) } ?? periodStart,
+            end: rangeEnd.map { min(periodEnd, $0) } ?? periodEnd
+        )
     }
 
     static func tooltipXOffset(
@@ -67,6 +107,37 @@ enum ActivityTokenChartLayout {
 
     static func hoveredHour(forChartXValue value: Double) -> Int {
         min(max(0, Int(value.rounded())), lastChartHour)
+    }
+
+    static func rangeAxisMarks(count: Int, maximumMarkCount: Int = 9) -> [Int] {
+        guard count > 1 else { return count == 1 ? [0] : [] }
+        let markCount = min(count, max(2, maximumMarkCount))
+        return (0..<markCount).map { index in
+            Int(
+                (Double(index) * Double(count - 1) / Double(markCount - 1))
+                    .rounded()
+            )
+        }
+    }
+
+    static func rangeHourAxisMarks(
+        bucketCount: Int,
+        dayCount: Int,
+        includesEndBoundary: Bool
+    ) -> [Int] {
+        guard bucketCount > 0 else { return [] }
+        let interval: Int
+        switch dayCount {
+        case 2: interval = 6
+        case 3: interval = 8
+        default: interval = hourAxisMarkInterval
+        }
+        let domainEnd = includesEndBoundary ? bucketCount : bucketCount - 1
+        var marks = Array(stride(from: 0, through: domainEnd, by: interval))
+        if includesEndBoundary, marks.last != domainEnd {
+            marks.append(domainEnd)
+        }
+        return marks
     }
 
     static func currentHourPosition(

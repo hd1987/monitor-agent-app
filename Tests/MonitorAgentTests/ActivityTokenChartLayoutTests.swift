@@ -5,6 +5,7 @@ final class ActivityTokenChartLayoutTests: XCTestCase {
     func testDrawerUsesStableHeightForSelectedDayDetail() {
         XCTAssertEqual(ActivityTokenChartLayout.drawerHeight, 190)
         XCTAssertEqual(ActivityTokenChartLayout.chartHeight, 128)
+        XCTAssertEqual(ActivityTokenChartLayout.rangeChartTooltipWidth, 170)
     }
 
     func testHourAxisMarksUseThreeHourCadence() {
@@ -24,6 +25,21 @@ final class ActivityTokenChartLayoutTests: XCTestCase {
         XCTAssertEqual(ActivityTokenChartLayout.hourAxisLabel(for: ActivityTokenChartLayout.lastHourAxisMark), "21h")
     }
 
+    func testMultiDayHourlyAxisLabelsShowOnlyHour() {
+        let calendar = Calendar(identifier: .gregorian)
+        let date = calendar.date(from: DateComponents(
+            year: 2026,
+            month: 7,
+            day: 30,
+            hour: 20
+        ))!
+
+        XCTAssertEqual(
+            ActivityTokenChartLayout.rangeHourAxisLabel(for: date, calendar: calendar),
+            "20h"
+        )
+    }
+
     func testTokenAxisLabelsUseWholeNumberAbbreviations() {
         XCTAssertEqual(ActivityTokenChartLayout.tokenAxisLabel(for: 0), "0")
         XCTAssertEqual(ActivityTokenChartLayout.tokenAxisLabel(for: 1_500), "2K")
@@ -34,6 +50,50 @@ final class ActivityTokenChartLayoutTests: XCTestCase {
     func testHourRangeLabelsUseStartInclusiveOneHourWindow() {
         XCTAssertEqual(ActivityTokenChartLayout.hourRangeLabel(for: 13), "13:00-14:00")
         XCTAssertEqual(ActivityTokenChartLayout.hourRangeLabel(for: 23), "23:00-00:00")
+    }
+
+    func testMultiDayHourRangeLabelDoesNotRepeatEndDate() {
+        let calendar = Calendar(identifier: .gregorian)
+        let start = calendar.date(from: DateComponents(
+            year: 2026,
+            month: 7,
+            day: 31,
+            hour: 18
+        ))!
+
+        XCTAssertEqual(
+            ActivityTokenChartLayout.rangeHourLabel(for: start, calendar: calendar),
+            "Jul 31, 2026 18:00 - 19:00"
+        )
+    }
+
+    func testWeeklyLabelBoundsClampPartialWeeksToSelectedRange() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let rangeStart = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3))!
+        let rangeEnd = calendar.date(from: DateComponents(year: 2026, month: 9, day: 30))!
+        let firstWeekStart = calendar.date(from: DateComponents(year: 2026, month: 6, day: 1))!
+        let lastWeekStart = calendar.date(from: DateComponents(year: 2026, month: 9, day: 28))!
+        let range = TimeRange.custom(start: rangeStart, end: rangeEnd)
+
+        let firstBounds = ActivityTokenChartLayout.weekLabelBounds(
+            for: firstWeekStart,
+            range: range,
+            calendar: calendar
+        )
+        let lastBounds = ActivityTokenChartLayout.weekLabelBounds(
+            for: lastWeekStart,
+            range: range,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(firstBounds.start, rangeStart)
+        XCTAssertEqual(
+            firstBounds.end,
+            calendar.date(from: DateComponents(year: 2026, month: 6, day: 7))
+        )
+        XCTAssertEqual(lastBounds.start, lastWeekStart)
+        XCTAssertEqual(lastBounds.end, rangeEnd)
     }
 
     func testTooltipFlipsToRightOfGuideNearLeftEdge() {
@@ -89,6 +149,62 @@ final class ActivityTokenChartLayoutTests: XCTestCase {
     func testHoveredHourClampsOutsideChartDomain() {
         XCTAssertEqual(ActivityTokenChartLayout.hoveredHour(forChartXValue: -1.4), 0)
         XCTAssertEqual(ActivityTokenChartLayout.hoveredHour(forChartXValue: 24.2), 23)
+    }
+
+    func testRangeAxisMarksIncludeFirstAndLastBucketsWithoutCrowding() {
+        XCTAssertEqual(ActivityTokenChartLayout.rangeAxisMarks(count: 0), [])
+        XCTAssertEqual(ActivityTokenChartLayout.rangeAxisMarks(count: 1), [0])
+        XCTAssertEqual(ActivityTokenChartLayout.rangeAxisMarks(count: 7), [0, 1, 2, 3, 4, 5, 6])
+
+        let marks = ActivityTokenChartLayout.rangeAxisMarks(count: 30)
+        XCTAssertEqual(marks.first, 0)
+        XCTAssertEqual(marks.last, 29)
+        XCTAssertEqual(marks, [0, 4, 7, 11, 15, 18, 22, 25, 29])
+        XCTAssertEqual(marks.count, 9)
+        XCTAssertEqual(ActivityTokenChartLayout.rangeAxisMarks(count: 9), Array(0...8))
+    }
+
+    func testTwoDayHourlyAxisUsesSixHourCadenceAndEndBoundary() {
+        XCTAssertEqual(
+            ActivityTokenChartLayout.rangeHourAxisMarks(
+                bucketCount: 48,
+                dayCount: 2,
+                includesEndBoundary: true
+            ),
+            [0, 6, 12, 18, 24, 30, 36, 42, 48]
+        )
+    }
+
+    func testThreeDayHourlyAxisUsesEightHourCadenceAndEndBoundary() {
+        XCTAssertEqual(
+            ActivityTokenChartLayout.rangeHourAxisMarks(
+                bucketCount: 72,
+                dayCount: 3,
+                includesEndBoundary: true
+            ),
+            [0, 8, 16, 24, 32, 40, 48, 56, 64, 72]
+        )
+    }
+
+    func testIncompleteMultiDayHourlyAxisOmitsFutureEndBoundary() {
+        XCTAssertEqual(
+            ActivityTokenChartLayout.rangeHourAxisMarks(
+                bucketCount: 59,
+                dayCount: 3,
+                includesEndBoundary: false
+            ),
+            [0, 8, 16, 24, 32, 40, 48, 56]
+        )
+    }
+
+    func testActivityRangeAggregationUsesPointDensityBoundaries() {
+        XCTAssertEqual(ActivityTokenAggregation.forDayCount(1), .hour)
+        XCTAssertEqual(ActivityTokenAggregation.forDayCount(3), .hour)
+        XCTAssertEqual(ActivityTokenAggregation.forDayCount(4), .day)
+        XCTAssertEqual(ActivityTokenAggregation.forDayCount(90), .day)
+        XCTAssertEqual(ActivityTokenAggregation.forDayCount(91), .week)
+        XCTAssertEqual(ActivityTokenAggregation.forDayCount(540), .week)
+        XCTAssertEqual(ActivityTokenAggregation.forDayCount(541), .month)
     }
 
     func testVisibleUsageForTodayStopsAtCurrentHour() {

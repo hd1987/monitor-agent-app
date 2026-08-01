@@ -374,7 +374,8 @@ final class DatabaseManager {
     private func whereClause(
         app: AppFilter,
         range: TimeRange,
-        enabledAgents: Set<AgentID>
+        enabledAgents: Set<AgentID>,
+        bounds: TimeBounds? = nil
     ) -> (sql: String, args: [any DatabaseValueConvertible]) {
         var conditions: [String] = []
         var args: [any DatabaseValueConvertible] = []
@@ -386,12 +387,12 @@ final class DatabaseManager {
             args: &args
         )
 
-        let bounds = range.bounds()
-        if let start = bounds.start {
+        let resolvedBounds = bounds ?? range.bounds()
+        if let start = resolvedBounds.start {
             conditions.append("created_at >= ?")
             args.append(start)
         }
-        if let end = bounds.end {
+        if let end = resolvedBounds.end {
             conditions.append("created_at < ?")
             args.append(end)
         }
@@ -540,6 +541,167 @@ final class DatabaseManager {
         }
 
         return values
+    }
+
+    func fetchActivityRangeTokenUsage(
+        app: AppFilter,
+        range: TimeRange,
+        enabledAgents: Set<AgentID> = Set(AgentID.allCases),
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> ActivityRangeTokenSeries {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard let db = dbQueue else { return .empty }
+
+        let bounds = range.bounds(now: now, calendar: calendar)
+        let w = whereClause(
+            app: app,
+            range: range,
+            enabledAgents: enabledAgents,
+            bounds: bounds
+        )
+
+        return (try? db.read { db in
+            let limits = try Row.fetchOne(db, sql: """
+                SELECT MIN(created_at) AS first_at, MAX(created_at) AS last_at
+                FROM request_logs \(w.sql)
+                """, arguments: StatementArguments(w.args))
+            let firstTimestamp: Int? = limits?["first_at"]
+            let lastTimestamp: Int? = limits?["last_at"]
+
+            guard let startDate = bounds.start.map({ Date(timeIntervalSince1970: TimeInterval($0)) })
+                ?? firstTimestamp.map({ calendar.startOfDay(for: Date(timeIntervalSince1970: TimeInterval($0))) }),
+                let exclusiveEnd = bounds.end.map({ Date(timeIntervalSince1970: TimeInterval($0)) })
+                    ?? lastTimestamp.flatMap({ timestamp in
+                        calendar.date(
+                            byAdding: .day,
+                            value: 1,
+                            to: calendar.startOfDay(for: Date(timeIntervalSince1970: TimeInterval(timestamp)))
+                        )
+                    }) else {
+                return .empty
+            }
+            let dayCount = max(1, calendar.dateComponents([.day], from: startDate, to: exclusiveEnd).day ?? 1)
+            let aggregation = ActivityTokenAggregation.forDayCount(dayCount)
+
+            let localDate = "datetime(created_at, 'unixepoch', 'localtime')"
+            let periodExpression: String
+            switch aggregation {
+            case .hour:
+                let startTimestamp = Int(startDate.timeIntervalSince1970)
+                periodExpression = "\(startTimestamp) + CAST((created_at - \(startTimestamp)) / 3600 AS INTEGER) * 3600"
+            case .day:
+                periodExpression = "date(\(localDate))"
+            case .week:
+                periodExpression = "date(\(localDate), '-' || ((CAST(strftime('%w', \(localDate)) AS INTEGER) + 6) % 7) || ' days')"
+            case .month:
+                periodExpression = "strftime('%Y-%m-01', \(localDate))"
+            }
+
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT
+                    \(periodExpression) AS period_start,
+                    COUNT(*) AS request_count,
+                    COALESCE(SUM(input_tokens), 0) AS input_tk,
+                    COALESCE(SUM(output_tokens), 0) AS output_tk,
+                    COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tk,
+                    COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tk
+                FROM request_logs \(w.sql)
+                GROUP BY period_start ORDER BY period_start
+                """, arguments: StatementArguments(w.args))
+
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.calendar = calendar
+            formatter.timeZone = calendar.timeZone
+            formatter.dateFormat = "yyyy-MM-dd"
+            let populated = Dictionary(uniqueKeysWithValues: rows.compactMap { row -> (Date, ActivityRangeTokenUsage)? in
+                let periodStart: Date?
+                switch aggregation {
+                case .hour:
+                    let timestamp: Int = row["period_start"]
+                    periodStart = Date(timeIntervalSince1970: TimeInterval(timestamp))
+                case .day, .week, .month:
+                    let value: String = row["period_start"]
+                    periodStart = formatter.date(from: value)
+                }
+                guard let periodStart else { return nil }
+                let usage = ActivityRangeTokenUsage(
+                    periodStart: periodStart,
+                    requestCount: row["request_count"],
+                    inputTokens: row["input_tk"],
+                    outputTokens: row["output_tk"],
+                    cacheReadTokens: row["cache_read_tk"],
+                    cacheCreationTokens: row["cache_creation_tk"]
+                )
+                return (usage.periodStart, usage)
+            })
+
+            var cursor = alignedActivityPeriodStart(startDate, aggregation: aggregation, calendar: calendar)
+            let displayExclusiveEnd: Date
+            if aggregation == .hour, startDate <= now, now < exclusiveEnd {
+                let currentHour = alignedActivityPeriodStart(now, aggregation: .hour, calendar: calendar)
+                displayExclusiveEnd = min(
+                    exclusiveEnd,
+                    nextActivityPeriodStart(currentHour, aggregation: .hour, calendar: calendar)
+                )
+            } else {
+                displayExclusiveEnd = exclusiveEnd
+            }
+            var usage: [ActivityRangeTokenUsage] = []
+            while cursor < displayExclusiveEnd {
+                usage.append(populated[cursor] ?? ActivityRangeTokenUsage(
+                    periodStart: cursor,
+                    requestCount: 0,
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    cacheReadTokens: 0,
+                    cacheCreationTokens: 0
+                ))
+                cursor = nextActivityPeriodStart(cursor, aggregation: aggregation, calendar: calendar)
+            }
+
+            return ActivityRangeTokenSeries(aggregation: aggregation, usage: usage)
+        }) ?? .empty
+    }
+
+    private func alignedActivityPeriodStart(
+        _ date: Date,
+        aggregation: ActivityTokenAggregation,
+        calendar: Calendar
+    ) -> Date {
+        let day = calendar.startOfDay(for: date)
+        switch aggregation {
+        case .hour:
+            let components = calendar.dateComponents([.year, .month, .day, .hour], from: date)
+            return calendar.date(from: components)!
+        case .day:
+            return day
+        case .week:
+            let weekday = calendar.component(.weekday, from: day)
+            return calendar.date(byAdding: .day, value: -((weekday + 5) % 7), to: day)!
+        case .month:
+            let components = calendar.dateComponents([.year, .month], from: day)
+            return calendar.date(from: components)!
+        }
+    }
+
+    private func nextActivityPeriodStart(
+        _ date: Date,
+        aggregation: ActivityTokenAggregation,
+        calendar: Calendar
+    ) -> Date {
+        switch aggregation {
+        case .hour:
+            return calendar.date(byAdding: .hour, value: 1, to: date)!
+        case .day:
+            return calendar.date(byAdding: .day, value: 1, to: date)!
+        case .week:
+            return calendar.date(byAdding: .day, value: 7, to: date)!
+        case .month:
+            return calendar.date(byAdding: .month, value: 1, to: date)!
+        }
     }
 
     func fetchModelDistribution(

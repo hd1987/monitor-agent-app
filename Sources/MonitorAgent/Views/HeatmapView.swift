@@ -55,7 +55,7 @@ struct HeatmapView: View {
             }
             .contentShape(Rectangle())
             .onTapGesture {
-                if store.selectedActivityDate != nil {
+                if store.isActivityDetailPresented {
                     store.clearSelectedActivityDate()
                 }
             }
@@ -203,6 +203,18 @@ struct HeatmapView: View {
                             ? .opacity
                             : .opacity.combined(with: .move(edge: .top))
                     )
+            } else if let range = store.activityDetailRange {
+                ActivityRangeTokenChartView(
+                    range: range,
+                    series: store.activityRangeTokenSeries,
+                    isLoading: store.isActivityRangeTokenUsageLoading
+                )
+                    .environmentObject(theme)
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .opacity.combined(with: .move(edge: .top))
+                    )
             }
         }
         .padding(.horizontal, hPadding)
@@ -213,7 +225,7 @@ struct HeatmapView: View {
                     activityFrameInWindow = frame
                 }
                 ActivityChartClickMonitor(
-                    isActive: store.selectedActivityDate != nil,
+                    isActive: store.isActivityDetailPresented,
                     excludedFrames: [activityFrameInWindow, filterBarFrameInWindow],
                     onOutsideClick: {
                         store.clearSelectedActivityDate()
@@ -221,8 +233,8 @@ struct HeatmapView: View {
                 )
             }
         )
-        .onChange(of: store.selectedActivityDate) { _, selectedDate in
-            if selectedDate == nil {
+        .onChange(of: store.activityDetailRange) { _, selectedRange in
+            if selectedRange == nil {
                 activityFrameInWindow = .null
             }
         }
