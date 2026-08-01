@@ -2,6 +2,8 @@ import Foundation
 import SwiftUI
 import Combine
 
+typealias HourlyTokenUsageLoader = (DatabaseManager, AppFilter, String) -> [HourlyTokenUsage]
+
 final class AppStore: ObservableObject {
     @Published var appFilter: AppFilter = .all
     @Published var timeRange: TimeRange = .today
@@ -31,10 +33,12 @@ final class AppStore: ObservableObject {
     private let quotaService: QuotaRefreshing
     private let quotaSettings: QuotaSettings
     private let refreshCoordinator: PanelRefreshCoordinator
+    private let hourlyTokenUsageLoader: HourlyTokenUsageLoader
     private var activeDay: Date
     private var cancellables = Set<AnyCancellable>()
     private var usageDataRebuildCancellation: UsageDataRebuildCancellation?
     private var reloadGeneration = 0
+    private var hourlyLoadGeneration = 0
     private(set) var isPanelVisible = false
     var isPeriodicRefreshActive: Bool { refreshCoordinator.isRunning }
 
@@ -46,7 +50,10 @@ final class AppStore: ObservableObject {
         quotaSettings: QuotaSettings = .shared,
         refreshCoordinator: PanelRefreshCoordinator = PanelRefreshCoordinator(),
         observeRefreshIntervalChanges: Bool = true,
-        currentDateProvider: @escaping () -> Date = Date.init
+        currentDateProvider: @escaping () -> Date = Date.init,
+        hourlyTokenUsageLoader: @escaping HourlyTokenUsageLoader = { database, app, date in
+            database.fetchHourlyTokenUsage(app: app, date: date)
+        }
     ) {
         self.db = database
         self.syncManager = syncManager ?? SessionSyncManager(
@@ -58,6 +65,7 @@ final class AppStore: ObservableObject {
         self.quotaService = quotaService
         self.quotaSettings = quotaSettings
         self.refreshCoordinator = refreshCoordinator
+        self.hourlyTokenUsageLoader = hourlyTokenUsageLoader
         self.activeDay = Calendar.current.startOfDay(for: currentDateProvider())
         refreshCoordinator.setRefreshStateHandler { [weak self] isRefreshing, isManual in
             self?.isRefreshInProgress = isRefreshing
@@ -258,13 +266,19 @@ final class AppStore: ObservableObject {
 
         resetToTodayAfterDayRolloverIfNeeded()
         reloadGeneration += 1
+        hourlyLoadGeneration += 1
 
         let appFilter = appFilter
         let timeRange = timeRange
         let heatmapMode = heatmapMode
         let selectedActivityDate = selectedActivityDate
         let reloadGeneration = reloadGeneration
+        let hourlyLoadGeneration = hourlyLoadGeneration
         let db = db
+        let hourlyTokenUsageLoader = hourlyTokenUsageLoader
+        if selectedActivityDate != nil {
+            isHourlyTokenUsageLoading = true
+        }
 
         DispatchQueue.global(qos: .userInitiated).async {
             let s = db.fetchStats(app: appFilter, range: timeRange)
@@ -282,7 +296,7 @@ final class AppStore: ObservableObject {
                 h = db.fetchHeatmap(app: appFilter, from: start, to: end)
             }
             let hourly = selectedActivityDate.map {
-                db.fetchHourlyTokenUsage(app: appFilter, date: $0)
+                hourlyTokenUsageLoader(db, appFilter, $0)
             } ?? []
             let m = db.fetchModelDistribution(app: appFilter, range: timeRange)
             let years = db.availableYears()
@@ -293,7 +307,8 @@ final class AppStore: ObservableObject {
                     self.timeRange == timeRange,
                     self.heatmapMode == heatmapMode,
                     self.selectedActivityDate == selectedActivityDate,
-                    self.reloadGeneration == reloadGeneration
+                    self.reloadGeneration == reloadGeneration,
+                    self.hourlyLoadGeneration == hourlyLoadGeneration
                 else {
                     return
                 }
@@ -301,6 +316,7 @@ final class AppStore: ObservableObject {
                 self.stats = s
                 self.heatmap = h
                 self.hourlyTokenUsage = hourly
+                self.isHourlyTokenUsageLoading = false
                 self.modelDistribution = m
                 self.availableYears = years
                 if case .year(let selectedYear) = self.heatmapMode,
@@ -336,6 +352,7 @@ final class AppStore: ObservableObject {
     }
 
     func clearSelectedActivityDate() {
+        hourlyLoadGeneration += 1
         selectedActivityDate = nil
         hourlyTokenUsage = []
         isHourlyTokenUsageLoading = false
@@ -343,12 +360,22 @@ final class AppStore: ObservableObject {
 
     private func loadHourlyTokenUsage(for date: String) {
         let app = appFilter
+        hourlyLoadGeneration += 1
+        let generation = hourlyLoadGeneration
+        let loader = hourlyTokenUsageLoader
         DispatchQueue.global(qos: .userInitiated).async { [db] in
-            let usage = db.fetchHourlyTokenUsage(app: app, date: date)
+            let usage = loader(db, app, date)
             DispatchQueue.main.async { [weak self] in
-                guard self?.selectedActivityDate == date else { return }
-                self?.hourlyTokenUsage = usage
-                self?.isHourlyTokenUsageLoading = false
+                guard
+                    let self,
+                    self.selectedActivityDate == date,
+                    self.appFilter == app,
+                    self.hourlyLoadGeneration == generation
+                else {
+                    return
+                }
+                self.hourlyTokenUsage = usage
+                self.isHourlyTokenUsageLoading = false
             }
         }
     }

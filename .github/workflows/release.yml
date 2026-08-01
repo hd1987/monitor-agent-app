@@ -43,7 +43,7 @@ jobs:
           fi
           VERSION="${TAG#v}"
           COMMIT_SHA=$(git rev-parse --short=7 "$TAG_COMMIT")
-          RELEASE_DATE=$(awk -v version="$VERSION" '$0 ~ "^## \\[" version "\\] - " { print $0; exit }' CHANGELOG.md | sed -E 's/^## \[[^]]+\] - //')
+          RELEASE_DATE=$(git show "${TAG}:CHANGELOG.md" | awk -v version="$VERSION" '$0 ~ "^## \\[" version "\\] - " { print $0; exit }' | sed -E 's/^## \[[^]]+\] - //')
           if [ -z "$RELEASE_DATE" ]; then
             echo "Release date for $VERSION not found in CHANGELOG.md."
             exit 1
@@ -56,6 +56,10 @@ jobs:
           echo "skip=false" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check out release tag
+        if: steps.tag.outputs.skip == 'false'
+        run: git checkout --detach "${{ steps.tag.outputs.tag }}"
 
       - name: Select Xcode 26.6
         if: steps.tag.outputs.skip == 'false'

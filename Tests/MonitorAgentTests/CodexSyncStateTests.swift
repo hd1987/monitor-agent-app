@@ -83,6 +83,25 @@ final class CodexSyncStateTests: XCTestCase {
         XCTAssertEqual(record.outputTokens, 260)
     }
 
+    func testCodexTokenCountWithoutLastUsageFailsClosedWithoutAdvancingContext() {
+        var context = CodexParseContext(
+            sessionId: "session-1",
+            turnCount: 4,
+            lastTotalIn: 100,
+            lastTotalOut: 20
+        )
+        let line = codexTokenCountLineWithoutLastUsage(
+            timestamp: "2026-06-21T14:04:17.347Z",
+            totalInput: 150,
+            totalOutput: 30
+        )
+
+        XCTAssertNil(CodexLogParser.parse(lineData: line, context: &context))
+        XCTAssertEqual(context.turnCount, 4)
+        XCTAssertEqual(context.lastTotalIn, 100)
+        XCTAssertEqual(context.lastTotalOut, 20)
+    }
+
     private func codexTokenCountLine(
         timestamp: String,
         totalInput: Int,
@@ -105,6 +124,27 @@ final class CodexSyncStateTests: XCTestCase {
                         "input_tokens": lastInput,
                         "output_tokens": lastOutput,
                         "cached_input_tokens": lastCacheRead,
+                    ],
+                ],
+            ],
+        ]
+        return try! JSONSerialization.data(withJSONObject: json)
+    }
+
+    private func codexTokenCountLineWithoutLastUsage(
+        timestamp: String,
+        totalInput: Int,
+        totalOutput: Int
+    ) -> Data {
+        let json: [String: Any] = [
+            "timestamp": timestamp,
+            "type": "event_msg",
+            "payload": [
+                "type": "token_count",
+                "info": [
+                    "total_token_usage": [
+                        "input_tokens": totalInput,
+                        "output_tokens": totalOutput,
                     ],
                 ],
             ],

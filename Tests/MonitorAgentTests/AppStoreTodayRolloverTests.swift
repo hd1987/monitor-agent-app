@@ -263,6 +263,48 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         wait(for: [loaded], timeout: 1)
     }
 
+    func testStaleHourlyLoadCannotOverwriteNewAppFilter() {
+        let oldLoadStarted = expectation(description: "old hourly load starts")
+        let releaseOldLoad = DispatchSemaphore(value: 0)
+        let oldUsage = [hourlyUsage(hour: 1, inputTokens: 100)]
+        let currentUsage = [hourlyUsage(hour: 2, inputTokens: 200)]
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            observeRefreshIntervalChanges: false,
+            hourlyTokenUsageLoader: { _, app, _ in
+                if app == .all {
+                    oldLoadStarted.fulfill()
+                    _ = releaseOldLoad.wait(timeout: .now() + 1)
+                    return oldUsage
+                }
+                return currentUsage
+            }
+        )
+
+        store.selectActivityDate("2026-07-08")
+        wait(for: [oldLoadStarted], timeout: 1)
+
+        store.appFilter = .cursor
+        store.reload()
+
+        let currentLoadFinished = expectation(description: "current hourly load finishes")
+        waitUntil(attemptsRemaining: 50) {
+            store.hourlyTokenUsage == currentUsage && !store.isHourlyTokenUsageLoading
+        } completion: {
+            currentLoadFinished.fulfill()
+        }
+        wait(for: [currentLoadFinished], timeout: 1)
+
+        releaseOldLoad.signal()
+        let staleLoadFinished = expectation(description: "stale hourly load finishes")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            XCTAssertEqual(store.hourlyTokenUsage, currentUsage)
+            XCTAssertFalse(store.isHourlyTokenUsageLoading)
+            staleLoadFinished.fulfill()
+        }
+        wait(for: [staleLoadFinished], timeout: 1)
+    }
+
     func testReloadAfterDayRolloverResetsAnySelectionToToday() {
         var now = date(year: 2026, month: 7, day: 9, hour: 23)
         let store = AppStore(
@@ -348,6 +390,17 @@ final class AppStoreTodayRolloverTests: XCTestCase {
     private func date(year: Int, month: Int, day: Int, hour: Int = 0) -> Date {
         let calendar = Calendar.current
         return calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour))!
+    }
+
+    private func hourlyUsage(hour: Int, inputTokens: Int64) -> HourlyTokenUsage {
+        HourlyTokenUsage(
+            hour: hour,
+            requestCount: 1,
+            inputTokens: inputTokens,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0
+        )
     }
 }
 

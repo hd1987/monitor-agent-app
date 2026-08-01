@@ -7,6 +7,34 @@ struct RestartCommand {
     let arguments: [String]
 }
 
+enum UpdateOperationState: Equatable {
+    case idle
+    case checking
+    case downloading
+    case installing
+}
+
+enum UpdateWindowClosePolicy {
+    static func allowsClose(operationState: UpdateOperationState) -> Bool {
+        operationState != .installing
+    }
+}
+
+enum UpdateDownloadStager {
+    static func stage(
+        downloadedFile: URL,
+        in directory: URL = FileManager.default.temporaryDirectory,
+        fileManager: FileManager = .default,
+        identifier: UUID = UUID()
+    ) throws -> URL {
+        let destination = directory
+            .appendingPathComponent("MonitorAgent-update-\(identifier.uuidString)")
+            .appendingPathExtension("zip")
+        try fileManager.moveItem(at: downloadedFile, to: destination)
+        return destination
+    }
+}
+
 enum RestartLauncher {
     static func makeCommand(appURL: URL, delay: TimeInterval) -> RestartCommand {
         let delayValue = String(format: "%.1f", delay)
@@ -34,12 +62,12 @@ enum RestartLauncher {
 }
 
 /// Checks GitHub Releases for new versions, downloads and installs updates.
-final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
+final class UpdateChecker: NSObject, URLSessionDownloadDelegate, NSWindowDelegate {
     static let shared = UpdateChecker()
 
     private let repo = "hd1987/monitor-agent-app"
     private let lastCheckKey = "lastUpdateCheck"
-    private var isChecking = false
+    private var operationState: UpdateOperationState = .idle
 
     private var window: NSPanel?
     private var hostingView: NSHostingView<UpdateCheckView>?
@@ -52,6 +80,7 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
     // MARK: - Public
 
     func checkForUpdates(silent: Bool) {
+        guard operationState == .idle else { return }
         guard currentVersion != nil else {
             if !silent {
                 configureWindow(state: .unavailable())
@@ -60,12 +89,11 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
         }
 
         if silent {
-            guard !isChecking else { return }
             let last = UserDefaults.standard.object(forKey: lastCheckKey) as? Date
             if let last, Date().timeIntervalSince(last) < 86400 { return }
         }
 
-        isChecking = true
+        operationState = .checking
         if !silent { showChecking() }
 
         fetchLatestRelease { [weak self] result in
@@ -83,7 +111,8 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
     // MARK: - Result Handling
 
     private func handleResult(_ result: Result<Release?, Error>, silent: Bool) {
-        isChecking = false
+        guard operationState == .checking else { return }
+        operationState = .idle
         UserDefaults.standard.set(Date(), forKey: lastCheckKey)
 
         switch result {
@@ -133,6 +162,7 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
         hostingView?.rootView = UpdateCheckView(state: state) { [weak self] action in
             self?.perform(action)
         }
+        updateWindowCloseAvailability()
 
         if let fittingSize = hostingView?.fittingSize {
             window?.setContentSize(NSSize(width: max(460, fittingSize.width), height: fittingSize.height))
@@ -158,6 +188,7 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
         win.level = .normal
         win.hidesOnDeactivate = false
         win.isMovableByWindowBackground = true
+        win.delegate = self
 
         win.appearance = ThemeManager.shared.nsAppearance
 
@@ -188,16 +219,30 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
     @objc private func close() {
         downloadTask?.cancel()
         downloadTask = nil
-        isChecking = false
+        operationState = .idle
         closeWindow()
     }
 
     private func closeWindow() { window?.orderOut(nil) }
 
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard UpdateWindowClosePolicy.allowsClose(operationState: operationState) else {
+            return false
+        }
+        close()
+        return false
+    }
+
+    private func updateWindowCloseAvailability() {
+        window?.standardWindowButton(.closeButton)?.isEnabled =
+            UpdateWindowClosePolicy.allowsClose(operationState: operationState)
+    }
+
     // MARK: - Download
 
     @objc private func startDownload() {
-        guard let release = pendingRelease else { return }
+        guard operationState == .idle, let release = pendingRelease else { return }
+        operationState = .downloading
         showDownloading(release.tagName)
 
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
@@ -213,6 +258,12 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
         let mb = Double(totalBytesWritten) / 1_000_000
         let totalMb = Double(totalBytesExpectedToWrite) / 1_000_000
         DispatchQueue.main.async {
+            guard
+                self.operationState == .downloading,
+                self.downloadTask === downloadTask
+            else {
+                return
+            }
             self.configureWindow(
                 state: .downloading(
                     tagName: self.pendingRelease?.tagName ?? "update",
@@ -227,19 +278,47 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
                     didFinishDownloadingTo location: URL) {
-        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("MonitorAgent-update.zip")
-        try? FileManager.default.removeItem(at: tmp)
-        try? FileManager.default.moveItem(at: location, to: tmp)
-        DispatchQueue.main.async {
-            self.downloadTask = nil
-            self.install(zipURL: tmp)
+        do {
+            let stagedURL = try UpdateDownloadStager.stage(downloadedFile: location)
+            DispatchQueue.main.async {
+                guard
+                    self.operationState == .downloading,
+                    self.downloadTask === downloadTask
+                else {
+                    try? FileManager.default.removeItem(at: stagedURL)
+                    return
+                }
+                self.downloadTask = nil
+                self.install(zipURL: stagedURL)
+            }
+        } catch {
+            DispatchQueue.main.async {
+                guard
+                    self.operationState == .downloading,
+                    self.downloadTask === downloadTask
+                else {
+                    return
+                }
+                self.downloadTask = nil
+                self.operationState = .idle
+                self.configureWindow(
+                    state: .failure(title: "Download failed", detail: error.localizedDescription)
+                )
+            }
         }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let error, (error as NSError).code != NSURLErrorCancelled else { return }
         DispatchQueue.main.async {
+            guard
+                self.operationState == .downloading,
+                self.downloadTask === task
+            else {
+                return
+            }
             self.downloadTask = nil
+            self.operationState = .idle
             self.configureWindow(state: .failure(title: "Download failed", detail: error.localizedDescription))
         }
     }
@@ -247,10 +326,14 @@ final class UpdateChecker: NSObject, URLSessionDownloadDelegate {
     // MARK: - Install
 
     private func install(zipURL: URL) {
+        operationState = .installing
         showInstalling()
         DispatchQueue.global(qos: .userInitiated).async { [self] in
+            defer { try? FileManager.default.removeItem(at: zipURL) }
             let success = Self.extractApp(from: zipURL)
             DispatchQueue.main.async {
+                guard self.operationState == .installing else { return }
+                self.operationState = .idle
                 if success {
                     self.configureWindow(state: .updateComplete())
                 } else {
