@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-02
+
 ### Added
 - Let an already-open Activity detail follow multi-day filters, aggregating one to three days by hour, up to 90 days by day, up to 540 days by week, and longer history by month while closed details stay closed
 
