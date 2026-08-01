@@ -190,7 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         panel.onCycleAppFilter = { [weak self] reverse in
             guard let self else { return }
-            self.store.appFilter = self.store.appFilter.cycled(reverse: reverse)
+            self.store.cycleAppFilter(reverse: reverse)
         }
         panel.onResetPosition = { [weak self] in
             self?.resetPanelPosition()

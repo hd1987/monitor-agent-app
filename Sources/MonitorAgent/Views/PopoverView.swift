@@ -17,11 +17,25 @@ struct PopoverView: View {
                     filterBarFrameInWindow = frame
                 }
             )
-            StatCardsView(isTokenBreakdownPresented: $isTokenBreakdownPresented)
-            HeatmapView(filterBarFrameInWindow: filterBarFrameInWindow)
-                .allowsHitTesting(!isTokenBreakdownPresented)
-            ModelDistributionView()
-            SubscriptionQuotaView()
+            if store.hasEnabledAgents {
+                StatCardsView(isTokenBreakdownPresented: $isTokenBreakdownPresented)
+                HeatmapView(filterBarFrameInWindow: filterBarFrameInWindow)
+                    .allowsHitTesting(!isTokenBreakdownPresented)
+                ModelDistributionView()
+                SubscriptionQuotaView()
+            } else {
+                ContentUnavailableView {
+                    Label("No Agents Monitored", systemImage: "waveform.slash")
+                } description: {
+                    Text("Enable at least one Agent in General Settings.")
+                } actions: {
+                    Button("Open General Settings") {
+                        onOpenGeneralSettings()
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 360)
+            }
         }
         .frame(width: MainPanelDesign.width)
         .clipShape(

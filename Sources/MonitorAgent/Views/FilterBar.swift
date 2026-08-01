@@ -45,7 +45,7 @@ struct FilterBar: View {
         HStack(spacing: 12) {
             // App filter (segmented)
             HStack(spacing: 2) {
-                ForEach(AppFilter.allCases) { filter in
+                ForEach(store.availableAppFilters) { filter in
                     Button {
                         store.appFilter = filter
                     } label: {
@@ -127,7 +127,9 @@ struct FilterBar: View {
                     } label: {
                         RefreshStatusIcon(
                             isRefreshing: store.isManualRefreshInProgress,
-                            foreground: isCoolingDown || store.isRebuildingUsageData
+                            foreground: isCoolingDown
+                                || store.isRebuildingUsageData
+                                || !store.hasEnabledAgents
                                 ? headerToolForeground.opacity(0.35)
                                 : headerToolForeground,
                             reduceMotion: reduceMotion
@@ -141,6 +143,7 @@ struct FilterBar: View {
                     .buttonStyle(MainPanelPressButtonStyle())
                     .disabled(
                         store.isRebuildingUsageData
+                            || !store.hasEnabledAgents
                             || cooldownRemaining > 0
                     )
                     .help(

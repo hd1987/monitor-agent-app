@@ -6,12 +6,23 @@ protocol CursorUsageSyncing {
     func sync() throws -> SessionSyncResult
 }
 
+protocol CancellableCursorUsageSyncing: CursorUsageSyncing {
+    func sync(cancellation: AgentSyncCancellation?) throws -> SessionSyncResult
+}
+
 protocol CursorAuthenticationReading {
     func readAccessToken() throws -> String
 }
 
 protocol CursorHTTPTransport {
     func send(_ request: URLRequest) throws -> (Data, HTTPURLResponse)
+}
+
+protocol CancellableCursorHTTPTransport: CursorHTTPTransport {
+    func send(
+        _ request: URLRequest,
+        isCancelled: @escaping () -> Bool
+    ) throws -> (Data, HTTPURLResponse)
 }
 
 enum CursorUsageError: LocalizedError, Equatable {
@@ -22,6 +33,7 @@ enum CursorUsageError: LocalizedError, Equatable {
     case responseTooLarge
     case paginationLimitExceeded
     case requestFailed
+    case cancelled
 
     var errorDescription: String? {
         switch self {
@@ -39,12 +51,14 @@ enum CursorUsageError: LocalizedError, Equatable {
             return "Cursor usage pagination exceeded the safety limit."
         case .requestFailed:
             return "Cursor usage could not be refreshed."
+        case .cancelled:
+            return "Cursor usage refresh was canceled."
         }
     }
 
     var allowsRebuildWithoutCursorData: Bool {
         switch self {
-        case .authenticationUnavailable, .authenticationRejected, .requestFailed:
+        case .authenticationUnavailable, .authenticationRejected, .requestFailed, .cancelled:
             return true
         case .invalidEndpoint, .invalidResponse, .responseTooLarge, .paginationLimitExceeded:
             return false
@@ -81,7 +95,7 @@ final class CursorStateAuthenticationReader: CursorAuthenticationReading {
     }
 }
 
-final class CursorURLSessionTransport: NSObject, CursorHTTPTransport, URLSessionTaskDelegate {
+final class CursorURLSessionTransport: NSObject, CancellableCursorHTTPTransport, URLSessionTaskDelegate {
     private static let timeout: TimeInterval = 20
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -93,6 +107,13 @@ final class CursorURLSessionTransport: NSObject, CursorHTTPTransport, URLSession
     }()
 
     func send(_ request: URLRequest) throws -> (Data, HTTPURLResponse) {
+        try send(request, isCancelled: { false })
+    }
+
+    func send(
+        _ request: URLRequest,
+        isCancelled: @escaping () -> Bool
+    ) throws -> (Data, HTTPURLResponse) {
         let semaphore = DispatchSemaphore(value: 0)
         let lock = NSLock()
         var result: Result<(Data, HTTPURLResponse), Error>?
@@ -113,9 +134,16 @@ final class CursorURLSessionTransport: NSObject, CursorHTTPTransport, URLSession
         }
         task.resume()
 
-        guard semaphore.wait(timeout: .now() + Self.timeout + 1) == .success else {
-            task.cancel()
-            throw CursorUsageError.requestFailed
+        let deadline = Date().addingTimeInterval(Self.timeout + 1)
+        while semaphore.wait(timeout: .now() + 0.1) != .success {
+            if isCancelled() {
+                task.cancel()
+                throw CursorUsageError.cancelled
+            }
+            if Date() >= deadline {
+                task.cancel()
+                throw CursorUsageError.requestFailed
+            }
         }
 
         lock.lock()
@@ -135,7 +163,7 @@ final class CursorURLSessionTransport: NSObject, CursorHTTPTransport, URLSession
     }
 }
 
-final class CursorUsageService: CursorUsageSyncing {
+final class CursorUsageService: CancellableCursorUsageSyncing {
     static let syncStateKey = "cursor://usage-events"
 
     private static let apiOrigin = URL(string: "https://api2.cursor.sh")!
@@ -162,11 +190,17 @@ final class CursorUsageService: CursorUsageSyncing {
     }
 
     func sync() throws -> SessionSyncResult {
+        try sync(cancellation: nil)
+    }
+
+    func sync(cancellation: AgentSyncCancellation?) throws -> SessionSyncResult {
+        try checkCancellation(cancellation)
         let currentDate = now()
         let currentSeconds = Int(currentDate.timeIntervalSince1970)
         let existingState = database.getSyncState(for: Self.syncStateKey)
         let token = try authenticationReader.readAccessToken()
-        let account = try fetchAccount(token: token)
+        try checkCancellation(cancellation)
+        let account = try fetchAccount(token: token, cancellation: cancellation)
         let accountIdentity = account.syncIdentity
         let accountChanged = existingState?.sessionId != accountIdentity
         let endMilliseconds = Int64(currentDate.timeIntervalSince1970 * 1_000)
@@ -177,8 +211,10 @@ final class CursorUsageService: CursorUsageSyncing {
             token: token,
             account: account,
             startMilliseconds: startMilliseconds,
-            endMilliseconds: endMilliseconds
+            endMilliseconds: endMilliseconds,
+            cancellation: cancellation
         )
+        try checkCancellation(cancellation)
         let records = events.compactMap(makeRecord)
         let state = SyncState(
             filePath: Self.syncStateKey,
@@ -189,6 +225,23 @@ final class CursorUsageService: CursorUsageSyncing {
             lastModified: currentSeconds,
             lastSyncedAt: currentSeconds
         )
+        if let cancellation {
+            guard try cancellation.withEnabledAgent(.cursor, perform: {
+                try commit(records: records, state: state, accountChanged: accountChanged)
+            }) != nil else {
+                throw CursorUsageError.cancelled
+            }
+        } else {
+            try commit(records: records, state: state, accountChanged: accountChanged)
+        }
+        return SessionSyncResult(filesSynced: 1, recordsSynced: records.count)
+    }
+
+    private func commit(
+        records: [ParsedRecord],
+        state: SyncState,
+        accountChanged: Bool
+    ) throws {
         if accountChanged {
             try database.replaceAppRecords(
                 appType: "cursor",
@@ -198,14 +251,17 @@ final class CursorUsageService: CursorUsageSyncing {
         } else {
             try database.commitSync(records: records, state: state)
         }
-        return SessionSyncResult(filesSynced: 1, recordsSynced: records.count)
     }
 
-    private func fetchAccount(token: String) throws -> CursorAccount {
+    private func fetchAccount(
+        token: String,
+        cancellation: AgentSyncCancellation?
+    ) throws -> CursorAccount {
         let data = try perform(
             path: "/aiserver.v1.DashboardService/GetMe",
             token: token,
-            body: [:]
+            body: [:],
+            cancellation: cancellation
         )
         return try JSONDecoder().decode(CursorAccount.self, from: data)
     }
@@ -214,12 +270,14 @@ final class CursorUsageService: CursorUsageSyncing {
         token: String,
         account: CursorAccount,
         startMilliseconds: Int64?,
-        endMilliseconds: Int64
+        endMilliseconds: Int64,
+        cancellation: AgentSyncCancellation?
     ) throws -> [CursorUsageEvent] {
         var events: [CursorUsageEvent] = []
         var page = 1
 
         while page <= Self.maximumPages {
+            try checkCancellation(cancellation)
             var body: [String: Any] = [
                 "userId": account.userId,
                 "endDate": String(endMilliseconds),
@@ -236,7 +294,8 @@ final class CursorUsageService: CursorUsageSyncing {
             let data = try perform(
                 path: "/aiserver.v1.DashboardService/GetFilteredUsageEvents",
                 token: token,
-                body: body
+                body: body,
+                cancellation: cancellation
             )
             let response = try JSONDecoder().decode(CursorUsagePage.self, from: data)
             events.append(contentsOf: response.usageEventsDisplay)
@@ -251,7 +310,13 @@ final class CursorUsageService: CursorUsageSyncing {
         throw CursorUsageError.paginationLimitExceeded
     }
 
-    private func perform(path: String, token: String, body: [String: Any]) throws -> Data {
+    private func perform(
+        path: String,
+        token: String,
+        body: [String: Any],
+        cancellation: AgentSyncCancellation?
+    ) throws -> Data {
+        try checkCancellation(cancellation)
         let url = Self.apiOrigin.appendingPathComponent(path)
         guard url.scheme == "https",
               url.host == "api2.cursor.sh",
@@ -269,12 +334,19 @@ final class CursorUsageService: CursorUsageSyncing {
         let data: Data
         let response: HTTPURLResponse
         do {
-            (data, response) = try transport.send(request)
+            if let transport = transport as? CancellableCursorHTTPTransport {
+                (data, response) = try transport.send(request) {
+                    cancellation?.isEnabled(.cursor) == false
+                }
+            } else {
+                (data, response) = try transport.send(request)
+            }
         } catch let error as CursorUsageError {
             throw error
         } catch {
             throw CursorUsageError.requestFailed
         }
+        try checkCancellation(cancellation)
         guard data.count <= Self.maximumResponseBytes else {
             throw CursorUsageError.responseTooLarge
         }
@@ -285,6 +357,12 @@ final class CursorUsageService: CursorUsageSyncing {
             throw CursorUsageError.requestFailed
         }
         return data
+    }
+
+    private func checkCancellation(_ cancellation: AgentSyncCancellation?) throws {
+        if cancellation?.isEnabled(.cursor) == false {
+            throw CursorUsageError.cancelled
+        }
     }
 
     private func makeRecord(event: CursorUsageEvent) -> ParsedRecord? {

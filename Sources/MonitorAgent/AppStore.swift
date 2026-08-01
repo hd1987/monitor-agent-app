@@ -2,7 +2,33 @@ import Foundation
 import SwiftUI
 import Combine
 
-typealias HourlyTokenUsageLoader = (DatabaseManager, AppFilter, String) -> [HourlyTokenUsage]
+typealias HourlyTokenUsageLoader = (
+    DatabaseManager,
+    AppFilter,
+    Set<AgentID>,
+    String
+) -> [HourlyTokenUsage]
+
+private final class RefreshCycleParticipant {
+    private let lock = NSLock()
+    private var isFinished = false
+    private let onFinish: () -> Void
+
+    init(onFinish: @escaping () -> Void) {
+        self.onFinish = onFinish
+    }
+
+    func finish() {
+        lock.lock()
+        guard !isFinished else {
+            lock.unlock()
+            return
+        }
+        isFinished = true
+        lock.unlock()
+        onFinish()
+    }
+}
 
 final class AppStore: ObservableObject {
     @Published var appFilter: AppFilter = .all
@@ -25,10 +51,12 @@ final class AppStore: ObservableObject {
     @Published private(set) var manualRefreshAvailableAt: Date?
     @Published private(set) var isRefreshInProgress = false
     @Published private(set) var isManualRefreshInProgress = false
+    @Published private(set) var enabledAgents: Set<AgentID>
 
     private let db: DatabaseManager
     private let syncManager: SessionSyncManager
     private let refreshSettings: RefreshSettings
+    private let monitoringSettings: AgentMonitoringSettings
     private let currentDateProvider: () -> Date
     private let quotaService: QuotaRefreshing
     private let quotaSettings: QuotaSettings
@@ -37,6 +65,8 @@ final class AppStore: ObservableObject {
     private var activeDay: Date
     private var cancellables = Set<AnyCancellable>()
     private var usageDataRebuildCancellation: UsageDataRebuildCancellation?
+    private var activeAgentSyncCancellation: AgentSyncCancellation?
+    private var activeQuotaParticipants: [QuotaProviderID: RefreshCycleParticipant] = [:]
     private var reloadGeneration = 0
     private var hourlyLoadGeneration = 0
     private(set) var isPanelVisible = false
@@ -46,13 +76,14 @@ final class AppStore: ObservableObject {
         database: DatabaseManager = .shared,
         syncManager: SessionSyncManager? = nil,
         refreshSettings: RefreshSettings = .shared,
+        monitoringSettings: AgentMonitoringSettings = .shared,
         quotaService: QuotaRefreshing = QuotaService.shared,
         quotaSettings: QuotaSettings = .shared,
         refreshCoordinator: PanelRefreshCoordinator = PanelRefreshCoordinator(),
         observeRefreshIntervalChanges: Bool = true,
         currentDateProvider: @escaping () -> Date = Date.init,
-        hourlyTokenUsageLoader: @escaping HourlyTokenUsageLoader = { database, app, date in
-            database.fetchHourlyTokenUsage(app: app, date: date)
+        hourlyTokenUsageLoader: @escaping HourlyTokenUsageLoader = { database, app, agents, date in
+            database.fetchHourlyTokenUsage(app: app, date: date, enabledAgents: agents)
         }
     ) {
         self.db = database
@@ -61,6 +92,8 @@ final class AppStore: ObservableObject {
             cursorUsageSyncer: CursorUsageService(database: database)
         )
         self.refreshSettings = refreshSettings
+        self.monitoringSettings = monitoringSettings
+        self.enabledAgents = monitoringSettings.enabledAgents
         self.currentDateProvider = currentDateProvider
         self.quotaService = quotaService
         self.quotaSettings = quotaSettings
@@ -88,13 +121,30 @@ final class AppStore: ObservableObject {
                 .store(in: &cancellables)
         }
 
+        monitoringSettings.$enabledAgents
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] enabledAgents in
+                self?.monitoringSettingsDidChange(enabledAgents)
+            }
+            .store(in: &cancellables)
+
+    }
+
+    var availableAppFilters: [AppFilter] { AppFilter.available(for: enabledAgents) }
+    var hasEnabledAgents: Bool { !enabledAgents.isEmpty }
+
+    func updateEnabledAgents(_ enabledAgents: Set<AgentID>) {
+        monitoringSettings.enabledAgents = enabledAgents
     }
 
     private func applyRefreshInterval(
         _ interval: RefreshInterval,
-        throttleInitialRefresh: Bool = false
+        throttleInitialRefresh: Bool = false,
+        enabledAgents requestedEnabledAgents: Set<AgentID>? = nil
     ) {
-        guard isPanelVisible, !isRebuildingUsageData else {
+        let enabledAgents = requestedEnabledAgents ?? self.enabledAgents
+        guard isPanelVisible, !isRebuildingUsageData, !enabledAgents.isEmpty else {
             refreshCoordinator.stop()
             return
         }
@@ -110,20 +160,35 @@ final class AppStore: ObservableObject {
                 return
             }
             self.manualRefreshAvailableAt = self.refreshCoordinator.manualRefreshAvailableAt
-            self.performRefreshCycle(completion: completion)
+            self.performRefreshCycle(
+                enabledAgents: enabledAgents,
+                completion: completion
+            )
         }
     }
 
-    private func performRefreshCycle(completion: @escaping () -> Void) {
+    private func performRefreshCycle(
+        enabledAgents: Set<AgentID>,
+        completion: @escaping () -> Void
+    ) {
         guard !isRebuildingUsageData else {
             completion()
             return
         }
 
+        guard !enabledAgents.isEmpty else {
+            completion()
+            return
+        }
+
         let group = DispatchGroup()
+        let syncCancellation = AgentSyncCancellation(enabledAgents: enabledAgents)
+        activeAgentSyncCancellation = syncCancellation
 
         group.enter()
         syncManager.syncOnce(
+            enabledAgents: enabledAgents,
+            cancellation: syncCancellation,
             onLocalComplete: { [weak self] in
                 DispatchQueue.main.async {
                     guard let self, self.isPanelVisible else { return }
@@ -141,20 +206,37 @@ final class AppStore: ObservableObject {
             }
         )
 
-        for provider in QuotaProviderID.allCases where quotaSettings.isEnabled(provider) {
+        for provider in QuotaProviderID.allCases
+            where quotaSettings.isEnabled(provider) && isAgentEnabled(for: provider, in: enabledAgents) {
             group.enter()
+            let participant = RefreshCycleParticipant {
+                group.leave()
+            }
+            activeQuotaParticipants[provider] = participant
             quotaService.refresh(
                 provider: provider,
                 now: Date()
             ) { [weak self] snapshot in
-                if self?.quotaSettings.isEnabled(provider) == true {
-                    self?.quotaSnapshots[provider] = snapshot
+                DispatchQueue.main.async {
+                    if let self,
+                       self.activeQuotaParticipants[provider] === participant {
+                        self.activeQuotaParticipants.removeValue(forKey: provider)
+                        if self.quotaSettings.isEnabled(provider),
+                           self.isAgentEnabled(for: provider, in: self.enabledAgents) {
+                            self.quotaSnapshots[provider] = snapshot
+                        }
+                    }
+                    participant.finish()
                 }
-                group.leave()
             }
         }
 
-        group.notify(queue: .main, execute: completion)
+        group.notify(queue: .main) { [weak self] in
+            if self?.activeAgentSyncCancellation === syncCancellation {
+                self?.activeAgentSyncCancellation = nil
+            }
+            completion()
+        }
     }
 
     /// Start one unified visible-panel refresh lifecycle.
@@ -171,7 +253,7 @@ final class AppStore: ObservableObject {
 
     /// Start a unified manual refresh and reset the next automatic interval.
     func refreshNow() {
-        guard isPanelVisible, !isRebuildingUsageData else { return }
+        guard isPanelVisible, !isRebuildingUsageData, hasEnabledAgents else { return }
         refreshCoordinator.refreshNow()
     }
 
@@ -181,15 +263,65 @@ final class AppStore: ObservableObject {
     }
 
     func quotaProviderSettingsDidChange() {
-        quotaSnapshots = quotaSnapshots.filter { quotaSettings.isEnabled($0.key) }
+        for provider in Array(activeQuotaParticipants.keys)
+            where !quotaSettings.isEnabled(provider)
+                || !isAgentEnabled(for: provider, in: enabledAgents) {
+            activeQuotaParticipants.removeValue(forKey: provider)?.finish()
+        }
+        quotaSnapshots = quotaSnapshots.filter {
+            quotaSettings.isEnabled($0.key) && isAgentEnabled(for: $0.key, in: enabledAgents)
+        }
     }
 
     var visibleQuotaProviders: [QuotaProviderID] {
+        let filtered: [QuotaProviderID]
         switch appFilter {
-        case .all: return QuotaProviderID.allCases
-        case .claude: return [.claude]
-        case .codex: return [.codex]
-        case .cursor: return []
+        case .all: filtered = QuotaProviderID.allCases
+        case .claude: filtered = [.claude]
+        case .codex: filtered = [.codex]
+        case .cursor: filtered = []
+        }
+        return filtered.filter { isAgentEnabled(for: $0, in: enabledAgents) }
+    }
+
+    func cycleAppFilter(reverse: Bool = false) {
+        appFilter = appFilter.cycled(in: availableAppFilters, reverse: reverse)
+    }
+
+    private func monitoringSettingsDidChange(_ enabledAgents: Set<AgentID>) {
+        self.enabledAgents = enabledAgents
+        activeAgentSyncCancellation?.disableAgents(notIn: enabledAgents)
+        cancelQuotaParticipants(disabledBy: enabledAgents)
+        let filters = AppFilter.available(for: enabledAgents)
+        if !filters.contains(appFilter) {
+            clearSelectedActivityDate()
+            appFilter = .all
+        } else {
+            reload(enabledAgents: enabledAgents)
+        }
+        quotaSnapshots = quotaSnapshots.filter {
+            isAgentEnabled(for: $0.key, in: enabledAgents)
+        }
+        applyRefreshInterval(
+            refreshSettings.interval,
+            enabledAgents: enabledAgents
+        )
+    }
+
+    private func cancelQuotaParticipants(disabledBy enabledAgents: Set<AgentID>) {
+        for provider in Array(activeQuotaParticipants.keys)
+            where !isAgentEnabled(for: provider, in: enabledAgents) {
+            activeQuotaParticipants.removeValue(forKey: provider)?.finish()
+        }
+    }
+
+    private func isAgentEnabled(
+        for provider: QuotaProviderID,
+        in enabledAgents: Set<AgentID>
+    ) -> Bool {
+        switch provider {
+        case .claude: return enabledAgents.contains(.claude)
+        case .codex: return enabledAgents.contains(.codex)
         }
     }
 
@@ -256,10 +388,10 @@ final class AppStore: ObservableObject {
         usageDataRebuildWasCancelled = false
     }
 
-    func reload() {
+    func reload(enabledAgents requestedEnabledAgents: Set<AgentID>? = nil) {
         guard Thread.isMainThread else {
             DispatchQueue.main.async { [weak self] in
-                self?.reload()
+                self?.reload(enabledAgents: requestedEnabledAgents)
             }
             return
         }
@@ -269,6 +401,7 @@ final class AppStore: ObservableObject {
         hourlyLoadGeneration += 1
 
         let appFilter = appFilter
+        let enabledAgents = requestedEnabledAgents ?? self.enabledAgents
         let timeRange = timeRange
         let heatmapMode = heatmapMode
         let selectedActivityDate = selectedActivityDate
@@ -281,7 +414,11 @@ final class AppStore: ObservableObject {
         }
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let s = db.fetchStats(app: appFilter, range: timeRange)
+            let s = db.fetchStats(
+                app: appFilter,
+                range: timeRange,
+                enabledAgents: enabledAgents
+            )
             let cal = Calendar.current
             let h: [DayActivity]
             switch heatmapMode {
@@ -289,21 +426,36 @@ final class AppStore: ObservableObject {
                 let today = cal.startOfDay(for: Date())
                 let start = cal.date(byAdding: .day, value: -364, to: today)!
                 let end = cal.date(byAdding: .day, value: 1, to: today)!
-                h = db.fetchHeatmap(app: appFilter, from: start, to: end)
+                h = db.fetchHeatmap(
+                    app: appFilter,
+                    from: start,
+                    to: end,
+                    enabledAgents: enabledAgents
+                )
             case .year(let year):
                 let start = cal.date(from: DateComponents(year: year, month: 1, day: 1))!
                 let end = cal.date(from: DateComponents(year: year + 1, month: 1, day: 1))!
-                h = db.fetchHeatmap(app: appFilter, from: start, to: end)
+                h = db.fetchHeatmap(
+                    app: appFilter,
+                    from: start,
+                    to: end,
+                    enabledAgents: enabledAgents
+                )
             }
             let hourly = selectedActivityDate.map {
-                hourlyTokenUsageLoader(db, appFilter, $0)
+                hourlyTokenUsageLoader(db, appFilter, enabledAgents, $0)
             } ?? []
-            let m = db.fetchModelDistribution(app: appFilter, range: timeRange)
-            let years = db.availableYears()
+            let m = db.fetchModelDistribution(
+                app: appFilter,
+                range: timeRange,
+                enabledAgents: enabledAgents
+            )
+            let years = db.availableYears(enabledAgents: enabledAgents)
 
             DispatchQueue.main.async {
                 guard
                     self.appFilter == appFilter,
+                    self.enabledAgents == enabledAgents,
                     self.timeRange == timeRange,
                     self.heatmapMode == heatmapMode,
                     self.selectedActivityDate == selectedActivityDate,
@@ -360,16 +512,18 @@ final class AppStore: ObservableObject {
 
     private func loadHourlyTokenUsage(for date: String) {
         let app = appFilter
+        let enabledAgents = enabledAgents
         hourlyLoadGeneration += 1
         let generation = hourlyLoadGeneration
         let loader = hourlyTokenUsageLoader
         DispatchQueue.global(qos: .userInitiated).async { [db] in
-            let usage = loader(db, app, date)
+            let usage = loader(db, app, enabledAgents, date)
             DispatchQueue.main.async { [weak self] in
                 guard
                     let self,
                     self.selectedActivityDate == date,
                     self.appFilter == app,
+                    self.enabledAgents == enabledAgents,
                     self.hourlyLoadGeneration == generation
                 else {
                     return

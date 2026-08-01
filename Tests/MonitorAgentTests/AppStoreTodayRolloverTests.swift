@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 @testable import MonitorAgent
 
@@ -76,6 +77,192 @@ final class AppStoreTodayRolloverTests: XCTestCase {
 
         XCTAssertEqual(quotaService.providers, [.claude, .codex])
         store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testMonitoringSelectionLimitsFiltersAndQuotaRefresh() {
+        let suiteName = "AppStoreTodayRolloverTests.monitoringSelection"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        monitoringSettings.enabledAgents = [.claude]
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        enableAllProviders(quotaSettings)
+        let quotaService = RecordingQuotaService()
+        let database = DatabaseManager(inMemory: true)
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/nonexistent/claude",
+            codexSessionsPath: "/nonexistent/codex",
+            codexArchivedSessionsPath: "/nonexistent/codex-archive"
+        )
+        let store = AppStore(
+            database: database,
+            syncManager: syncManager,
+            monitoringSettings: monitoringSettings,
+            quotaService: quotaService,
+            quotaSettings: quotaSettings,
+            observeRefreshIntervalChanges: false
+        )
+
+        store.panelDidOpen()
+
+        XCTAssertEqual(store.availableAppFilters, [.all, .claude])
+        XCTAssertEqual(store.visibleQuotaProviders, [.claude])
+        XCTAssertEqual(quotaService.providers, [.claude])
+        store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testNoMonitoredAgentsStopsPanelRefreshLifecycle() {
+        let suiteName = "AppStoreTodayRolloverTests.noMonitoredAgents"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        monitoringSettings.enabledAgents = []
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        enableAllProviders(quotaSettings)
+        let quotaService = RecordingQuotaService()
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            monitoringSettings: monitoringSettings,
+            quotaService: quotaService,
+            quotaSettings: quotaSettings,
+            observeRefreshIntervalChanges: false
+        )
+
+        store.panelDidOpen()
+        store.refreshNow()
+
+        XCTAssertFalse(store.hasEnabledAgents)
+        XCTAssertEqual(store.availableAppFilters, [.all])
+        XCTAssertFalse(store.isPeriodicRefreshActive)
+        XCTAssertTrue(quotaService.providers.isEmpty)
+        XCTAssertEqual(store.manualRefreshCooldownRemaining(at: Date()), 0)
+        store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testDisablingSelectedAgentResetsFilterAndSelectedActivity() {
+        let suiteName = "AppStoreTodayRolloverTests.disableSelectedAgent"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            monitoringSettings: monitoringSettings,
+            observeRefreshIntervalChanges: false
+        )
+        store.appFilter = .codex
+        store.selectActivityDate("2026-07-09")
+
+        monitoringSettings.enabledAgents = [.claude, .cursor]
+
+        XCTAssertEqual(store.appFilter, .all)
+        XCTAssertNil(store.selectedActivityDate)
+        XCTAssertEqual(store.availableAppFilters, [.all, .claude, .cursor])
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testDisablingAgentCancelsItsInFlightRoutineSync() {
+        let suiteName = "AppStoreTodayRolloverTests.cancelDisabledAgent"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        let cursorSyncer = CancellableCursorUsageSyncerProbe()
+        let database = DatabaseManager(inMemory: true)
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/nonexistent/claude",
+            codexSessionsPath: "/nonexistent/codex",
+            codexArchivedSessionsPath: "/nonexistent/codex-archive",
+            cursorUsageSyncer: cursorSyncer
+        )
+        let store = AppStore(
+            database: database,
+            syncManager: syncManager,
+            monitoringSettings: monitoringSettings,
+            quotaService: RecordingQuotaService(),
+            quotaSettings: QuotaSettings(defaults: defaults),
+            observeRefreshIntervalChanges: false
+        )
+
+        store.panelDidOpen()
+        wait(for: [cursorSyncer.started], timeout: 1)
+        monitoringSettings.enabledAgents = [.claude, .codex]
+
+        wait(for: [cursorSyncer.cancelled], timeout: 1)
+        store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testDisabledQuotaDoesNotBlockReplacementRefreshCycle() {
+        let suiteName = "AppStoreTodayRolloverTests.cancelDisabledQuota"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        quotaSettings.claudeExpirationDate = Date(timeIntervalSinceNow: 30 * 24 * 60 * 60)
+        let quotaService = BlockingQuotaService()
+        let database = DatabaseManager(inMemory: true)
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/nonexistent/claude",
+            codexSessionsPath: "/nonexistent/codex",
+            codexArchivedSessionsPath: "/nonexistent/codex-archive"
+        )
+        let store = AppStore(
+            database: database,
+            syncManager: syncManager,
+            monitoringSettings: monitoringSettings,
+            quotaService: quotaService,
+            quotaSettings: quotaSettings,
+            observeRefreshIntervalChanges: false
+        )
+
+        store.panelDidOpen()
+        wait(for: [quotaService.started], timeout: 1)
+        monitoringSettings.enabledAgents = [.cursor]
+
+        let replacementCycleFinished = expectation(description: "Replacement refresh cycle finishes")
+        waitUntil(attemptsRemaining: 100) {
+            !store.isRefreshInProgress
+        } completion: {
+            replacementCycleFinished.fulfill()
+        }
+        wait(for: [replacementCycleFinished], timeout: 2)
+
+        quotaService.finish()
+        let completionDrained = expectation(description: "Cancelled quota completion drains")
+        DispatchQueue.main.async {
+            completionDrained.fulfill()
+        }
+        wait(for: [completionDrained], timeout: 1)
+        store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testMonitoringSelectionPublishesThroughAppStore() {
+        let suiteName = "AppStoreTodayRolloverTests.publishedMonitoringSelection"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            monitoringSettings: monitoringSettings,
+            observeRefreshIntervalChanges: false
+        )
+        let published = expectation(description: "AppStore publishes enabled Agents")
+        var observation: AnyCancellable?
+        observation = store.$enabledAgents.dropFirst().sink { enabledAgents in
+            XCTAssertEqual(enabledAgents, [.claude])
+            published.fulfill()
+        }
+
+        store.updateEnabledAgents([.claude])
+
+        wait(for: [published], timeout: 1)
+        withExtendedLifetime(observation) {}
         defaults.removePersistentDomain(forName: suiteName)
     }
 
@@ -271,7 +458,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         let store = AppStore(
             database: DatabaseManager(inMemory: true),
             observeRefreshIntervalChanges: false,
-            hourlyTokenUsageLoader: { _, app, _ in
+            hourlyTokenUsageLoader: { _, app, _, _ in
                 if app == .all {
                     oldLoadStarted.fulfill()
                     _ = releaseOldLoad.wait(timeout: .now() + 1)
@@ -303,6 +490,43 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             staleLoadFinished.fulfill()
         }
         wait(for: [staleLoadFinished], timeout: 1)
+    }
+
+    func testMonitoringChangeReloadsExpandedActivityWithNewAgentScope() {
+        let suiteName = "AppStoreTodayRolloverTests.expandedActivityMonitoringChange"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        let allAgentUsage = [hourlyUsage(hour: 1, inputTokens: 100)]
+        let enabledAgentUsage = [hourlyUsage(hour: 2, inputTokens: 200)]
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            monitoringSettings: monitoringSettings,
+            observeRefreshIntervalChanges: false,
+            hourlyTokenUsageLoader: { _, _, enabledAgents, _ in
+                enabledAgents.contains(.cursor) ? allAgentUsage : enabledAgentUsage
+            }
+        )
+        store.selectActivityDate("2026-07-08")
+        let initialLoadFinished = expectation(description: "initial hourly load finishes")
+        waitUntil(attemptsRemaining: 50) {
+            store.hourlyTokenUsage == allAgentUsage && !store.isHourlyTokenUsageLoading
+        } completion: {
+            initialLoadFinished.fulfill()
+        }
+        wait(for: [initialLoadFinished], timeout: 1)
+
+        monitoringSettings.enabledAgents = [.claude, .codex]
+
+        let updatedLoadFinished = expectation(description: "updated hourly load finishes")
+        waitUntil(attemptsRemaining: 50) {
+            store.hourlyTokenUsage == enabledAgentUsage && !store.isHourlyTokenUsageLoading
+        } completion: {
+            XCTAssertEqual(store.selectedActivityDate, "2026-07-08")
+            updatedLoadFinished.fulfill()
+        }
+        wait(for: [updatedLoadFinished], timeout: 1)
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
     func testReloadAfterDayRolloverResetsAnySelectionToToday() {
@@ -414,5 +638,47 @@ private final class RecordingQuotaService: QuotaRefreshing {
     ) {
         providers.append(provider)
         completion(.failure(provider: provider, status: .notInstalled, at: now))
+    }
+}
+
+private final class BlockingQuotaService: QuotaRefreshing {
+    let started = XCTestExpectation(description: "Quota refresh started")
+    private var completion: ((QuotaSnapshot) -> Void)?
+
+    func refresh(
+        provider: QuotaProviderID,
+        now: Date,
+        completion: @escaping (QuotaSnapshot) -> Void
+    ) {
+        self.completion = completion
+        started.fulfill()
+    }
+
+    func finish() {
+        completion?(.failure(provider: .claude, status: .notInstalled, at: Date()))
+        completion = nil
+    }
+}
+
+private final class CancellableCursorUsageSyncerProbe: CancellableCursorUsageSyncing {
+    let started = XCTestExpectation(description: "Cursor routine sync started")
+    let cancelled = XCTestExpectation(description: "Cursor routine sync cancelled")
+
+    func sync() throws -> SessionSyncResult {
+        XCTFail("Routine Cursor sync should receive a cancellation token")
+        return SessionSyncResult()
+    }
+
+    func sync(cancellation: AgentSyncCancellation?) throws -> SessionSyncResult {
+        started.fulfill()
+        guard let cancellation else {
+            XCTFail("Routine Cursor sync should receive a cancellation token")
+            return SessionSyncResult()
+        }
+        while cancellation.isEnabled(.cursor) {
+            Thread.sleep(forTimeInterval: 0.001)
+        }
+        cancelled.fulfill()
+        return SessionSyncResult()
     }
 }

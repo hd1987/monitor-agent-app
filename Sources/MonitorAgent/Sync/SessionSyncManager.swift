@@ -119,6 +119,8 @@ final class SessionSyncManager {
 
     /// Run local and Cursor syncs on separate background queues.
     func syncOnce(
+        enabledAgents: Set<AgentID> = Set(AgentID.allCases),
+        cancellation: AgentSyncCancellation? = nil,
         onLocalComplete: @escaping () -> Void,
         onCursorComplete: @escaping () -> Void,
         completion: @escaping () -> Void
@@ -128,18 +130,31 @@ final class SessionSyncManager {
                 completion()
                 return
             }
-            _ = self.syncLocal()
+            _ = self.syncLocal(
+                enabledAgents: enabledAgents,
+                cancellation: cancellation
+            )
             onLocalComplete()
+            guard enabledAgents.contains(.cursor),
+                  cancellation?.isEnabled(.cursor) != false else {
+                completion()
+                return
+            }
             self.scheduleCursorSync(
+                cancellation: cancellation,
                 onSuccess: onCursorComplete,
                 completion: completion
             )
         }
     }
 
-    func syncAllOnce(onProgress: ((SessionSyncProgress) -> Void)? = nil) -> SessionSyncResult {
-        var result = syncLocal(onProgress: onProgress)
-        if let cursorUsageSyncer,
+    func syncAllOnce(
+        enabledAgents: Set<AgentID> = Set(AgentID.allCases),
+        onProgress: ((SessionSyncProgress) -> Void)? = nil
+    ) -> SessionSyncResult {
+        var result = syncLocal(enabledAgents: enabledAgents, onProgress: onProgress)
+        if enabledAgents.contains(.cursor),
+           let cursorUsageSyncer,
            let cursorResult = cursorQueue.sync(execute: { try? cursorUsageSyncer.sync() }) {
             result.add(cursorResult)
         }
@@ -260,11 +275,18 @@ final class SessionSyncManager {
     // MARK: - Sync Cycle
 
     private func syncLocal(
+        enabledAgents: Set<AgentID> = Set(AgentID.allCases),
+        cancellation: AgentSyncCancellation? = nil,
         onProgress: ((SessionSyncProgress) -> Void)? = nil
     ) -> SessionSyncResult {
-        let claudeFiles = discoverClaudeFiles()
-        let codexFiles = discoverCodexFiles()
-        let allFiles = claudeFiles.map { ($0, false) } + codexFiles.map { ($0, true) }
+        let claudeFiles = enabledAgents.contains(.claude) && cancellation?.isEnabled(.claude) != false
+            ? discoverClaudeFiles(cancellation: cancellation)
+            : []
+        let codexFiles = enabledAgents.contains(.codex) && cancellation?.isEnabled(.codex) != false
+            ? discoverCodexFiles(cancellation: cancellation)
+            : []
+        let allFiles = claudeFiles.map { ($0, AgentID.claude) }
+            + codexFiles.map { ($0, AgentID.codex) }
         let totalFiles = allFiles.count
         var result = SessionSyncResult()
         var completedFiles = 0
@@ -275,8 +297,13 @@ final class SessionSyncManager {
             recordsSynced: result.recordsSynced
         ))
 
-        for (path, isCodex) in allFiles {
-            result.add(syncFile(path: path, isCodex: isCodex))
+        for (path, agent) in allFiles {
+            guard cancellation?.isEnabled(agent) != false else { continue }
+            result.add(syncFile(
+                path: path,
+                agent: agent,
+                cancellation: cancellation
+            ))
             completedFiles += 1
             onProgress?(SessionSyncProgress(
                 completedFiles: completedFiles,
@@ -288,6 +315,7 @@ final class SessionSyncManager {
     }
 
     private func scheduleCursorSync(
+        cancellation: AgentSyncCancellation?,
         onSuccess: @escaping () -> Void,
         completion: @escaping () -> Void
     ) {
@@ -316,7 +344,15 @@ final class SessionSyncManager {
                 self.cursorScheduleLock.unlock()
                 completion()
             }
-            guard let result = try? cursorUsageSyncer.sync(),
+            guard cancellation?.isEnabled(.cursor) != false else { return }
+            let cursorResult: SessionSyncResult?
+            if let cursorUsageSyncer = cursorUsageSyncer as? CancellableCursorUsageSyncing {
+                cursorResult = try? cursorUsageSyncer.sync(cancellation: cancellation)
+            } else {
+                cursorResult = try? cursorUsageSyncer.sync()
+            }
+            guard cancellation?.isEnabled(.cursor) != false,
+                  let result = cursorResult,
                   result.filesSynced > 0 else {
                 return
             }
@@ -389,22 +425,48 @@ final class SessionSyncManager {
         )
     }
 
-    private func discoverClaudeFiles() -> [String] {
-        findFiles(under: claudeProjectsPath, matching: { $0.hasSuffix(".jsonl") })
+    private func discoverClaudeFiles(cancellation: AgentSyncCancellation?) -> [String] {
+        findFiles(
+            under: claudeProjectsPath,
+            cancellation: cancellation,
+            agent: .claude,
+            matching: { $0.hasSuffix(".jsonl") }
+        )
     }
 
-    private func discoverCodexFiles() -> [String] {
-        let a = findFiles(under: codexSessionsPath, matching: { $0.hasPrefix("rollout-") && $0.hasSuffix(".jsonl") })
-        let b = findFiles(under: codexArchivedSessionsPath, matching: { $0.hasPrefix("rollout-") && $0.hasSuffix(".jsonl") })
+    private func discoverCodexFiles(cancellation: AgentSyncCancellation?) -> [String] {
+        let filter: (String) -> Bool = {
+            $0.hasPrefix("rollout-") && $0.hasSuffix(".jsonl")
+        }
+        let a = findFiles(
+            under: codexSessionsPath,
+            cancellation: cancellation,
+            agent: .codex,
+            matching: filter
+        )
+        guard cancellation?.isEnabled(.codex) != false else { return a }
+        let b = findFiles(
+            under: codexArchivedSessionsPath,
+            cancellation: cancellation,
+            agent: .codex,
+            matching: filter
+        )
         return a + b
     }
 
-    private func findFiles(under directory: String, matching filter: (String) -> Bool) -> [String] {
+    private func findFiles(
+        under directory: String,
+        cancellation: AgentSyncCancellation?,
+        agent: AgentID,
+        matching filter: (String) -> Bool
+    ) -> [String] {
+        guard cancellation?.isEnabled(agent) != false else { return [] }
         guard fm.fileExists(atPath: directory),
               let enumerator = fm.enumerator(atPath: directory) else { return [] }
 
         var results: [String] = []
         while let relative = enumerator.nextObject() as? String {
+            guard cancellation?.isEnabled(agent) != false else { break }
             let filename = (relative as NSString).lastPathComponent
             if filter(filename) {
                 results.append((directory as NSString).appendingPathComponent(relative))
@@ -585,7 +647,12 @@ final class SessionSyncManager {
         }
     }
 
-    private func syncFile(path: String, isCodex: Bool) -> SessionSyncResult {
+    private func syncFile(
+        path: String,
+        agent: AgentID,
+        cancellation: AgentSyncCancellation?
+    ) -> SessionSyncResult {
+        guard cancellation?.isEnabled(agent) != false else { return SessionSyncResult() }
         guard let attrs = try? fm.attributesOfItem(atPath: path),
               let modDate = attrs[.modificationDate] as? Date,
               let fileSize = attrs[.size] as? Int64 else { return SessionSyncResult() }
@@ -610,68 +677,87 @@ final class SessionSyncManager {
         defer { handle.closeFile() }
 
         handle.seek(toFileOffset: UInt64(offset))
-        let data = handle.readDataToEndOfFile()
-        guard !data.isEmpty else { return SessionSyncResult() }
-
-        // Split by newline, keep only complete lines
-        let newlineCode = UInt8(0x0A)
-        var lineRanges: [Range<Data.Index>] = []
-        var lineStart = data.startIndex
-        for i in data.indices {
-            if data[i] == newlineCode {
-                let lineEnd = i
-                if lineEnd > lineStart {
-                    lineRanges.append(lineStart..<lineEnd)
-                }
-                lineStart = i + 1
-            }
-        }
-
-        // Byte offset advances to after the last complete newline
-        let bytesConsumed: Int64
-        if let lastNewline = data.lastIndex(of: newlineCode) {
-            bytesConsumed = Int64(lastNewline + 1)
-        } else {
-            // No complete line found
-            return SessionSyncResult()
-        }
-
-        // Parse lines
+        var pending = Data()
         var records: [ParsedRecord] = []
+        var codexContext = CodexParseContext(syncState: existing)
+        var bytesConsumed: Int64 = 0
 
-        if isCodex {
-            var context = CodexParseContext(syncState: existing)
-            for range in lineRanges {
-                let lineData = data.subdata(in: range)
-                if let record = CodexLogParser.parse(lineData: lineData, context: &context) {
-                    records.append(record)
+        while cancellation?.isEnabled(agent) != false {
+            let chunk = handle.readData(ofLength: Self.rebuildReadChunkSize)
+            guard !chunk.isEmpty else { break }
+            let previouslyScannedCount = pending.count
+            pending.append(chunk)
+
+            var lineStart = pending.startIndex
+            var searchStart = pending.index(
+                pending.startIndex,
+                offsetBy: previouslyScannedCount
+            )
+            var consumedThrough = pending.startIndex
+            while searchStart < pending.endIndex,
+                  let newlineIndex = pending[searchStart..<pending.endIndex].firstIndex(of: UInt8(0x0A)) {
+                guard cancellation?.isEnabled(agent) != false else {
+                    return SessionSyncResult()
                 }
+                if newlineIndex > lineStart {
+                    let lineData = pending.subdata(in: lineStart..<newlineIndex)
+                    let record: ParsedRecord?
+                    if agent == .codex {
+                        record = CodexLogParser.parse(
+                            lineData: lineData,
+                            context: &codexContext
+                        )
+                    } else {
+                        record = ClaudeLogParser.parse(lineData: lineData)
+                    }
+                    if let record {
+                        records.append(record)
+                    }
+                }
+                lineStart = pending.index(after: newlineIndex)
+                searchStart = lineStart
+                consumedThrough = lineStart
             }
+            if consumedThrough > pending.startIndex {
+                let consumedCount = pending.distance(
+                    from: pending.startIndex,
+                    to: consumedThrough
+                )
+                bytesConsumed += Int64(consumedCount)
+                pending.removeFirst(consumedCount)
+            }
+        }
+        guard cancellation?.isEnabled(agent) != false else { return SessionSyncResult() }
+        guard bytesConsumed > 0 else { return SessionSyncResult() }
+
+        if agent == .codex {
             // Update sync state with context
             let state = SyncState(
                 filePath: path,
                 byteOffset: offset + bytesConsumed,
-                recordCount: context.turnCount,
-                sessionId: context.sessionId,
-                model: context.currentModel,
+                recordCount: codexContext.turnCount,
+                sessionId: codexContext.sessionId,
+                model: codexContext.currentModel,
                 lastModified: fileMtime,
                 lastSyncedAt: Int(Date().timeIntervalSince1970),
-                lastTotalInputTokens: context.lastTotalIn,
-                lastTotalOutputTokens: context.lastTotalOut
+                lastTotalInputTokens: codexContext.lastTotalIn,
+                lastTotalOutputTokens: codexContext.lastTotalOut
             )
             do {
-                try db.commitSync(records: records, state: state)
+                if let cancellation {
+                    guard try cancellation.withEnabledAgent(agent, perform: {
+                        try db.commitSync(records: records, state: state)
+                    }) != nil else {
+                        return SessionSyncResult()
+                    }
+                } else {
+                    try db.commitSync(records: records, state: state)
+                }
             } catch {
                 print("Failed to commit sync for \(path): \(error)")
                 return SessionSyncResult()
             }
         } else {
-            for range in lineRanges {
-                let lineData = data.subdata(in: range)
-                if let record = ClaudeLogParser.parse(lineData: lineData) {
-                    records.append(record)
-                }
-            }
             let state = SyncState(
                 filePath: path,
                 byteOffset: offset + bytesConsumed,
@@ -682,7 +768,15 @@ final class SessionSyncManager {
                 lastSyncedAt: Int(Date().timeIntervalSince1970)
             )
             do {
-                try db.commitSync(records: records, state: state)
+                if let cancellation {
+                    guard try cancellation.withEnabledAgent(agent, perform: {
+                        try db.commitSync(records: records, state: state)
+                    }) != nil else {
+                        return SessionSyncResult()
+                    }
+                } else {
+                    try db.commitSync(records: records, state: state)
+                }
             } catch {
                 print("Failed to commit sync for \(path): \(error)")
                 return SessionSyncResult()

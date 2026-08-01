@@ -157,6 +157,70 @@ final class SettingsSaveConfirmationTests: XCTestCase {
         XCTAssertEqual(RefreshInterval.allCases.map(\.displayName), ["1 min", "2 min", "5 min", "Never"])
     }
 
+    func testMonitoringSettingsDescribeEverySupportedAgent() {
+        XCTAssertEqual(MonitoringSettingsCopy.title, "Monitored Agents")
+        XCTAssertEqual(
+            MonitoringSettingsCopy.description,
+            "Choose which Agents MonitorAgent collects and displays. Select any combination."
+        )
+        XCTAssertEqual(
+            AgentID.allCases.map(\.displayName),
+            ["Claude Code", "Codex", "Cursor"]
+        )
+        XCTAssertEqual(AgentMultiSelectControlLayout.width, 300)
+        XCTAssertEqual(AgentMultiSelectControlLayout.itemHeight, 28)
+        XCTAssertEqual(AgentMultiSelectControlLayout.itemSpacing, 6)
+        XCTAssertEqual(AgentMultiSelectControlLayout.itemCornerRadius, 7)
+        XCTAssertEqual(
+            AgentMultiSelectControlLayout.trailingOffset(
+                containerWidth: 300,
+                contentWidth: 264
+            ),
+            36
+        )
+        XCTAssertEqual(
+            AgentMultiSelectControlLayout.trailingOffset(
+                containerWidth: 300,
+                contentWidth: 340
+            ),
+            0
+        )
+    }
+
+    func testMonitoringControlSupportsIndependentAndEmptySelection() {
+        var selection = Set(AgentID.allCases)
+
+        selection = AgentMultiSelectControl.toggling(.codex, in: selection)
+        XCTAssertEqual(selection, [.claude, .cursor])
+        selection = AgentMultiSelectControl.toggling(.claude, in: selection)
+        selection = AgentMultiSelectControl.toggling(.cursor, in: selection)
+        XCTAssertTrue(selection.isEmpty)
+        selection = AgentMultiSelectControl.toggling(.codex, in: selection)
+        XCTAssertEqual(selection, [.codex])
+    }
+
+    func testMonitoringControlWrapsAndTrailingAlignsEveryRow() {
+        let sizes = [
+            CGSize(width: 100, height: 28),
+            CGSize(width: 90, height: 28),
+            CGSize(width: 120, height: 28),
+        ]
+
+        let result = AgentMultiSelectControlLayout.wrappingLayout(
+            itemSizes: sizes,
+            proposedWidth: 200
+        )
+
+        XCTAssertEqual(result.size, CGSize(width: 200, height: 62))
+        XCTAssertEqual(result.points, [
+            CGPoint(x: 4, y: 0),
+            CGPoint(x: 110, y: 0),
+            CGPoint(x: 80, y: 34),
+        ])
+        XCTAssertEqual(result.points[1].x + sizes[1].width, 200)
+        XCTAssertEqual(result.points[2].x + sizes[2].width, 200)
+    }
+
     func testExpirationDateControlUsesCompactInputGeometry() {
         XCTAssertEqual(ExpirationDateControlStyle.width, 140)
         XCTAssertEqual(ExpirationDateControlStyle.height, 28)
@@ -174,7 +238,9 @@ final class SettingsSaveConfirmationTests: XCTestCase {
 
     func testUsageDataRebuildCopyMatchesSettingsDataSection() {
         XCTAssertEqual(UsageDataRebuildCopy.buttonTitle, "Rebuild Local Usage Data")
+        XCTAssertTrue(UsageDataRebuildCopy.description.contains("regardless of the Monitored Agents selection"))
         XCTAssertEqual(UsageDataRebuildCopy.confirmationTitle, "Rebuild Local Usage Data?")
+        XCTAssertTrue(UsageDataRebuildCopy.confirmationMessage.contains("including sources disabled under Monitored Agents"))
         XCTAssertEqual(UsageDataRebuildCopy.runningMessage, "Rebuilding local usage data...")
         XCTAssertEqual(UsageDataRebuildCopy.successTitle, "Local usage data rebuilt successfully.")
         XCTAssertEqual(UsageDataRebuildCopy.failureTitle, "Rebuild failed. Your existing usage data was not changed.")
