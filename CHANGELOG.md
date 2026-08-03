@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-08-03
+
 ### Changed
 - Replace Activity outside-click dismissal and protected click regions with a compact top-right collapse button that shares the top-panel line-chart icon and hover treatment
 - Render single-day and multi-day Activity data through one normalized chart component
