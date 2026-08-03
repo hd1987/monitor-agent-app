@@ -56,6 +56,88 @@ struct MainPanelPressButtonStyle: ButtonStyle {
     }
 }
 
+struct MainPanelHeaderToolButton<Label: View>: View {
+    @EnvironmentObject private var theme: ThemeManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isEnabled) private var isEnabled
+    let helpText: String
+    let accessibilityText: String
+    let isSelected: Bool
+    let action: () -> Void
+    let label: (Color) -> Label
+    @State private var isHovered = false
+
+    init(
+        helpText: String,
+        accessibilityText: String,
+        isSelected: Bool = false,
+        action: @escaping () -> Void,
+        @ViewBuilder label: @escaping (Color) -> Label
+    ) {
+        self.helpText = helpText
+        self.accessibilityText = accessibilityText
+        self.isSelected = isSelected
+        self.action = action
+        self.label = label
+    }
+
+    var body: some View {
+        Button(action: action) {
+            label(foreground)
+                .frame(
+                    width: MainPanelDesign.headerControlItemHeight,
+                    height: MainPanelDesign.headerControlItemHeight
+                )
+                .background {
+                    Circle()
+                        .fill(isEnabled && isHovered ? theme.controlSurface : .clear)
+                }
+                .contentShape(Circle())
+        }
+        .buttonStyle(MainPanelPressButtonStyle())
+        .opacity(isEnabled ? 1 : 0.35)
+        .onHover { hovering in
+            isHovered = isEnabled && hovering
+        }
+        .animation(
+            MainPanelMotion.feedback(reduceMotion: reduceMotion),
+            value: isHovered
+        )
+        .help(helpText)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var foreground: Color {
+        if isSelected {
+            return theme.selectedControlAccent
+        }
+        return theme.panelTertiaryForeground.opacity(MainPanelDesign.headerToolOpacity)
+    }
+}
+
+struct MainPanelLineChartButton: View {
+    let helpText: String
+    let accessibilityText: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        MainPanelHeaderToolButton(
+            helpText: helpText,
+            accessibilityText: accessibilityText,
+            isSelected: isSelected,
+            action: action
+        ) { foreground in
+            Image(nsImage: MainPanelIconAsset.lineChartImage)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(foreground)
+                .frame(width: 11, height: 11)
+        }
+    }
+}
+
 struct MainPanelGroupedSurface: ViewModifier {
     @EnvironmentObject private var theme: ThemeManager
     let cornerRadius: CGFloat

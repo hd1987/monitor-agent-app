@@ -10,10 +10,10 @@ enum ActivityTokenPalette {
 
 struct ActivityTokenChartView: View {
     @EnvironmentObject var theme: ThemeManager
-    let date: String
-    let usage: [HourlyTokenUsage]
+    let data: ActivityChartData
     let isLoading: Bool
-    @State private var hoveredHour: Int?
+    let onClose: () -> Void
+    @State private var hoveredIndex: Int?
     @State private var hiddenMetrics: Set<String> = []
 
     private var metricStyles: [TokenMetricStyle] {
@@ -25,17 +25,13 @@ struct ActivityTokenChartView: View {
         ]
     }
 
-    private var visibleUsage: [HourlyTokenUsage] {
-        ActivityTokenChartLayout.visibleUsage(usage, for: date)
-    }
-
     private var points: [TokenSeriesPoint] {
-        visibleUsage.flatMap { item in
+        data.usage.flatMap { item in
             [
-                TokenSeriesPoint(metric: "Input Tokens", hour: item.hour, value: Double(item.inputTokens)),
-                TokenSeriesPoint(metric: "Output Tokens", hour: item.hour, value: Double(item.outputTokens)),
-                TokenSeriesPoint(metric: "Cache Read", hour: item.hour, value: Double(item.cacheReadTokens)),
-                TokenSeriesPoint(metric: "Cache Creation", hour: item.hour, value: Double(item.cacheCreationTokens)),
+                TokenSeriesPoint(metric: "Input Tokens", index: item.index, value: Double(item.inputTokens)),
+                TokenSeriesPoint(metric: "Output Tokens", index: item.index, value: Double(item.outputTokens)),
+                TokenSeriesPoint(metric: "Cache Read", index: item.index, value: Double(item.cacheReadTokens)),
+                TokenSeriesPoint(metric: "Cache Creation", index: item.index, value: Double(item.cacheCreationTokens)),
             ]
         }.filter { !hiddenMetrics.contains($0.metric) }
     }
@@ -44,36 +40,40 @@ struct ActivityTokenChartView: View {
         max(points.map(\.value).max() ?? 0, 1)
     }
 
-    private var hoveredUsage: HourlyTokenUsage? {
-        guard let hoveredHour else { return nil }
-        return visibleUsage.first { $0.hour == hoveredHour }
+    private var hoveredUsage: ActivityChartUsage? {
+        guard let hoveredIndex else { return nil }
+        return data.usage.first { $0.index == hoveredIndex }
     }
 
     private var hoveredPoints: [TokenSeriesPoint] {
         guard let item = hoveredUsage else { return [] }
         return [
-            TokenSeriesPoint(metric: "Input Tokens", hour: item.hour, value: Double(item.inputTokens)),
-            TokenSeriesPoint(metric: "Output Tokens", hour: item.hour, value: Double(item.outputTokens)),
-            TokenSeriesPoint(metric: "Cache Read", hour: item.hour, value: Double(item.cacheReadTokens)),
-            TokenSeriesPoint(metric: "Cache Creation", hour: item.hour, value: Double(item.cacheCreationTokens)),
+            TokenSeriesPoint(metric: "Input Tokens", index: item.index, value: Double(item.inputTokens)),
+            TokenSeriesPoint(metric: "Output Tokens", index: item.index, value: Double(item.outputTokens)),
+            TokenSeriesPoint(metric: "Cache Read", index: item.index, value: Double(item.cacheReadTokens)),
+            TokenSeriesPoint(metric: "Cache Creation", index: item.index, value: Double(item.cacheCreationTokens)),
         ].filter { !hiddenMetrics.contains($0.metric) }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: ActivityTokenChartLayout.chartSectionSpacing) {
             HStack {
-                Text(chartTitle)
+                Text(data.chartTitle)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.primary)
-                Text("Hour")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(theme.panelTertiaryForeground)
+                if let granularityLabel = data.granularityLabel(isLoading: isLoading) {
+                    Text(granularityLabel)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(theme.panelTertiaryForeground)
+                }
                 Spacer()
             }
+            .padding(.trailing, MainPanelDesign.headerControlItemHeight)
+            .frame(height: ActivityTokenChartLayout.chartHeaderHeight)
 
             Chart(points) { point in
                 AreaMark(
-                    x: .value("Hour", point.hour),
+                    x: .value("Period", point.index),
                     yStart: .value("Baseline", 0),
                     yEnd: .value("Tokens", point.value)
                 )
@@ -82,7 +82,7 @@ struct ActivityTokenChartView: View {
                 .opacity(0.12)
 
                 LineMark(
-                    x: .value("Hour", point.hour),
+                    x: .value("Period", point.index),
                     y: .value("Tokens", point.value)
                 )
                 .interpolationMethod(.catmullRom)
@@ -95,13 +95,14 @@ struct ActivityTokenChartView: View {
                 "Cache Read": ActivityTokenPalette.cacheRead,
                 "Cache Creation": ActivityTokenPalette.cacheCreation,
             ])
-            .chartXScale(domain: 0...23)
+            .chartXScale(domain: 0...data.chartDomainEnd)
             .chartYScale(domain: 0...maxValue)
             .chartXAxis {
-                AxisMarks(values: ActivityTokenChartLayout.hourAxisMarks) { value in
+                AxisMarks(values: data.xAxisMarks) { value in
                     AxisValueLabel(anchor: .top) {
-                        if let hour = value.as(Int.self) {
-                            Text(ActivityTokenChartLayout.hourAxisLabel(for: hour))
+                        if let index = value.as(Int.self),
+                           let label = data.axisLabel(for: index) {
+                            Text(label)
                                 .foregroundStyle(theme.panelSecondaryForeground)
                         }
                     }
@@ -126,8 +127,8 @@ struct ActivityTokenChartView: View {
                         let plotAreaFrame = geometry[plotFrame]
 
                         ZStack(alignment: .topLeading) {
-                            if let nowHour = ActivityTokenChartLayout.currentHourPosition(for: date),
-                               let plotX = proxy.position(forX: nowHour) {
+                            if let nowPosition = data.nowPosition,
+                               let plotX = proxy.position(forX: nowPosition) {
                                 let nowX = plotAreaFrame.minX + plotX
                                 let futureWidth = max(0, plotAreaFrame.maxX - nowX)
 
@@ -170,17 +171,18 @@ struct ActivityTokenChartView: View {
                                 .onContinuousHover { phase in
                                     switch phase {
                                     case .active(let location):
-                                        updateHoveredHour(at: location, in: plotAreaFrame, proxy: proxy)
+                                        updateHoveredIndex(at: location, in: plotAreaFrame, proxy: proxy)
                                     case .ended:
-                                        hoveredHour = nil
+                                        hoveredIndex = nil
                                     }
                                 }
 
-                            if let hoveredUsage, let plotX = proxy.position(forX: hoveredUsage.hour) {
+                            if let hoveredUsage,
+                               let plotX = proxy.position(forX: hoveredUsage.index) {
                                 let anchorX = plotAreaFrame.minX + plotX
                                 let tooltipOffset = ActivityTokenChartLayout.tooltipXOffset(
                                     anchorX: anchorX,
-                                    tooltipWidth: ActivityTokenChartLayout.chartTooltipWidth,
+                                    tooltipWidth: data.tooltipWidth,
                                     availableWidth: geometry.size.width
                                 )
 
@@ -196,9 +198,9 @@ struct ActivityTokenChartView: View {
                                 }
 
                                 chartTooltip(for: hoveredUsage)
-                                    .frame(width: ActivityTokenChartLayout.chartTooltipWidth, alignment: .leading)
+                                    .frame(width: data.tooltipWidth, alignment: .leading)
                                     .position(
-                                        x: tooltipOffset + ActivityTokenChartLayout.chartTooltipWidth / 2,
+                                        x: tooltipOffset + data.tooltipWidth / 2,
                                         y: plotAreaFrame.minY + 47
                                     )
                                     .allowsHitTesting(false)
@@ -235,11 +237,26 @@ struct ActivityTokenChartView: View {
             }
             .font(.system(size: 9))
             .foregroundStyle(theme.panelSecondaryForeground)
+            .frame(height: ActivityTokenChartLayout.chartLegendHeight)
         }
-        .padding(10)
+        .padding(.horizontal, 10)
+        .padding(.vertical, ActivityTokenChartLayout.chartVerticalPadding)
+        .overlay(alignment: .topTrailing) {
+            MainPanelLineChartButton(
+                helpText: "Collapse Activity detail",
+                accessibilityText: "Collapse Activity detail",
+                isSelected: false,
+                action: onClose
+            )
+            .padding(.top, 5)
+            .padding(.trailing, 10)
+        }
         .frame(height: ActivityTokenChartLayout.drawerHeight)
         .mainPanelGroupedSurface()
-        .accessibilityLabel("Hourly token usage for \(date)")
+        .accessibilityLabel(data.accessibilityLabel)
+        .onChange(of: data) { _, _ in
+            hoveredIndex = nil
+        }
     }
 
     private func toggleMetric(_ metric: String) {
@@ -250,34 +267,27 @@ struct ActivityTokenChartView: View {
         }
     }
 
-    private var chartTitle: String {
-        let input = DateFormatter()
-        input.locale = Locale(identifier: "en_US_POSIX")
-        input.dateFormat = "yyyy-MM-dd"
-
-        let output = DateFormatter()
-        output.setLocalizedDateFormatFromTemplate("MMM d, yyyy")
-
-        guard let parsedDate = input.date(from: date) else { return date }
-        return output.string(from: parsedDate)
-    }
-
-    private func updateHoveredHour(at location: CGPoint, in plotAreaFrame: CGRect, proxy: ChartProxy) {
-        guard plotAreaFrame.contains(location) else {
-            hoveredHour = nil
+    private func updateHoveredIndex(
+        at location: CGPoint,
+        in plotAreaFrame: CGRect,
+        proxy: ChartProxy
+    ) {
+        guard plotAreaFrame.contains(location), !data.usage.isEmpty else {
+            hoveredIndex = nil
             return
         }
 
         let plotX = location.x - plotAreaFrame.minX
         guard let value = proxy.value(atX: plotX, as: Double.self) else { return }
-        hoveredHour = ActivityTokenChartLayout.hoveredHour(forChartXValue: value)
+        hoveredIndex = min(max(0, Int(value.rounded())), data.usage.count - 1)
     }
 
-    private func chartTooltip(for item: HourlyTokenUsage) -> some View {
+    private func chartTooltip(for item: ActivityChartUsage) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(ActivityTokenChartLayout.hourRangeLabel(for: item.hour))
+            Text(data.periodLabel(for: item))
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(theme.tooltipForeground)
+                .lineLimit(1)
 
             Divider()
                 .overlay(theme.tooltipForeground.opacity(0.14))
@@ -360,9 +370,9 @@ struct ActivityTokenChartView: View {
 
 private struct TokenSeriesPoint: Identifiable {
     let metric: String
-    let hour: Int
+    let index: Int
     let value: Double
-    var id: String { "\(metric)-\(hour)" }
+    var id: String { "\(metric)-\(index)" }
 }
 
 private struct TokenMetricStyle: Identifiable {

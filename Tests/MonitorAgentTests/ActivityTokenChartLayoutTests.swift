@@ -6,6 +6,55 @@ final class ActivityTokenChartLayoutTests: XCTestCase {
         XCTAssertEqual(ActivityTokenChartLayout.drawerHeight, 190)
         XCTAssertEqual(ActivityTokenChartLayout.chartHeight, 128)
         XCTAssertEqual(ActivityTokenChartLayout.rangeChartTooltipWidth, 170)
+        XCTAssertLessThanOrEqual(
+            ActivityTokenChartLayout.requiredDrawerHeight,
+            ActivityTokenChartLayout.drawerHeight
+        )
+    }
+
+    func testUnifiedChartDataNormalizesHourlyUsage() {
+        let data = ActivityChartData.hourly(
+            date: "2026-07-08",
+            usage: hourlyUsage()
+        )
+
+        XCTAssertEqual(data.usage.map(\.index), Array(0...23))
+        XCTAssertEqual(data.chartDomainEnd, 23)
+        XCTAssertEqual(data.xAxisMarks, ActivityTokenChartLayout.hourAxisMarks)
+        XCTAssertEqual(data.axisLabel(for: 3), "3h")
+        XCTAssertEqual(data.periodLabel(for: data.usage[13]), "13:00-14:00")
+        XCTAssertEqual(data.tooltipWidth, ActivityTokenChartLayout.chartTooltipWidth)
+    }
+
+    func testUnifiedChartDataNormalizesRangeUsage() {
+        let calendar = Calendar(identifier: .gregorian)
+        let start = calendar.date(from: DateComponents(year: 2026, month: 7, day: 1))!
+        let end = calendar.date(from: DateComponents(year: 2026, month: 7, day: 2))!
+        let series = ActivityRangeTokenSeries(
+            aggregation: .day,
+            usage: [start, end].enumerated().map { index, date in
+                ActivityRangeTokenUsage(
+                    periodStart: date,
+                    requestCount: index + 1,
+                    inputTokens: Int64(index + 10),
+                    outputTokens: 0,
+                    cacheReadTokens: 0,
+                    cacheCreationTokens: 0
+                )
+            }
+        )
+        let data = ActivityChartData.range(
+            range: .custom(start: start, end: end),
+            series: series
+        )
+
+        XCTAssertEqual(data.usage.map(\.index), [0, 1])
+        XCTAssertEqual(data.usage.map(\.requestCount), [1, 2])
+        XCTAssertEqual(data.chartDomainEnd, 1)
+        XCTAssertEqual(data.xAxisMarks, [0, 1])
+        XCTAssertEqual(data.granularityLabel(isLoading: false), "Day")
+        XCTAssertNil(data.granularityLabel(isLoading: true))
+        XCTAssertEqual(data.tooltipWidth, ActivityTokenChartLayout.rangeChartTooltipWidth)
     }
 
     func testHourAxisMarksUseThreeHourCadence() {

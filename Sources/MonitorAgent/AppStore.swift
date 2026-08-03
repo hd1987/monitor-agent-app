@@ -16,6 +16,11 @@ typealias ActivityRangeTokenUsageLoader = (
     TimeRange
 ) -> ActivityRangeTokenSeries
 
+private enum ActivityDetailRequest: Equatable {
+    case hourly(date: String)
+    case range(TimeRange)
+}
+
 private final class RefreshCycleParticipant {
     private let lock = NSLock()
     private var isFinished = false
@@ -44,12 +49,7 @@ final class AppStore: ObservableObject {
 
     @Published var stats = UsageStats()
     @Published var heatmap: [DayActivity] = []
-    @Published var selectedActivityDate: String?
-    @Published var hourlyTokenUsage: [HourlyTokenUsage] = []
-    @Published var isHourlyTokenUsageLoading = false
-    @Published var activityDetailRange: TimeRange?
-    @Published var activityRangeTokenSeries: ActivityRangeTokenSeries = .empty
-    @Published var isActivityRangeTokenUsageLoading = false
+    @Published private(set) var activityDetailState: ActivityDetailState = .closed
     @Published var modelDistribution: [ModelShare] = []
     @Published var availableYears: [Int] = []
     @Published var isRebuildingUsageData = false
@@ -79,7 +79,7 @@ final class AppStore: ObservableObject {
     private var activeAgentSyncCancellation: AgentSyncCancellation?
     private var activeQuotaParticipants: [QuotaProviderID: RefreshCycleParticipant] = [:]
     private var reloadGeneration = 0
-    private var hourlyLoadGeneration = 0
+    private var activityLoadGeneration = 0
     private(set) var isPanelVisible = false
     var isPeriodicRefreshActive: Bool { refreshCoordinator.isRunning }
 
@@ -148,7 +148,66 @@ final class AppStore: ObservableObject {
 
     var availableAppFilters: [AppFilter] { AppFilter.available(for: enabledAgents) }
     var hasEnabledAgents: Bool { !enabledAgents.isEmpty }
-    var isActivityDetailPresented: Bool { activityDetailRange != nil }
+    var isActivityDetailPresented: Bool {
+        if case .closed = activityDetailState { return false }
+        return true
+    }
+
+    var selectedActivityDate: String? {
+        guard case .hourly(let date, _, _) = activityDetailState else { return nil }
+        return date
+    }
+
+    var hourlyTokenUsage: [HourlyTokenUsage] {
+        guard case .hourly(_, let usage, _) = activityDetailState else { return [] }
+        return usage
+    }
+
+    var isHourlyTokenUsageLoading: Bool {
+        guard case .hourly(_, _, let isLoading) = activityDetailState else { return false }
+        return isLoading
+    }
+
+    var activityDetailRange: TimeRange? {
+        switch activityDetailState {
+        case .closed:
+            return nil
+        case .hourly(let date, _, _):
+            return TimeRange.activityDay(date, now: currentDateProvider())
+        case .range(let range, _, _):
+            return range
+        }
+    }
+
+    var activityRangeTokenSeries: ActivityRangeTokenSeries {
+        guard case .range(_, let series, _) = activityDetailState else { return .empty }
+        return series
+    }
+
+    var isActivityRangeTokenUsageLoading: Bool {
+        guard case .range(_, _, let isLoading) = activityDetailState else { return false }
+        return isLoading
+    }
+
+    var activityChartData: ActivityChartData? {
+        switch activityDetailState {
+        case .closed:
+            return nil
+        case .hourly(let date, let usage, _):
+            return .hourly(date: date, usage: usage)
+        case .range(let range, let series, _):
+            return .range(range: range, series: series)
+        }
+    }
+
+    var isActivityChartLoading: Bool {
+        switch activityDetailState {
+        case .closed:
+            return false
+        case .hourly(_, _, let isLoading), .range(_, _, let isLoading):
+            return isLoading
+        }
+    }
 
     func updateEnabledAgents(_ enabledAgents: Set<AgentID>) {
         monitoringSettings.enabledAgents = enabledAgents
@@ -309,7 +368,10 @@ final class AppStore: ObservableObject {
         activeAgentSyncCancellation?.disableAgents(notIn: enabledAgents)
         cancelQuotaParticipants(disabledBy: enabledAgents)
         let filters = AppFilter.available(for: enabledAgents)
-        if !filters.contains(appFilter) {
+        if enabledAgents.isEmpty {
+            clearSelectedActivityDate()
+            reload(enabledAgents: enabledAgents)
+        } else if !filters.contains(appFilter) {
             clearSelectedActivityDate()
             appFilter = .all
         } else {
@@ -414,24 +476,19 @@ final class AppStore: ObservableObject {
 
         resetToTodayAfterDayRolloverIfNeeded()
         reloadGeneration += 1
-        hourlyLoadGeneration += 1
+        activityLoadGeneration += 1
 
         let appFilter = appFilter
         let enabledAgents = requestedEnabledAgents ?? self.enabledAgents
         let timeRange = timeRange
         let heatmapMode = heatmapMode
-        let selectedActivityDate = selectedActivityDate
-        let activityDetailRange = activityDetailRange
+        let activityDetailRequest = activityDetailRequest
         let reloadGeneration = reloadGeneration
-        let hourlyLoadGeneration = hourlyLoadGeneration
+        let activityLoadGeneration = activityLoadGeneration
         let db = db
         let hourlyTokenUsageLoader = hourlyTokenUsageLoader
         let activityRangeTokenUsageLoader = activityRangeTokenUsageLoader
-        if selectedActivityDate != nil {
-            isHourlyTokenUsageLoading = true
-        } else if activityDetailRange != nil {
-            isActivityRangeTokenUsageLoading = true
-        }
+        markActivityDetailLoading()
 
         DispatchQueue.global(qos: .userInitiated).async {
             let s = db.fetchStats(
@@ -462,14 +519,19 @@ final class AppStore: ObservableObject {
                     enabledAgents: enabledAgents
                 )
             }
-            let hourly = selectedActivityDate.map {
-                hourlyTokenUsageLoader(db, appFilter, enabledAgents, $0)
-            } ?? []
-            let ranged = activityDetailRange.flatMap { range in
-                selectedActivityDate == nil
-                    ? activityRangeTokenUsageLoader(db, appFilter, enabledAgents, range)
-                    : nil
-            } ?? .empty
+            let hourly: [HourlyTokenUsage]
+            let ranged: ActivityRangeTokenSeries
+            switch activityDetailRequest {
+            case .hourly(let date):
+                hourly = hourlyTokenUsageLoader(db, appFilter, enabledAgents, date)
+                ranged = .empty
+            case .range(let range):
+                hourly = []
+                ranged = activityRangeTokenUsageLoader(db, appFilter, enabledAgents, range)
+            case nil:
+                hourly = []
+                ranged = .empty
+            }
             let m = db.fetchModelDistribution(
                 app: appFilter,
                 range: timeRange,
@@ -483,20 +545,31 @@ final class AppStore: ObservableObject {
                     self.enabledAgents == enabledAgents,
                     self.timeRange == timeRange,
                     self.heatmapMode == heatmapMode,
-                    self.selectedActivityDate == selectedActivityDate,
-                    self.activityDetailRange == activityDetailRange,
+                    self.activityDetailRequest == activityDetailRequest,
                     self.reloadGeneration == reloadGeneration,
-                    self.hourlyLoadGeneration == hourlyLoadGeneration
+                    self.activityLoadGeneration == activityLoadGeneration
                 else {
                     return
                 }
 
                 self.stats = s
                 self.heatmap = h
-                self.hourlyTokenUsage = hourly
-                self.isHourlyTokenUsageLoading = false
-                self.activityRangeTokenSeries = ranged
-                self.isActivityRangeTokenUsageLoading = false
+                switch activityDetailRequest {
+                case .hourly(let date):
+                    self.activityDetailState = .hourly(
+                        date: date,
+                        usage: hourly,
+                        isLoading: false
+                    )
+                case .range(let range):
+                    self.activityDetailState = .range(
+                        range: range,
+                        series: ranged,
+                        isLoading: false
+                    )
+                case nil:
+                    break
+                }
                 self.modelDistribution = m
                 self.availableYears = years
                 if case .year(let selectedYear) = self.heatmapMode,
@@ -510,13 +583,8 @@ final class AppStore: ObservableObject {
     func selectActivityDate(_ date: String) {
         guard let range = TimeRange.activityDay(date, now: currentDateProvider()) else { return }
 
-        selectedActivityDate = date
-        activityDetailRange = range
+        activityDetailState = .hourly(date: date, usage: [], isLoading: true)
         timeRange = range
-        hourlyTokenUsage = []
-        activityRangeTokenSeries = .empty
-        isHourlyTokenUsageLoading = true
-        isActivityRangeTokenUsageLoading = false
         loadHourlyTokenUsage(for: date)
     }
 
@@ -532,14 +600,32 @@ final class AppStore: ObservableObject {
     func setTimeRangeFromFilter(_ range: TimeRange) {
         let keepsActivityDetailPresented = isActivityDetailPresented
         let selectedDate = activityDateString(for: range)
-        hourlyLoadGeneration += 1
-        selectedActivityDate = keepsActivityDetailPresented ? selectedDate : nil
-        hourlyTokenUsage = []
-        isHourlyTokenUsageLoading = keepsActivityDetailPresented && selectedDate != nil
-        activityDetailRange = keepsActivityDetailPresented ? range : nil
-        activityRangeTokenSeries = .empty
-        isActivityRangeTokenUsageLoading = keepsActivityDetailPresented && selectedDate == nil
+        activityLoadGeneration += 1
+        if keepsActivityDetailPresented, let selectedDate {
+            activityDetailState = .hourly(date: selectedDate, usage: [], isLoading: true)
+        } else if keepsActivityDetailPresented {
+            activityDetailState = .range(range: range, series: .empty, isLoading: true)
+        } else {
+            activityDetailState = .closed
+        }
         timeRange = range
+    }
+
+    func toggleActivityDetail() {
+        guard hasEnabledAgents else { return }
+        if isActivityDetailPresented {
+            clearSelectedActivityDate()
+            return
+        }
+
+        let selectedDate = activityDateString(for: timeRange)
+        if let selectedDate {
+            activityDetailState = .hourly(date: selectedDate, usage: [], isLoading: true)
+            loadHourlyTokenUsage(for: selectedDate)
+        } else {
+            activityDetailState = .range(range: timeRange, series: .empty, isLoading: true)
+            loadActivityRangeTokenUsage(for: timeRange)
+        }
     }
 
     private func activityDateString(for range: TimeRange) -> String? {
@@ -561,20 +647,15 @@ final class AppStore: ObservableObject {
     }
 
     func clearSelectedActivityDate() {
-        hourlyLoadGeneration += 1
-        selectedActivityDate = nil
-        activityDetailRange = nil
-        hourlyTokenUsage = []
-        isHourlyTokenUsageLoading = false
-        activityRangeTokenSeries = .empty
-        isActivityRangeTokenUsageLoading = false
+        activityLoadGeneration += 1
+        activityDetailState = .closed
     }
 
     private func loadHourlyTokenUsage(for date: String) {
         let app = appFilter
         let enabledAgents = enabledAgents
-        hourlyLoadGeneration += 1
-        let generation = hourlyLoadGeneration
+        activityLoadGeneration += 1
+        let generation = activityLoadGeneration
         let loader = hourlyTokenUsageLoader
         DispatchQueue.global(qos: .userInitiated).async { [db] in
             let usage = loader(db, app, enabledAgents, date)
@@ -584,13 +665,65 @@ final class AppStore: ObservableObject {
                     self.selectedActivityDate == date,
                     self.appFilter == app,
                     self.enabledAgents == enabledAgents,
-                    self.hourlyLoadGeneration == generation
+                    self.activityLoadGeneration == generation
                 else {
                     return
                 }
-                self.hourlyTokenUsage = usage
-                self.isHourlyTokenUsageLoading = false
+                self.activityDetailState = .hourly(
+                    date: date,
+                    usage: usage,
+                    isLoading: false
+                )
             }
+        }
+    }
+
+    private func loadActivityRangeTokenUsage(for range: TimeRange) {
+        let app = appFilter
+        let enabledAgents = enabledAgents
+        activityLoadGeneration += 1
+        let generation = activityLoadGeneration
+        let loader = activityRangeTokenUsageLoader
+        DispatchQueue.global(qos: .userInitiated).async { [db] in
+            let series = loader(db, app, enabledAgents, range)
+            DispatchQueue.main.async { [weak self] in
+                guard
+                    let self,
+                    self.activityDetailRequest == .range(range),
+                    self.appFilter == app,
+                    self.enabledAgents == enabledAgents,
+                    self.activityLoadGeneration == generation
+                else {
+                    return
+                }
+                self.activityDetailState = .range(
+                    range: range,
+                    series: series,
+                    isLoading: false
+                )
+            }
+        }
+    }
+
+    private var activityDetailRequest: ActivityDetailRequest? {
+        switch activityDetailState {
+        case .closed:
+            return nil
+        case .hourly(let date, _, _):
+            return .hourly(date: date)
+        case .range(let range, _, _):
+            return .range(range)
+        }
+    }
+
+    private func markActivityDetailLoading() {
+        switch activityDetailState {
+        case .closed:
+            break
+        case .hourly(let date, let usage, _):
+            activityDetailState = .hourly(date: date, usage: usage, isLoading: true)
+        case .range(let range, let series, _):
+            activityDetailState = .range(range: range, series: series, isLoading: true)
         }
     }
 

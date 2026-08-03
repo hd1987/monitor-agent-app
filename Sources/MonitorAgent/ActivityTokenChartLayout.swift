@@ -4,6 +4,10 @@ import Foundation
 enum ActivityTokenChartLayout {
     static let drawerHeight: CGFloat = 190
     static let chartHeight: CGFloat = 128
+    static let chartHeaderHeight: CGFloat = 14
+    static let chartLegendHeight: CGFloat = 12
+    static let chartSectionSpacing: CGFloat = 8
+    static let chartVerticalPadding: CGFloat = 10
     static let defaultTooltipWidth: CGFloat = 120
     static let chartTooltipWidth: CGFloat = 150
     static let rangeChartTooltipWidth: CGFloat = 170
@@ -15,6 +19,14 @@ enum ActivityTokenChartLayout {
     static let lastChartHour = 23
     static let hourAxisMarks = Array(stride(from: 0, through: lastHourAxisMark, by: hourAxisMarkInterval))
     static let heatmapIntensities: [Double] = [0.20, 0.40, 0.60, 0.80, 1.0]
+
+    static var requiredDrawerHeight: CGFloat {
+        chartHeaderHeight
+            + chartHeight
+            + chartLegendHeight
+            + chartSectionSpacing * 2
+            + chartVerticalPadding * 2
+    }
 
     static func hourAxisLabel(for hour: Int) -> String {
         "\(hour)h"

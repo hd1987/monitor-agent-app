@@ -1,4 +1,5 @@
 import Combine
+import SwiftUI
 import XCTest
 @testable import MonitorAgent
 
@@ -161,6 +162,28 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         XCTAssertEqual(store.appFilter, .all)
         XCTAssertNil(store.selectedActivityDate)
         XCTAssertEqual(store.availableAppFilters, [.all, .claude, .cursor])
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testDisablingAllAgentsClosesActivityDetail() {
+        let suiteName = "AppStoreTodayRolloverTests.disableAllAgents"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            monitoringSettings: monitoringSettings,
+            observeRefreshIntervalChanges: false
+        )
+        store.toggleActivityDetail()
+
+        XCTAssertTrue(store.isActivityDetailPresented)
+
+        monitoringSettings.enabledAgents = []
+
+        XCTAssertEqual(store.activityDetailState, .closed)
+        XCTAssertFalse(store.isActivityDetailPresented)
+        XCTAssertNil(store.activityChartData)
         defaults.removePersistentDomain(forName: suiteName)
     }
 
@@ -391,6 +414,133 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         XCTAssertEqual(store.selectedActivityDate, "2026-07-09")
     }
 
+    func testHeatmapModeChangeKeepsActivityDetailPresented() {
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            observeRefreshIntervalChanges: false
+        )
+        store.selectActivityDate("2026-07-08")
+        let hostingView = NSHostingView(
+            rootView: HeatmapView()
+                .environmentObject(store)
+                .environmentObject(ThemeManager.shared)
+        )
+        hostingView.frame = NSRect(x: 0, y: 0, width: MainPanelDesign.width, height: 500)
+        hostingView.layoutSubtreeIfNeeded()
+
+        store.heatmapMode = .year(2025)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+
+        XCTAssertTrue(store.isActivityDetailPresented)
+        XCTAssertEqual(store.selectedActivityDate, "2026-07-08")
+    }
+
+    func testClosingActivityDetailPreservesCurrentFilters() {
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            observeRefreshIntervalChanges: false
+        )
+        store.appFilter = .codex
+        store.selectActivityDate("2026-07-08")
+        let selectedRange = store.timeRange
+
+        store.clearSelectedActivityDate()
+
+        XCTAssertFalse(store.isActivityDetailPresented)
+        XCTAssertNil(store.selectedActivityDate)
+        XCTAssertEqual(store.timeRange, selectedRange)
+        XCTAssertEqual(store.appFilter, .codex)
+    }
+
+    func testToggleActivityDetailShowsAndHidesCurrentSingleDayRange() {
+        let now = date(year: 2026, month: 7, day: 9, hour: 10)
+        let expectedUsage = [hourlyUsage(hour: 10, inputTokens: 100)]
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            observeRefreshIntervalChanges: false,
+            currentDateProvider: { now },
+            hourlyTokenUsageLoader: { _, _, _, date in
+                XCTAssertEqual(date, "2026-07-09")
+                return expectedUsage
+            }
+        )
+
+        store.toggleActivityDetail()
+
+        let loaded = expectation(description: "top chart button loads current day")
+        waitUntil(attemptsRemaining: 50) {
+            store.hourlyTokenUsage == expectedUsage && !store.isHourlyTokenUsageLoading
+        } completion: {
+            XCTAssertTrue(store.isActivityDetailPresented)
+            XCTAssertEqual(store.selectedActivityDate, "2026-07-09")
+            XCTAssertEqual(store.timeRange, .today)
+            XCTAssertEqual(
+                store.activityDetailState,
+                .hourly(date: "2026-07-09", usage: expectedUsage, isLoading: false)
+            )
+            loaded.fulfill()
+        }
+        wait(for: [loaded], timeout: 1)
+
+        store.toggleActivityDetail()
+
+        XCTAssertEqual(store.activityDetailState, .closed)
+        XCTAssertFalse(store.isActivityDetailPresented)
+        XCTAssertEqual(store.timeRange, .today)
+    }
+
+    func testToggleActivityDetailShowsCurrentMultiDayRange() {
+        let loadCountLock = NSLock()
+        var loadCount = 0
+        let expectedSeries = ActivityRangeTokenSeries(
+            aggregation: .day,
+            usage: [ActivityRangeTokenUsage(
+                periodStart: date(year: 2026, month: 7, day: 3),
+                requestCount: 1,
+                inputTokens: 100,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                cacheCreationTokens: 0
+            )]
+        )
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            observeRefreshIntervalChanges: false,
+            activityRangeTokenUsageLoader: { _, _, _, range in
+                XCTAssertEqual(range, .last7)
+                loadCountLock.lock()
+                loadCount += 1
+                loadCountLock.unlock()
+                return expectedSeries
+            }
+        )
+        store.setTimeRangeFromFilter(.last7)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+
+        store.toggleActivityDetail()
+
+        let loaded = expectation(description: "top chart button loads current range")
+        waitUntil(attemptsRemaining: 50) {
+            store.activityRangeTokenSeries == expectedSeries
+                && !store.isActivityRangeTokenUsageLoading
+        } completion: {
+            XCTAssertTrue(store.isActivityDetailPresented)
+            XCTAssertNil(store.selectedActivityDate)
+            XCTAssertEqual(store.activityDetailRange, .last7)
+            XCTAssertEqual(store.timeRange, .last7)
+            XCTAssertEqual(
+                store.activityDetailState,
+                .range(range: .last7, series: expectedSeries, isLoading: false)
+            )
+            loadCountLock.lock()
+            let finalLoadCount = loadCount
+            loadCountLock.unlock()
+            XCTAssertEqual(finalLoadCount, 1)
+            loaded.fulfill()
+        }
+        wait(for: [loaded], timeout: 1)
+    }
+
     func testSelectingMultiDayFilterPresentsAggregatedActivityDetail() {
         let expectedSeries = ActivityRangeTokenSeries(
             aggregation: .day,
@@ -572,20 +722,10 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             currentDateProvider: { now }
         )
 
-        store.hourlyTokenUsage = [
-            HourlyTokenUsage(
-                hour: 12,
-                requestCount: 1,
-                inputTokens: 999,
-                outputTokens: 0,
-                cacheReadTokens: 0,
-                cacheCreationTokens: 0
-            )
-        ]
-
         store.selectActivityDate("2026-07-08")
 
-        XCTAssertFalse(store.hourlyTokenUsage.contains { $0.inputTokens == 999 })
+        XCTAssertTrue(store.isHourlyTokenUsageLoading)
+        XCTAssertTrue(store.hourlyTokenUsage.isEmpty)
 
         let loaded = expectation(description: "zero hourly usage loads")
         waitUntil(attemptsRemaining: 50) {
@@ -686,21 +826,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             observeRefreshIntervalChanges: false,
             currentDateProvider: { now }
         )
-        store.timeRange = .custom(
-            start: date(year: 2026, month: 7, day: 8),
-            end: date(year: 2026, month: 7, day: 8)
-        )
-        store.selectedActivityDate = "2026-07-08"
-        store.hourlyTokenUsage = [
-            HourlyTokenUsage(
-                hour: 9,
-                requestCount: 1,
-                inputTokens: 10,
-                outputTokens: 0,
-                cacheReadTokens: 0,
-                cacheCreationTokens: 0
-            )
-        ]
+        store.selectActivityDate("2026-07-08")
 
         now = date(year: 2026, month: 7, day: 10, hour: 0)
         let reset = expectation(description: "day rollover resets selection")

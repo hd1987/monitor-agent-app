@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Replace Activity outside-click dismissal and protected click regions with a compact top-right collapse button that shares the top-panel line-chart icon and hover treatment
+- Render single-day and multi-day Activity data through one normalized chart component
+- Add a stateful top-panel chart button using the supplied template SVG that shows or collapses Activity detail for the current date range, turns only its icon blue while open, and shares the top tools' circular hover treatment
+- Consolidate Activity presentation, payload, and loading fields into one state and load a newly opened chart without reloading unrelated dashboard data
+
+### Fixed
+- Keep the Activity chart's 190pt height budget stable by overlaying its collapse button, close the detail when all Agents are disabled, and cache the template chart icon
+
 ## [0.10.0] - 2026-08-02
 
 ### Added
