@@ -299,6 +299,12 @@ struct ActivityRangeTokenSeries: Equatable {
     static let empty = ActivityRangeTokenSeries(aggregation: .day, usage: [])
 }
 
+enum ActivityDetailState: Equatable {
+    case closed
+    case hourly(date: String, usage: [HourlyTokenUsage], isLoading: Bool)
+    case range(range: TimeRange, series: ActivityRangeTokenSeries, isLoading: Bool)
+}
+
 struct ModelShare: Identifiable {
     let model: String
     let requests: Int

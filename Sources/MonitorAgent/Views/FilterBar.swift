@@ -7,7 +7,6 @@ struct FilterBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let onOpenGeneralSettings: () -> Void
     let onResetPanelPosition: () -> Void
-    let onFilterBarFrameChange: (CGRect) -> Void
 
     @State private var isTimeRangePopoverPresented = false
     @State private var calendarSelection = CalendarRangeSelection()
@@ -33,12 +32,6 @@ struct FilterBar: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 10)
         }
-        .overlay(
-            WindowFrameReader { frame in
-                onFilterBarFrameChange(frame)
-            }
-            .allowsHitTesting(false)
-        )
     }
 
     private var headerContent: some View {
@@ -62,13 +55,13 @@ struct FilterBar: View {
                         }
                         .foregroundStyle(Color.primary)
                         .padding(.horizontal, store.appFilter == filter ? 10 : 7)
-                            .frame(height: MainPanelDesign.headerControlItemHeight)
-                            .background(
-                                store.appFilter == filter
-                                    ? theme.selectedControlSurface
-                                    : Color.clear
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .frame(height: MainPanelDesign.headerControlItemHeight)
+                        .background(
+                            store.appFilter == filter
+                                ? theme.selectedControlSurface
+                                : Color.clear
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                     .buttonStyle(MainPanelPressButtonStyle())
                     .help(filter.rawValue)
@@ -93,98 +86,77 @@ struct FilterBar: View {
                 )
 
             HStack(spacing: 0) {
-                Button {
-                    panelPresentationState.togglePin()
-                } label: {
+                MainPanelHeaderToolButton(
+                    helpText: panelPresentationState.isPinned ? "Unpin Panel" : "Keep Panel Open",
+                    accessibilityText: panelPresentationState.isPinned ? "Unpin panel" : "Keep panel open",
+                    isSelected: panelPresentationState.isPinHighlighted,
+                    action: panelPresentationState.togglePin
+                ) { foreground in
                     Image(systemName: panelPresentationState.isPinned ? "pin.fill" : "pin")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(
-                            panelPresentationState.isPinHighlighted
-                                ? theme.selectedControlAccent
-                                : headerToolForeground
-                        )
+                        .foregroundStyle(foreground)
                         .rotationEffect(
                             panelPresentationState.isPinned || reduceMotion
                                 ? .zero
                                 : .degrees(45)
                         )
-                        .frame(
-                            width: MainPanelDesign.headerControlItemHeight,
-                            height: MainPanelDesign.headerControlItemHeight
-                        )
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(MainPanelPressButtonStyle())
-                .help(panelPresentationState.isPinned ? "Unpin Panel" : "Keep Panel Open")
-                .accessibilityLabel(panelPresentationState.isPinned ? "Unpin panel" : "Keep panel open")
+
+                MainPanelLineChartButton(
+                    helpText: store.isActivityDetailPresented
+                        ? "Collapse Activity detail"
+                        : "Show Activity detail",
+                    accessibilityText: store.isActivityDetailPresented
+                        ? "Collapse Activity detail"
+                        : "Show Activity detail",
+                    isSelected: store.isActivityDetailPresented,
+                    action: store.toggleActivityDetail
+                )
+                .disabled(!store.hasEnabledAgents)
 
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     let cooldownRemaining = store.manualRefreshCooldownRemaining(at: context.date)
                     let isCoolingDown = cooldownRemaining > 0 && !store.isRefreshInProgress
 
-                    Button {
-                        store.refreshNow()
-                    } label: {
+                    MainPanelHeaderToolButton(
+                        helpText: store.isRefreshInProgress
+                            ? "Refreshing Data"
+                            : (isCoolingDown ? "Refresh unavailable during cooldown" : "Refresh Data"),
+                        accessibilityText: "Refresh data",
+                        action: store.refreshNow
+                    ) { foreground in
                         RefreshStatusIcon(
                             isRefreshing: store.isManualRefreshInProgress,
-                            foreground: isCoolingDown
-                                || store.isRebuildingUsageData
-                                || !store.hasEnabledAgents
-                                ? headerToolForeground.opacity(0.35)
-                                : headerToolForeground,
+                            foreground: foreground,
                             reduceMotion: reduceMotion
                         )
-                            .frame(
-                                width: MainPanelDesign.headerControlItemHeight,
-                                height: MainPanelDesign.headerControlItemHeight
-                            )
-                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(MainPanelPressButtonStyle())
                     .disabled(
                         store.isRebuildingUsageData
                             || !store.hasEnabledAgents
                             || cooldownRemaining > 0
                     )
-                    .help(
-                        store.isRefreshInProgress
-                            ? "Refreshing Data"
-                            : (isCoolingDown ? "Refresh unavailable during cooldown" : "Refresh Data")
-                    )
-                    .accessibilityLabel("Refresh data")
                 }
 
-                Button {
-                    onResetPanelPosition()
-                } label: {
+                MainPanelHeaderToolButton(
+                    helpText: "Reset Panel Position",
+                    accessibilityText: "Reset panel position",
+                    action: onResetPanelPosition
+                ) { foreground in
                     Image(systemName: "scope")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(headerToolForeground)
-                        .frame(
-                            width: MainPanelDesign.headerControlItemHeight,
-                            height: MainPanelDesign.headerControlItemHeight
-                        )
-                        .contentShape(Rectangle())
+                        .foregroundStyle(foreground)
                 }
-                .buttonStyle(MainPanelPressButtonStyle())
-                .help("Reset Panel Position")
-                .accessibilityLabel("Reset panel position")
 
-                Button {
-                    onOpenGeneralSettings()
-                } label: {
+                MainPanelHeaderToolButton(
+                    helpText: "Open General Settings",
+                    accessibilityText: "Open General settings",
+                    action: onOpenGeneralSettings
+                ) { foreground in
                     Image(systemName: "gearshape")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(headerToolForeground)
-                        .frame(
-                            width: MainPanelDesign.headerControlItemHeight,
-                            height: MainPanelDesign.headerControlItemHeight
-                        )
-                        .contentShape(Rectangle())
+                        .foregroundStyle(foreground)
                 }
-                .buttonStyle(MainPanelPressButtonStyle())
-                .help("Open General Settings")
-                .accessibilityLabel("Open General settings")
             }
             .padding(2)
             .frame(height: MainPanelDesign.headerControlHeight)
@@ -222,10 +194,6 @@ struct FilterBar: View {
                     }
             }
         }
-    }
-
-    private var headerToolForeground: Color {
-        theme.panelTertiaryForeground.opacity(MainPanelDesign.headerToolOpacity)
     }
 
     private var timeRangePopover: some View {

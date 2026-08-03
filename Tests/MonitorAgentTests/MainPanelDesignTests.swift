@@ -16,6 +16,10 @@ final class MainPanelDesignTests: XCTestCase {
         XCTAssertEqual(MainPanelDesign.headerToolSpacing, 4)
     }
 
+    func testHeaderToolButtonsUseCompactHitTarget() {
+        XCTAssertEqual(MainPanelDesign.headerControlItemHeight, 24)
+    }
+
     func testTooltipsShareOneSurfaceStyle() {
         XCTAssertEqual(MainPanelTooltipDesign.cornerRadius, 6)
         XCTAssertEqual(MainPanelTooltipDesign.borderOpacity, 0.12)

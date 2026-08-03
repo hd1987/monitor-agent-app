@@ -1,15 +1,12 @@
-import AppKit
 import SwiftUI
 
 struct HeatmapView: View {
     @EnvironmentObject var store: AppStore
     @EnvironmentObject var theme: ThemeManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    let filterBarFrameInWindow: CGRect
     @State private var hoveredCell: String?
     @State private var hoveredCount: Int = 0
     @State private var hoverAnchor: CGPoint = .zero
-    @State private var activityFrameInWindow: CGRect = .null
     @State private var tooltipSize: CGSize = .zero
 
     private let rows = 7
@@ -24,7 +21,7 @@ struct HeatmapView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Header — tap to dismiss activity chart
+            // Header
             HStack {
                 Text("Activity")
                     .mainPanelSectionTitle()
@@ -53,13 +50,6 @@ struct HeatmapView: View {
                     }
                 }
             }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                if store.isActivityDetailPresented {
-                    store.clearSelectedActivityDate()
-                }
-            }
-
             // Grid — compute cell size to fit all weeks within available width
             let grid = buildGrid()
             let columns = grid.count
@@ -191,23 +181,11 @@ struct HeatmapView: View {
                 alignment: .leading
             )
 
-            if let selectedDate = store.selectedActivityDate {
+            if let activityChartData = store.activityChartData {
                 ActivityTokenChartView(
-                    date: selectedDate,
-                    usage: store.hourlyTokenUsage,
-                    isLoading: store.isHourlyTokenUsageLoading
-                )
-                    .environmentObject(theme)
-                    .transition(
-                        reduceMotion
-                            ? .opacity
-                            : .opacity.combined(with: .move(edge: .top))
-                    )
-            } else if let range = store.activityDetailRange {
-                ActivityRangeTokenChartView(
-                    range: range,
-                    series: store.activityRangeTokenSeries,
-                    isLoading: store.isActivityRangeTokenUsageLoading
+                    data: activityChartData,
+                    isLoading: store.isActivityChartLoading,
+                    onClose: store.clearSelectedActivityDate
                 )
                     .environmentObject(theme)
                     .transition(
@@ -219,28 +197,6 @@ struct HeatmapView: View {
         }
         .padding(.horizontal, hPadding)
         .padding(.vertical, MainPanelDesign.sectionVerticalPadding)
-        .background(
-            ZStack {
-                WindowFrameReader { frame in
-                    activityFrameInWindow = frame
-                }
-                ActivityChartClickMonitor(
-                    isActive: store.isActivityDetailPresented,
-                    excludedFrames: [activityFrameInWindow, filterBarFrameInWindow],
-                    onOutsideClick: {
-                        store.clearSelectedActivityDate()
-                    }
-                )
-            }
-        )
-        .onChange(of: store.activityDetailRange) { _, selectedRange in
-            if selectedRange == nil {
-                activityFrameInWindow = .null
-            }
-        }
-        .onChange(of: store.heatmapMode) { _, _ in
-            store.clearSelectedActivityDate()
-        }
     }
 
     // MARK: - Heatmap Mode Helpers
@@ -468,87 +424,5 @@ private struct TooltipSizeKey: PreferenceKey {
     static var defaultValue: CGSize = .zero
     static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
         value = nextValue()
-    }
-}
-
-// MARK: - Outside Click Handling
-
-private struct ActivityChartClickMonitor: NSViewRepresentable {
-    let isActive: Bool
-    let excludedFrames: [CGRect]
-    let onOutsideClick: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        context.coordinator.update(
-            isActive: isActive,
-            excludedFrames: excludedFrames,
-            onOutsideClick: onOutsideClick,
-            owner: view
-        )
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        context.coordinator.update(
-            isActive: isActive,
-            excludedFrames: excludedFrames,
-            onOutsideClick: onOutsideClick,
-            owner: nsView
-        )
-    }
-
-    final class Coordinator {
-        private var monitor: Any?
-        private weak var owner: NSView?
-        private var isActive = false
-        private var excludedFrames: [CGRect] = []
-        private var onOutsideClick: () -> Void = {}
-
-        deinit {
-            removeMonitor()
-        }
-
-        func update(
-            isActive: Bool,
-            excludedFrames: [CGRect],
-            onOutsideClick: @escaping () -> Void,
-            owner: NSView
-        ) {
-            self.isActive = isActive
-            self.excludedFrames = excludedFrames.filter { !$0.isNull && !$0.isEmpty }
-            self.onOutsideClick = onOutsideClick
-            self.owner = owner
-
-            if monitor == nil {
-                monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
-                    self?.handle(event) ?? event
-                }
-            }
-        }
-
-        private func handle(_ event: NSEvent) -> NSEvent {
-            guard isActive, event.window === owner?.window else { return event }
-            let point = event.locationInWindow
-            if excludedFrames.contains(where: { $0.contains(point) }) {
-                return event
-            }
-
-            DispatchQueue.main.async {
-                self.onOutsideClick()
-            }
-            return event
-        }
-
-        private func removeMonitor() {
-            if let monitor {
-                NSEvent.removeMonitor(monitor)
-            }
-            monitor = nil
-        }
     }
 }

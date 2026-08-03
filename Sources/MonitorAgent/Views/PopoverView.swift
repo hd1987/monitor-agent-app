@@ -5,21 +5,17 @@ struct PopoverView: View {
     @EnvironmentObject var theme: ThemeManager
     let onOpenGeneralSettings: () -> Void
     let onResetPanelPosition: () -> Void
-    @State private var filterBarFrameInWindow: CGRect = .null
     @State private var isTokenBreakdownPresented = false
 
     var body: some View {
         VStack(spacing: 0) {
             FilterBar(
                 onOpenGeneralSettings: onOpenGeneralSettings,
-                onResetPanelPosition: onResetPanelPosition,
-                onFilterBarFrameChange: { frame in
-                    filterBarFrameInWindow = frame
-                }
+                onResetPanelPosition: onResetPanelPosition
             )
             if store.hasEnabledAgents {
                 StatCardsView(isTokenBreakdownPresented: $isTokenBreakdownPresented)
-                HeatmapView(filterBarFrameInWindow: filterBarFrameInWindow)
+                HeatmapView()
                     .allowsHitTesting(!isTokenBreakdownPresented)
                 ModelDistributionView()
                 SubscriptionQuotaView()

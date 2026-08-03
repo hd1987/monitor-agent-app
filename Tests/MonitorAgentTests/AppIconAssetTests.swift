@@ -14,4 +14,11 @@ final class AppIconAssetTests: XCTestCase {
     func testDevelopmentIconLoadsFromSwiftPackageBundle() {
         XCTAssertNotNil(AppIconAsset.data(for: .all))
     }
+
+    func testLineChartIconLoadsAsTemplateImage() {
+        let image = MainPanelIconAsset.lineChartImage
+
+        XCTAssertNotNil(AppIconAsset.data(named: "linechart"))
+        XCTAssertTrue(image.isTemplate)
+    }
 }

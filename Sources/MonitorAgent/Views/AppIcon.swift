@@ -28,8 +28,7 @@ enum AppIconAsset {
         }
     }
 
-    static func data(for icon: AppIcon) -> Data? {
-        let resourceName = icon == .all ? "menubar" : icon.rawValue
+    static func data(named resourceName: String) -> Data? {
         guard let url = resourceBundle()?.url(
             forResource: resourceName,
             withExtension: "svg",
@@ -38,6 +37,10 @@ enum AppIconAsset {
             return nil
         }
         return try? Data(contentsOf: url)
+    }
+
+    static func data(for icon: AppIcon) -> Data? {
+        data(named: icon == .all ? "menubar" : icon.rawValue)
     }
 
     static func image(for icon: AppIcon) -> NSImage {
@@ -54,6 +57,19 @@ enum AppIconAsset {
         image.isTemplate = true
         return image
     }
+}
+
+enum MainPanelIconAsset {
+    static let lineChartImage: NSImage = {
+        guard
+            let data = AppIconAsset.data(named: "linechart"),
+            let image = NSImage(data: data)
+        else {
+            return NSImage()
+        }
+        image.isTemplate = true
+        return image
+    }()
 }
 
 struct AppIconView: View {
