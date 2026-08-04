@@ -2,25 +2,32 @@ import SwiftUI
 
 struct SubscriptionQuotaView: View {
     @EnvironmentObject var store: AppStore
+    @State private var tipOwnership = QuotaTipOwnership()
 
     private var providers: [QuotaProviderID] {
         store.visibleQuotaProviders.filter(QuotaSettings.shared.isEnabled)
     }
 
     var body: some View {
-        if !providers.isEmpty {
-            VStack(spacing: 8) {
-                ForEach(providers, id: \.self) { provider in
-                    SubscriptionQuotaCard(
-                        provider: provider,
-                        snapshot: store.quotaSnapshots[provider],
-                        expirationDate: QuotaSettings.shared.expirationDate(for: provider)
-                    )
+        Group {
+            if !providers.isEmpty {
+                VStack(spacing: 8) {
+                    ForEach(providers, id: \.self) { provider in
+                        SubscriptionQuotaCard(
+                            provider: provider,
+                            snapshot: store.quotaSnapshots[provider],
+                            expirationDate: QuotaSettings.shared.expirationDate(for: provider),
+                            tipOwnership: $tipOwnership
+                        )
+                    }
                 }
+                .padding(.horizontal, MainPanelDesign.horizontalPadding)
+                .padding(.top, 2)
+                .padding(.bottom, 12)
             }
-            .padding(.horizontal, MainPanelDesign.horizontalPadding)
-            .padding(.top, 2)
-            .padding(.bottom, 12)
+        }
+        .onChange(of: providers) { _, providers in
+            tipOwnership.retainProviders(providers)
         }
     }
 }
@@ -28,14 +35,15 @@ struct SubscriptionQuotaView: View {
 private struct SubscriptionQuotaCard: View {
     @EnvironmentObject private var theme: ThemeManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isExpirationTipPresented = false
-    @State private var isResetTipPresented = false
+    @State private var expirationTipHoverState = QuotaTipHoverState()
+    @State private var resetTipHoverState = QuotaTipHoverState()
     @State private var cardWidth: CGFloat = 0
     @State private var rightRegionWidth: CGFloat = 0
     @State private var resetTipAnchorX: CGFloat = 0
     let provider: QuotaProviderID
     let snapshot: QuotaSnapshot?
     let expirationDate: Date?
+    @Binding var tipOwnership: QuotaTipOwnership
 
     var body: some View {
         HStack(spacing: 0) {
@@ -48,12 +56,12 @@ private struct SubscriptionQuotaCard: View {
                     case .active:
                         guard expirationDate != nil else { return }
                         withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
-                            isExpirationTipPresented = true
+                            tipOwnership.claim(expirationTipOwner)
+                            expirationTipHoverState.triggerHoverChanged(true)
                         }
                     case .ended:
-                        withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
-                            isExpirationTipPresented = false
-                        }
+                        expirationTipHoverState.triggerHoverChanged(false)
+                        reconcileExpirationTipPresentation()
                     }
                 }
             Spacer(minLength: QuotaCardLayout.contentSpacing)
@@ -71,22 +79,26 @@ private struct SubscriptionQuotaCard: View {
                         }
                     )
                     .onContinuousHover { phase in
-                        guard hasResetCredits(snapshot) else { return }
                         switch phase {
                         case .active(let location):
-                            if !isResetTipPresented {
-                                resetTipAnchorX = max(
-                                    0,
-                                    cardWidth - QuotaCardLayout.horizontalPadding - rightRegionWidth
-                                ) + location.x
+                            guard hasResetCredits(snapshot) else { return }
+                            if !tipOwnership.owns(resetTipOwner) {
+                                resetTipAnchorX = resetRegionOriginX + location.x
                             }
                             withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
-                                isResetTipPresented = true
+                                tipOwnership.claim(resetTipOwner)
+                                resetTipHoverState.triggerHoverChanged(true)
                             }
                         case .ended:
-                            withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
-                                isResetTipPresented = false
-                            }
+                            resetTipHoverState.triggerHoverChanged(false)
+                            reconcileResetTipPresentation()
+                        }
+                    }
+                    .onChange(of: hasResetCredits(snapshot)) { _, hasResetCredits in
+                        guard !hasResetCredits else { return }
+                        withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
+                            resetTipHoverState.reset()
+                            tipOwnership.release(resetTipOwner)
                         }
                     }
             } else {
@@ -106,29 +118,51 @@ private struct SubscriptionQuotaCard: View {
                     .onChange(of: proxy.size.width) { _, newValue in cardWidth = newValue }
             }
         )
-        .overlay(alignment: .bottomLeading) {
-            if isExpirationTipPresented, let expirationDate {
-                SubscriptionExpirationTip(expirationDate: expirationDate)
-                    .padding(.leading, 8)
-                    .offset(y: -(QuotaCardLayout.cardHeight + 6))
-                    .allowsHitTesting(false)
-                    .transition(
-                        reduceMotion
-                            ? .opacity
-                            : .opacity.combined(with: .scale(scale: 0.98, anchor: .bottomLeading))
-                    )
+        .onChange(of: tipOwnership.owner) { _, owner in
+            withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
+                if owner != expirationTipOwner {
+                    expirationTipHoverState.reset()
+                }
+                if owner != resetTipOwner {
+                    resetTipHoverState.reset()
+                }
             }
         }
         .overlay(alignment: .bottomLeading) {
-            if isResetTipPresented,
+            if tipOwnership.owns(expirationTipOwner),
+               expirationTipHoverState.isPresented,
+               let expirationDate {
+                QuotaHoverTip(
+                    width: QuotaCardLayout.expirationTipWidth,
+                    onHoverChanged: expirationTipSurfaceHoverChanged
+                ) {
+                    SubscriptionExpirationTip(expirationDate: expirationDate)
+                }
+                .padding(.leading, 8)
+                .offset(y: -QuotaCardLayout.cardHeight)
+                .transition(
+                    reduceMotion
+                        ? .opacity
+                        : .opacity.combined(with: .scale(scale: 0.98, anchor: .bottomLeading))
+                )
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if tipOwnership.owns(resetTipOwner),
+               resetTipHoverState.isPresented,
                let snapshot,
                let credits = snapshot.resetCredits,
                credits > 0 {
-                ResetCreditsTip(
-                    count: credits,
-                    expirations: snapshot.resetCreditExpirations
-                )
-                .offset(x: clampedResetTipX, y: -(QuotaCardLayout.cardHeight + 6))
+                QuotaHoverTip(
+                    width: QuotaCardLayout.resetTipWidth,
+                    onHoverChanged: resetTipSurfaceHoverChanged
+                ) {
+                    ResetCreditsTip(
+                        count: credits,
+                        expirations: snapshot.resetCreditExpirations
+                    )
+                }
+                .offset(x: clampedResetTipX, y: -QuotaCardLayout.cardHeight)
                 .transition(
                     reduceMotion
                         ? .opacity
@@ -136,12 +170,66 @@ private struct SubscriptionQuotaCard: View {
                 )
             }
         }
-        .zIndex(isExpirationTipPresented || isResetTipPresented ? 2 : 0)
+        .zIndex(tipOwnership.owner?.provider == provider ? 2 : 0)
     }
 
     private var clampedResetTipX: CGFloat {
         let maxX = max(0, cardWidth - QuotaCardLayout.resetTipWidth)
         return min(max(0, resetTipAnchorX - QuotaCardLayout.resetTipWidth / 2), maxX)
+    }
+
+    private var resetRegionOriginX: CGFloat {
+        max(0, cardWidth - QuotaCardLayout.horizontalPadding - rightRegionWidth)
+    }
+
+    private var expirationTipOwner: QuotaTipOwner {
+        QuotaTipOwner(provider: provider, kind: .expiration)
+    }
+
+    private var resetTipOwner: QuotaTipOwner {
+        QuotaTipOwner(provider: provider, kind: .resetCredits)
+    }
+
+    private func expirationTipSurfaceHoverChanged(_ hovering: Bool) {
+        guard tipOwnership.owns(expirationTipOwner) else { return }
+        withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
+            expirationTipHoverState.surfaceHoverChanged(hovering)
+        }
+        if !hovering {
+            reconcileExpirationTipPresentation()
+        }
+    }
+
+    private func resetTipSurfaceHoverChanged(_ hovering: Bool) {
+        guard tipOwnership.owns(resetTipOwner) else { return }
+        withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
+            resetTipHoverState.surfaceHoverChanged(hovering)
+        }
+        if !hovering {
+            reconcileResetTipPresentation()
+        }
+    }
+
+    private func reconcileExpirationTipPresentation() {
+        DispatchQueue.main.async {
+            withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
+                expirationTipHoverState.reconcilePresentation()
+                if !expirationTipHoverState.isPresented {
+                    tipOwnership.release(expirationTipOwner)
+                }
+            }
+        }
+    }
+
+    private func reconcileResetTipPresentation() {
+        DispatchQueue.main.async {
+            withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
+                resetTipHoverState.reconcilePresentation()
+                if !resetTipHoverState.isPresented {
+                    tipOwnership.release(resetTipOwner)
+                }
+            }
+        }
     }
 
     private var header: some View {
@@ -290,6 +378,98 @@ private struct SubscriptionQuotaCard: View {
 
 }
 
+struct QuotaTipOwner: Equatable {
+    enum Kind: Equatable {
+        case expiration
+        case resetCredits
+    }
+
+    let provider: QuotaProviderID
+    let kind: Kind
+}
+
+struct QuotaTipOwnership: Equatable {
+    private(set) var owner: QuotaTipOwner?
+
+    mutating func claim(_ owner: QuotaTipOwner) {
+        self.owner = owner
+    }
+
+    mutating func release(_ owner: QuotaTipOwner) {
+        guard self.owner == owner else { return }
+        self.owner = nil
+    }
+
+    mutating func retainProviders(_ providers: [QuotaProviderID]) {
+        guard let owner, !providers.contains(owner.provider) else { return }
+        self.owner = nil
+    }
+
+    func owns(_ owner: QuotaTipOwner) -> Bool {
+        self.owner == owner
+    }
+}
+
+struct QuotaTipHoverState: Equatable {
+    private(set) var isTriggerHovered = false
+    private(set) var isSurfaceHovered = false
+    private(set) var isPresented = false
+
+    mutating func triggerHoverChanged(_ hovering: Bool) {
+        isTriggerHovered = hovering
+        if hovering {
+            isPresented = true
+        }
+    }
+
+    mutating func surfaceHoverChanged(_ hovering: Bool) {
+        isSurfaceHovered = hovering
+        if hovering {
+            isPresented = true
+        }
+    }
+
+    mutating func reconcilePresentation() {
+        isPresented = isTriggerHovered || isSurfaceHovered
+    }
+
+    mutating func reset() {
+        isTriggerHovered = false
+        isSurfaceHovered = false
+        isPresented = false
+    }
+}
+
+private struct QuotaHoverTip<Content: View>: View {
+    let width: CGFloat
+    let onHoverChanged: (Bool) -> Void
+    private let content: Content
+
+    init(
+        width: CGFloat,
+        onHoverChanged: @escaping (Bool) -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.width = width
+        self.onHoverChanged = onHoverChanged
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            content
+            Color.clear
+                .frame(
+                    width: width,
+                    height: QuotaCardLayout.tipHoverBridgeHeight
+                )
+        }
+        .frame(width: width)
+        .contentShape(Rectangle())
+        .onHover(perform: onHoverChanged)
+    }
+}
+
 private struct QuotaMetricItem {
     let label: String
     let window: QuotaWindow
@@ -376,7 +556,6 @@ private struct ResetCreditsTip: View {
         .frame(width: QuotaCardLayout.resetTipWidth)
         .mainPanelTooltipSurface()
         .contentShape(Rectangle())
-        .onHover { _ in }
     }
 
     private func expirationText(at index: Int) -> String {
@@ -544,4 +723,5 @@ enum QuotaCardLayout {
     static let resetTipWidth: CGFloat = 220
     static let resetTipSectionSpacing: CGFloat = 10
     static let resetTipItemSpacing: CGFloat = 8
+    static let tipHoverBridgeHeight: CGFloat = 6
 }
