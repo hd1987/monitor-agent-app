@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Added
+- Add a configurable Toggle Activity Chart panel shortcut that defaults to `C`
+
 ### Fixed
 - Keep an open Activity chart presented when day rollover resets the active range to the new Today
 

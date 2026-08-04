@@ -142,4 +142,40 @@ final class PanelPresentationStateTests: XCTestCase {
 
         XCTAssertEqual(refreshCount, 1)
     }
+
+    func testActivityChartShortcutInvokesToggleOnceAndConsumesRepeats() {
+        let panel = FloatingPanel()
+        var toggleCount = 0
+        panel.onToggleActivityChart = { toggleCount += 1 }
+
+        let toggle = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "c",
+            charactersIgnoringModifiers: "c",
+            isARepeat: false,
+            keyCode: UInt16(kVK_ANSI_C)
+        )!
+        let repeatedToggle = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "c",
+            charactersIgnoringModifiers: "c",
+            isARepeat: true,
+            keyCode: UInt16(kVK_ANSI_C)
+        )!
+
+        panel.sendEvent(toggle)
+        panel.sendEvent(repeatedToggle)
+
+        XCTAssertEqual(toggleCount, 1)
+    }
 }
