@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-08-04
+
 ### Added
 - Add a configurable Toggle Activity Chart panel shortcut that defaults to `C`
 
