@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-08-04
+
 ### Fixed
 - Show the first and last available times on every Activity chart X-axis
 
