@@ -99,11 +99,16 @@ struct ActivityTokenChartView: View {
             .chartYScale(domain: 0...maxValue)
             .chartXAxis {
                 AxisMarks(values: data.xAxisMarks) { value in
-                    AxisValueLabel(anchor: .top) {
-                        if let index = value.as(Int.self),
-                           let label = data.axisLabel(for: index) {
-                            Text(label)
-                                .foregroundStyle(theme.panelSecondaryForeground)
+                    if let index = value.as(Int.self) {
+                        AxisValueLabel(
+                            anchor: index == data.xAxisMarks.first ? .topLeading : .top,
+                            collisionResolution: .disabled,
+                            horizontalSpacing: index == data.xAxisMarks.first ? 0 : nil
+                        ) {
+                            if let label = data.axisLabel(for: index) {
+                                Text(label)
+                                    .foregroundStyle(theme.panelSecondaryForeground)
+                            }
                         }
                     }
                 }

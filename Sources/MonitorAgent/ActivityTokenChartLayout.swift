@@ -17,7 +17,9 @@ enum ActivityTokenChartLayout {
     static let hourAxisMarkInterval = 3
     static let lastHourAxisMark = 21
     static let lastChartHour = 23
-    static let hourAxisMarks = Array(stride(from: 0, through: lastHourAxisMark, by: hourAxisMarkInterval))
+    static let hourAxisMarks = Array(
+        stride(from: 0, through: lastHourAxisMark, by: hourAxisMarkInterval)
+    ) + [lastChartHour]
     static let heatmapIntensities: [Double] = [0.20, 0.40, 0.60, 0.80, 1.0]
 
     static var requiredDrawerHeight: CGFloat {
@@ -146,8 +148,12 @@ enum ActivityTokenChartLayout {
         }
         let domainEnd = includesEndBoundary ? bucketCount : bucketCount - 1
         var marks = Array(stride(from: 0, through: domainEnd, by: interval))
-        if includesEndBoundary, marks.last != domainEnd {
-            marks.append(domainEnd)
+        if let lastMark = marks.last, lastMark != domainEnd {
+            if domainEnd - lastMark < interval / 2 {
+                marks[marks.count - 1] = domainEnd
+            } else {
+                marks.append(domainEnd)
+            }
         }
         return marks
     }
