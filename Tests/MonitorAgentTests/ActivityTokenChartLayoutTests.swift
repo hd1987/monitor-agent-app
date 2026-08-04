@@ -57,21 +57,16 @@ final class ActivityTokenChartLayoutTests: XCTestCase {
         XCTAssertEqual(data.tooltipWidth, ActivityTokenChartLayout.rangeChartTooltipWidth)
     }
 
-    func testHourAxisMarksUseThreeHourCadence() {
-        XCTAssertEqual(ActivityTokenChartLayout.hourAxisMarks.first, 0)
-        XCTAssertEqual(ActivityTokenChartLayout.hourAxisMarks.last, ActivityTokenChartLayout.lastHourAxisMark)
-        let intervals = zip(
+    func testHourAxisMarksUseThreeHourCadenceAndIncludeLastHour() {
+        XCTAssertEqual(
             ActivityTokenChartLayout.hourAxisMarks,
-            ActivityTokenChartLayout.hourAxisMarks.dropFirst()
-        ).map { current, next in
-            next - current
-        }
-        XCTAssertTrue(intervals.allSatisfy { $0 == ActivityTokenChartLayout.hourAxisMarkInterval })
+            [0, 3, 6, 9, 12, 15, 18, 21, 23]
+        )
     }
 
     func testHourAxisLabelsUseHourSuffix() {
         XCTAssertEqual(ActivityTokenChartLayout.hourAxisLabel(for: 0), "0h")
-        XCTAssertEqual(ActivityTokenChartLayout.hourAxisLabel(for: ActivityTokenChartLayout.lastHourAxisMark), "21h")
+        XCTAssertEqual(ActivityTokenChartLayout.hourAxisLabel(for: ActivityTokenChartLayout.lastChartHour), "23h")
     }
 
     func testMultiDayHourlyAxisLabelsShowOnlyHour() {
@@ -235,14 +230,25 @@ final class ActivityTokenChartLayoutTests: XCTestCase {
         )
     }
 
-    func testIncompleteMultiDayHourlyAxisOmitsFutureEndBoundary() {
+    func testIncompleteMultiDayHourlyAxisReplacesNearbyCadenceMarkWithLastHour() {
         XCTAssertEqual(
             ActivityTokenChartLayout.rangeHourAxisMarks(
                 bucketCount: 59,
                 dayCount: 3,
                 includesEndBoundary: false
             ),
-            [0, 8, 16, 24, 32, 40, 48, 56]
+            [0, 8, 16, 24, 32, 40, 48, 58]
+        )
+    }
+
+    func testIncompleteMultiDayHourlyAxisKeepsCadenceMarkWhenLastHourHasSpace() {
+        XCTAssertEqual(
+            ActivityTokenChartLayout.rangeHourAxisMarks(
+                bucketCount: 61,
+                dayCount: 3,
+                includesEndBoundary: false
+            ),
+            [0, 8, 16, 24, 32, 40, 48, 56, 60]
         )
     }
 
