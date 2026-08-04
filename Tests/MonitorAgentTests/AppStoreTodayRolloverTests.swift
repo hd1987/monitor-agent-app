@@ -819,26 +819,155 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
-    func testReloadAfterDayRolloverResetsAnySelectionToToday() {
+    func testReloadAfterDayRolloverKeepsHourlyActivityPresentedForNewToday() {
         var now = date(year: 2026, month: 7, day: 9, hour: 23)
+        let oldLoadStarted = expectation(description: "old hourly load starts")
+        let releaseOldLoad = DispatchSemaphore(value: 0)
+        let oldUsage = [hourlyUsage(hour: 23, inputTokens: 100)]
+        let newUsage = [hourlyUsage(hour: 0, inputTokens: 200)]
+        let loadedDatesLock = NSLock()
+        var loadedDates: [String] = []
         let store = AppStore(
             database: DatabaseManager(inMemory: true),
             observeRefreshIntervalChanges: false,
-            currentDateProvider: { now }
+            currentDateProvider: { now },
+            hourlyTokenUsageLoader: { _, _, _, date in
+                loadedDatesLock.lock()
+                loadedDates.append(date)
+                loadedDatesLock.unlock()
+                if date == "2026-07-08" {
+                    oldLoadStarted.fulfill()
+                    _ = releaseOldLoad.wait(timeout: .now() + 1)
+                    return oldUsage
+                }
+                return newUsage
+            }
         )
         store.selectActivityDate("2026-07-08")
+        wait(for: [oldLoadStarted], timeout: 1)
 
         now = date(year: 2026, month: 7, day: 10, hour: 0)
-        let reset = expectation(description: "day rollover resets selection")
         store.reload()
-        DispatchQueue.main.async {
+
+        let newTodayLoaded = expectation(description: "new Today hourly usage loads")
+        waitUntil(attemptsRemaining: 50) {
+            store.activityDetailState == .hourly(
+                date: "2026-07-10",
+                usage: newUsage,
+                isLoading: false
+            )
+        } completion: {
             XCTAssertEqual(store.timeRange, .today)
-            XCTAssertNil(store.selectedActivityDate)
-            XCTAssertTrue(store.hourlyTokenUsage.isEmpty)
-            reset.fulfill()
+            XCTAssertTrue(store.isActivityDetailPresented)
+            newTodayLoaded.fulfill()
+        }
+        wait(for: [newTodayLoaded], timeout: 1)
+
+        releaseOldLoad.signal()
+        let staleLoadFinished = expectation(description: "stale pre-rollover load finishes")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            loadedDatesLock.lock()
+            let newTodayLoadCount = loadedDates.filter { $0 == "2026-07-10" }.count
+            loadedDatesLock.unlock()
+            XCTAssertEqual(newTodayLoadCount, 1)
+            XCTAssertEqual(
+                store.activityDetailState,
+                .hourly(date: "2026-07-10", usage: newUsage, isLoading: false)
+            )
+            staleLoadFinished.fulfill()
+        }
+        wait(for: [staleLoadFinished], timeout: 1)
+    }
+
+    func testReloadAfterDayRolloverConvertsOpenRangeActivityToNewToday() {
+        var now = date(year: 2026, month: 7, day: 9, hour: 23)
+        let rangeUsage = ActivityRangeTokenSeries(
+            aggregation: .day,
+            usage: [ActivityRangeTokenUsage(
+                periodStart: date(year: 2026, month: 7, day: 9),
+                requestCount: 1,
+                inputTokens: 100,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                cacheCreationTokens: 0
+            )]
+        )
+        let newUsage = [hourlyUsage(hour: 0, inputTokens: 200)]
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            observeRefreshIntervalChanges: false,
+            currentDateProvider: { now },
+            hourlyTokenUsageLoader: { _, _, _, _ in newUsage },
+            activityRangeTokenUsageLoader: { _, _, _, _ in rangeUsage }
+        )
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+        store.setTimeRangeFromFilter(.last7)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+        store.toggleActivityDetail()
+
+        let rangeLoaded = expectation(description: "range Activity usage loads")
+        waitUntil(attemptsRemaining: 50) {
+            store.activityDetailState == .range(
+                range: .last7,
+                series: rangeUsage,
+                isLoading: false
+            )
+        } completion: {
+            rangeLoaded.fulfill()
+        }
+        wait(for: [rangeLoaded], timeout: 1)
+
+        now = date(year: 2026, month: 7, day: 10, hour: 0)
+        store.reload()
+
+        let newTodayLoaded = expectation(description: "range converts to new Today")
+        waitUntil(attemptsRemaining: 50) {
+            store.activityDetailState == .hourly(
+                date: "2026-07-10",
+                usage: newUsage,
+                isLoading: false
+            )
+        } completion: {
+            XCTAssertEqual(store.timeRange, .today)
+            XCTAssertTrue(store.isActivityDetailPresented)
+            newTodayLoaded.fulfill()
+        }
+        wait(for: [newTodayLoaded], timeout: 1)
+    }
+
+    func testReloadAfterDayRolloverKeepsClosedActivityClosed() {
+        var now = date(year: 2026, month: 7, day: 9, hour: 23)
+        let activityLoadStarted = expectation(description: "closed Activity should not load")
+        activityLoadStarted.isInverted = true
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            observeRefreshIntervalChanges: false,
+            currentDateProvider: { now },
+            hourlyTokenUsageLoader: { _, _, _, _ in
+                activityLoadStarted.fulfill()
+                return []
+            },
+            activityRangeTokenUsageLoader: { _, _, _, _ in
+                activityLoadStarted.fulfill()
+                return .empty
+            }
+        )
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+        store.setTimeRangeFromFilter(.last30)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+
+        now = date(year: 2026, month: 7, day: 10, hour: 0)
+        store.reload()
+
+        let resetFinished = expectation(description: "closed Activity resets to Today")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            XCTAssertEqual(store.timeRange, .today)
+            XCTAssertEqual(store.activityDetailState, .closed)
+            XCTAssertFalse(store.isActivityDetailPresented)
+            resetFinished.fulfill()
         }
 
-        wait(for: [reset], timeout: 1)
+        wait(for: [resetFinished, activityLoadStarted], timeout: 1)
     }
 
     func testReloadClearsUnavailableYearsAndResetsYearMode() {

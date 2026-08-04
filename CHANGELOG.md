@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Fixed
+- Keep an open Activity chart presented when day rollover resets the active range to the new Today
+
 ## [0.10.1] - 2026-08-03
 
 ### Changed
