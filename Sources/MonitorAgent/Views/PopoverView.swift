@@ -36,6 +36,10 @@ struct PopoverView: View {
             }
         }
         .frame(width: MainPanelDesign.width)
+        .mainPanelRefreshProgress(
+            isRefreshing: store.isRefreshInProgress,
+            tint: theme.selectedControlAccent
+        )
         .clipShape(
             RoundedRectangle(
                 cornerRadius: MainPanelDesign.cornerRadius,

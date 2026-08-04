@@ -11,8 +11,32 @@ enum MainPanelDesign {
     static let headerToolOpacity = 0.46
     static let lightGroupedSurfaceOpacity = 0.032
     static let darkGroupedSurfaceOpacity = 0.075
+    static let refreshIndicatorHeight: CGFloat = 2
+    static let refreshIndicatorHorizontalInset: CGFloat = 16
     static let horizontalPadding: CGFloat = 16
     static let sectionVerticalPadding: CGFloat = 10
+}
+
+struct MainPanelRefreshProgressOverlay: ViewModifier {
+    let isRefreshing: Bool
+    let tint: Color
+
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .top) {
+            if isRefreshing {
+                ProgressView()
+                    .progressViewStyle(.linear)
+                    .controlSize(.small)
+                    .tint(tint)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: MainPanelDesign.refreshIndicatorHeight)
+                    .clipped()
+                    .padding(.horizontal, MainPanelDesign.refreshIndicatorHorizontalInset)
+                    .allowsHitTesting(false)
+                    .accessibilityLabel("Refreshing panel data")
+            }
+        }
+    }
 }
 
 enum MainPanelSelectionPalette {
@@ -186,6 +210,15 @@ struct MainPanelTooltipSurface: ViewModifier {
 }
 
 extension View {
+    func mainPanelRefreshProgress(isRefreshing: Bool, tint: Color) -> some View {
+        modifier(
+            MainPanelRefreshProgressOverlay(
+                isRefreshing: isRefreshing,
+                tint: tint
+            )
+        )
+    }
+
     func mainPanelGroupedSurface(
         cornerRadius: CGFloat = MainPanelDesign.groupedCornerRadius
     ) -> some View {
