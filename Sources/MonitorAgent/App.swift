@@ -198,6 +198,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onTogglePin = { [weak self] in
             self?.panelPresentationState.togglePin()
         }
+        panel.onToggleActivityChart = { [weak self] in
+            self?.store.toggleActivityDetail()
+        }
         panel.onRefreshData = { [weak self] in
             self?.store.refreshNow()
         }
@@ -524,6 +527,7 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     var onCycleAppFilter: ((Bool) -> Void)?
     var onResetPosition: (() -> Void)?
     var onTogglePin: (() -> Void)?
+    var onToggleActivityChart: (() -> Void)?
     var onRefreshData: (() -> Void)?
 
     init() {
@@ -624,6 +628,13 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         if let binding = settings.binding(for: .togglePin),
            binding.matches(keyCode: event.keyCode, modifiers: modifiers) {
             onTogglePin?()
+            return true
+        }
+        if let binding = settings.binding(for: .toggleActivityChart),
+           binding.matches(keyCode: event.keyCode, modifiers: modifiers) {
+            if !event.isARepeat {
+                onToggleActivityChart?()
+            }
             return true
         }
         if let binding = settings.binding(for: .refreshData),

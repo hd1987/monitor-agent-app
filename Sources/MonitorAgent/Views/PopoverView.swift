@@ -6,12 +6,14 @@ struct PopoverView: View {
     let onOpenGeneralSettings: () -> Void
     let onResetPanelPosition: () -> Void
     @State private var isTokenBreakdownPresented = false
+    @State private var isTimeRangePopoverPresented = false
 
     var body: some View {
         VStack(spacing: 0) {
             FilterBar(
                 onOpenGeneralSettings: onOpenGeneralSettings,
-                onResetPanelPosition: onResetPanelPosition
+                onResetPanelPosition: onResetPanelPosition,
+                isTimeRangePopoverPresented: $isTimeRangePopoverPresented
             )
             if store.hasEnabledAgents {
                 StatCardsView(isTokenBreakdownPresented: $isTokenBreakdownPresented)
@@ -41,5 +43,15 @@ struct PopoverView: View {
             )
         )
         .preferredColorScheme(theme.colorScheme)
+        .overlay {
+            if isTimeRangePopoverPresented {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        isTimeRangePopoverPresented = false
+                    }
+                    .accessibilityHidden(true)
+            }
+        }
     }
 }

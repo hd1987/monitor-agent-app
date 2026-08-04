@@ -7,6 +7,7 @@ import Combine
 /// these bindings apply only to the focused panel and cannot collide with global input.
 enum PanelShortcutAction: String, CaseIterable, Identifiable {
     case togglePin
+    case toggleActivityChart
     case refreshData
     case cycleFilter
     case resetPosition
@@ -17,6 +18,7 @@ enum PanelShortcutAction: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .togglePin: return "Toggle Pin"
+        case .toggleActivityChart: return "Toggle Activity Chart"
         case .refreshData: return "Refresh Data"
         case .cycleFilter: return "Cycle App Filter"
         case .resetPosition: return "Reset Panel Position"
@@ -28,6 +30,8 @@ enum PanelShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .togglePin:
             return "Pin or unpin the panel so it stays open when focus moves away."
+        case .toggleActivityChart:
+            return "Show or collapse Activity detail for the current date range."
         case .refreshData:
             return "Refresh all data and restart the automatic refresh interval."
         case .cycleFilter:
@@ -44,6 +48,8 @@ enum PanelShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .togglePin:
             return GlobalShortcut(keyCode: UInt32(kVK_ANSI_P), modifierFlags: 0, keyLabel: "P")
+        case .toggleActivityChart:
+            return GlobalShortcut(keyCode: UInt32(kVK_ANSI_C), modifierFlags: 0, keyLabel: "C")
         case .refreshData:
             return GlobalShortcut(keyCode: UInt32(kVK_ANSI_R), modifierFlags: 0, keyLabel: "R")
         case .cycleFilter:
@@ -75,10 +81,24 @@ final class PanelShortcutSettings: ObservableObject {
         self.defaults = defaults
         if let data = defaults.data(forKey: Self.defaultsKey),
            let decoded = try? JSONDecoder().decode([PanelShortcutEntry].self, from: data) {
-            self.entries = Dictionary(
+            var entries = Dictionary(
                 decoded.map { ($0.action, $0.binding) },
                 uniquingKeysWith: { first, _ in first }
             )
+            let storedActions = Set(decoded.map(\.action))
+            let storedBindings = decoded.compactMap(\.binding)
+            for action in PanelShortcutAction.allCases
+                where !storedActions.contains(action.rawValue) {
+                let defaultBinding = action.defaultBinding
+                let hasStoredConflict = storedBindings.contains {
+                    $0.keyCode == defaultBinding.keyCode
+                        && $0.modifiers == defaultBinding.modifiers
+                }
+                if hasStoredConflict {
+                    entries.updateValue(nil, forKey: action.rawValue)
+                }
+            }
+            self.entries = entries
         } else {
             self.entries = [:]
         }

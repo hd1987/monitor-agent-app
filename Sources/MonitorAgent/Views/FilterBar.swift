@@ -8,7 +8,7 @@ struct FilterBar: View {
     let onOpenGeneralSettings: () -> Void
     let onResetPanelPosition: () -> Void
 
-    @State private var isTimeRangePopoverPresented = false
+    @Binding var isTimeRangePopoverPresented: Bool
     @State private var calendarSelection = CalendarRangeSelection()
     @State private var displayedMonth = Calendar.current.startOfDay(for: Date())
 

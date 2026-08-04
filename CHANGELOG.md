@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-08-04
+
+### Added
+- Add a configurable Toggle Activity Chart panel shortcut that defaults to `C`
+
+### Fixed
+- Keep an open Activity chart presented when day rollover resets the active range to the new Today
+- Make a main-panel click dismiss an open date popover without activating the clicked control
+
 ## [0.10.1] - 2026-08-03
 
 ### Changed

@@ -474,7 +474,7 @@ final class AppStore: ObservableObject {
             return
         }
 
-        resetToTodayAfterDayRolloverIfNeeded()
+        guard !resetToTodayAfterDayRolloverIfNeeded() else { return }
         reloadGeneration += 1
         activityLoadGeneration += 1
 
@@ -727,13 +727,13 @@ final class AppStore: ObservableObject {
         }
     }
 
-    private func resetToTodayAfterDayRolloverIfNeeded() {
+    private func resetToTodayAfterDayRolloverIfNeeded() -> Bool {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: currentDateProvider())
-        guard !calendar.isDate(activeDay, inSameDayAs: today) else { return }
+        guard !calendar.isDate(activeDay, inSameDayAs: today) else { return false }
 
         activeDay = today
-        timeRange = .today
-        clearSelectedActivityDate()
+        setTimeRangeFromFilter(.today)
+        return true
     }
 }
