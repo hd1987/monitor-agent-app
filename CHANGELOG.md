@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-08-04
+
+### Added
+- Show a non-layout-affecting progress bar at the top of the main panel during unified data refreshes
+
 ## [0.10.2] - 2026-08-04
 
 ### Added

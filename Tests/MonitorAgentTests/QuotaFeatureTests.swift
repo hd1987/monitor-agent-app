@@ -21,6 +21,100 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(QuotaCardLayout.resetTipWidth, 220)
         XCTAssertEqual(QuotaCardLayout.resetTipSectionSpacing, 10)
         XCTAssertEqual(QuotaCardLayout.resetTipItemSpacing, 8)
+        XCTAssertEqual(QuotaCardLayout.tipHoverBridgeHeight, 6)
+    }
+
+    func testQuotaTipHoverStateKeepsTipPresentedDuringTriggerToSurfaceHandoff() {
+        var state = QuotaTipHoverState()
+
+        state.triggerHoverChanged(true)
+        XCTAssertTrue(state.isPresented)
+
+        state.triggerHoverChanged(false)
+        XCTAssertTrue(state.isPresented)
+
+        state.surfaceHoverChanged(true)
+        state.reconcilePresentation()
+        XCTAssertTrue(state.isPresented)
+
+        state.surfaceHoverChanged(false)
+        state.reconcilePresentation()
+        XCTAssertFalse(state.isPresented)
+    }
+
+    func testQuotaTipHoverStateDismissesAfterLeavingTriggerWithoutEnteringSurface() {
+        var state = QuotaTipHoverState()
+
+        state.triggerHoverChanged(true)
+        state.triggerHoverChanged(false)
+        state.reconcilePresentation()
+
+        XCTAssertFalse(state.isPresented)
+    }
+
+    func testQuotaTipHoverStateResetClearsEveryRegion() {
+        var state = QuotaTipHoverState()
+        state.triggerHoverChanged(true)
+        state.surfaceHoverChanged(true)
+
+        state.reset()
+
+        XCTAssertFalse(state.isTriggerHovered)
+        XCTAssertFalse(state.isSurfaceHovered)
+        XCTAssertFalse(state.isPresented)
+    }
+
+    func testQuotaTipOwnershipAllowsOnlyOneProviderAndTipKind() {
+        var ownership = QuotaTipOwnership()
+        let codexExpiration = QuotaTipOwner(provider: .codex, kind: .expiration)
+        let claudeExpiration = QuotaTipOwner(provider: .claude, kind: .expiration)
+        let codexResetCredits = QuotaTipOwner(provider: .codex, kind: .resetCredits)
+
+        ownership.claim(codexExpiration)
+        XCTAssertTrue(ownership.owns(codexExpiration))
+
+        ownership.claim(claudeExpiration)
+        XCTAssertFalse(ownership.owns(codexExpiration))
+        XCTAssertTrue(ownership.owns(claudeExpiration))
+
+        ownership.claim(codexResetCredits)
+        XCTAssertFalse(ownership.owns(claudeExpiration))
+        XCTAssertTrue(ownership.owns(codexResetCredits))
+    }
+
+    func testQuotaTipOwnershipIgnoresReleaseFromOutgoingTip() {
+        var ownership = QuotaTipOwnership()
+        let codexExpiration = QuotaTipOwner(provider: .codex, kind: .expiration)
+        let claudeExpiration = QuotaTipOwner(provider: .claude, kind: .expiration)
+
+        ownership.claim(codexExpiration)
+        ownership.claim(claudeExpiration)
+        ownership.release(codexExpiration)
+
+        XCTAssertTrue(ownership.owns(claudeExpiration))
+
+        ownership.release(claudeExpiration)
+        XCTAssertNil(ownership.owner)
+    }
+
+    func testQuotaTipOwnershipClearsOwnerWhenVisibleProvidersBecomeEmpty() {
+        var ownership = QuotaTipOwnership()
+        let codexResetCredits = QuotaTipOwner(provider: .codex, kind: .resetCredits)
+        ownership.claim(codexResetCredits)
+
+        ownership.retainProviders([])
+
+        XCTAssertNil(ownership.owner)
+    }
+
+    func testQuotaTipOwnershipKeepsOwnerWhileProviderRemainsVisible() {
+        var ownership = QuotaTipOwnership()
+        let codexResetCredits = QuotaTipOwner(provider: .codex, kind: .resetCredits)
+        ownership.claim(codexResetCredits)
+
+        ownership.retainProviders([.claude, .codex])
+
+        XCTAssertTrue(ownership.owns(codexResetCredits))
     }
 
     func testQuotaRemainingStatusThresholds() {
