@@ -444,7 +444,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         store.selectActivityDate("2026-07-08")
         let selectedRange = store.timeRange
 
-        store.clearSelectedActivityDate()
+        store.closeActivityDetail()
 
         XCTAssertFalse(store.isActivityDetailPresented)
         XCTAssertNil(store.selectedActivityDate)
@@ -1039,28 +1039,34 @@ private final class RecordingQuotaService: QuotaRefreshing {
     func refresh(
         provider: QuotaProviderID,
         now: Date,
-        completion: @escaping (QuotaSnapshot) -> Void
+        completion: @escaping (QuotaRefreshResult) -> Void
     ) {
         providers.append(provider)
-        completion(.failure(provider: provider, status: .notInstalled, at: now))
+        completion(QuotaRefreshResult(
+            snapshot: .failure(provider: provider, status: .notInstalled, at: now),
+            identityDigest: nil
+        ))
     }
 }
 
 private final class BlockingQuotaService: QuotaRefreshing {
     let started = XCTestExpectation(description: "Quota refresh started")
-    private var completion: ((QuotaSnapshot) -> Void)?
+    private var completion: ((QuotaRefreshResult) -> Void)?
 
     func refresh(
         provider: QuotaProviderID,
         now: Date,
-        completion: @escaping (QuotaSnapshot) -> Void
+        completion: @escaping (QuotaRefreshResult) -> Void
     ) {
         self.completion = completion
         started.fulfill()
     }
 
     func finish() {
-        completion?(.failure(provider: .claude, status: .notInstalled, at: Date()))
+        completion?(QuotaRefreshResult(
+            snapshot: .failure(provider: .claude, status: .notInstalled, at: Date()),
+            identityDigest: nil
+        ))
         completion = nil
     }
 }

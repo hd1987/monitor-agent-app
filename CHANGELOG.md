@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Added
+- Restore the Activity detail presentation intent after app restarts
+- Preserve account-scoped successful quota data across restarts and transient refresh failures without changing the compact card layout
+
 ## [0.10.4] - 2026-08-04
 
 ### Fixed

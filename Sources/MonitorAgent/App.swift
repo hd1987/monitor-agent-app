@@ -111,7 +111,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var aboutPanel: NSWindow?
     private var statusMenu: NSMenu!
     private var rightClickHandled = false
-    private let store = AppStore()
+    private let store = AppStore(
+        quotaCache: QuotaSnapshotCache.shared,
+        activityPresentationSettings: ActivityPresentationSettings.shared
+    )
     private let panelPresentationState = PanelPresentationState()
     private let themeManager = ThemeManager.shared
     private let globalShortcutController = GlobalShortcutController.shared

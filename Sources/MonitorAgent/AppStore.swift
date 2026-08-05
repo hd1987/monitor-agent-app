@@ -58,6 +58,8 @@ final class AppStore: ObservableObject {
     @Published var usageDataRebuildErrorMessage: String?
     @Published var usageDataRebuildWasCancelled = false
     @Published var quotaSnapshots: [QuotaProviderID: QuotaSnapshot] = [:]
+    @Published private(set) var quotaRefreshPhases: [QuotaProviderID: QuotaRefreshPhase] = [:]
+    @Published private(set) var restoredQuotaProviders: Set<QuotaProviderID> = []
     @Published private(set) var manualRefreshAvailableAt: Date?
     @Published private(set) var isRefreshInProgress = false
     @Published private(set) var isManualRefreshInProgress = false
@@ -70,6 +72,8 @@ final class AppStore: ObservableObject {
     private let currentDateProvider: () -> Date
     private let quotaService: QuotaRefreshing
     private let quotaSettings: QuotaSettings
+    private let quotaCache: QuotaSnapshotCaching?
+    private let activityPresentationSettings: ActivityPresentationPersisting?
     private let refreshCoordinator: PanelRefreshCoordinator
     private let hourlyTokenUsageLoader: HourlyTokenUsageLoader
     private let activityRangeTokenUsageLoader: ActivityRangeTokenUsageLoader
@@ -78,6 +82,9 @@ final class AppStore: ObservableObject {
     private var usageDataRebuildCancellation: UsageDataRebuildCancellation?
     private var activeAgentSyncCancellation: AgentSyncCancellation?
     private var activeQuotaParticipants: [QuotaProviderID: RefreshCycleParticipant] = [:]
+    private var quotaSnapshotIdentities: [QuotaProviderID: String] = [:]
+    private var quotaRefreshGenerations: [QuotaProviderID: Int] = [:]
+    private var quotaRestoreGenerations: [QuotaProviderID: Int] = [:]
     private var reloadGeneration = 0
     private var activityLoadGeneration = 0
     private(set) var isPanelVisible = false
@@ -90,6 +97,8 @@ final class AppStore: ObservableObject {
         monitoringSettings: AgentMonitoringSettings = .shared,
         quotaService: QuotaRefreshing = QuotaService.shared,
         quotaSettings: QuotaSettings = .shared,
+        quotaCache: QuotaSnapshotCaching? = nil,
+        activityPresentationSettings: ActivityPresentationPersisting? = nil,
         refreshCoordinator: PanelRefreshCoordinator = PanelRefreshCoordinator(),
         observeRefreshIntervalChanges: Bool = true,
         currentDateProvider: @escaping () -> Date = Date.init,
@@ -111,10 +120,24 @@ final class AppStore: ObservableObject {
         self.currentDateProvider = currentDateProvider
         self.quotaService = quotaService
         self.quotaSettings = quotaSettings
+        self.quotaCache = quotaCache
+        self.activityPresentationSettings = activityPresentationSettings
         self.refreshCoordinator = refreshCoordinator
         self.hourlyTokenUsageLoader = hourlyTokenUsageLoader
         self.activityRangeTokenUsageLoader = activityRangeTokenUsageLoader
         self.activeDay = Calendar.current.startOfDay(for: currentDateProvider())
+        if activityPresentationSettings?.isPresented == true, !enabledAgents.isEmpty {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "yyyy-MM-dd"
+            activityDetailState = .hourly(
+                date: formatter.string(from: currentDateProvider()),
+                usage: [],
+                isLoading: true
+            )
+        } else if enabledAgents.isEmpty {
+            activityPresentationSettings?.isPresented = false
+        }
         refreshCoordinator.setRefreshStateHandler { [weak self] isRefreshing, isManual in
             self?.isRefreshInProgress = isRefreshing
             self?.isManualRefreshInProgress = isManual
@@ -144,6 +167,7 @@ final class AppStore: ObservableObject {
             }
             .store(in: &cancellables)
 
+        restoreCachedQuotaSnapshots()
     }
 
     var availableAppFilters: [AppFilter] { AppFilter.available(for: enabledAgents) }
@@ -284,6 +308,9 @@ final class AppStore: ObservableObject {
         for provider in QuotaProviderID.allCases
             where quotaSettings.isEnabled(provider) && isAgentEnabled(for: provider, in: enabledAgents) {
             group.enter()
+            let quotaGeneration = (quotaRefreshGenerations[provider] ?? 0) + 1
+            quotaRefreshGenerations[provider] = quotaGeneration
+            quotaRefreshPhases[provider] = .refreshing
             let participant = RefreshCycleParticipant {
                 group.leave()
             }
@@ -291,14 +318,15 @@ final class AppStore: ObservableObject {
             quotaService.refresh(
                 provider: provider,
                 now: Date()
-            ) { [weak self] snapshot in
+            ) { [weak self] result in
                 DispatchQueue.main.async {
                     if let self,
-                       self.activeQuotaParticipants[provider] === participant {
+                       self.activeQuotaParticipants[provider] === participant,
+                       self.quotaRefreshGenerations[provider] == quotaGeneration {
                         self.activeQuotaParticipants.removeValue(forKey: provider)
                         if self.quotaSettings.isEnabled(provider),
                            self.isAgentEnabled(for: provider, in: self.enabledAgents) {
-                            self.quotaSnapshots[provider] = snapshot
+                            self.applyQuotaRefreshResult(result, provider: provider)
                         }
                     }
                     participant.finish()
@@ -346,6 +374,10 @@ final class AppStore: ObservableObject {
         quotaSnapshots = quotaSnapshots.filter {
             quotaSettings.isEnabled($0.key) && isAgentEnabled(for: $0.key, in: enabledAgents)
         }
+        retainQuotaPresentationState {
+            quotaSettings.isEnabled($0) && isAgentEnabled(for: $0, in: enabledAgents)
+        }
+        restoreCachedQuotaSnapshots()
     }
 
     var visibleQuotaProviders: [QuotaProviderID] {
@@ -356,7 +388,13 @@ final class AppStore: ObservableObject {
         case .codex: filtered = [.codex]
         case .cursor: filtered = []
         }
-        return filtered.filter { isAgentEnabled(for: $0, in: enabledAgents) }
+        return filtered.filter {
+            isAgentEnabled(for: $0, in: enabledAgents) && quotaSettings.isEnabled($0)
+        }
+    }
+
+    func quotaExpirationDate(for provider: QuotaProviderID) -> Date? {
+        quotaSettings.expirationDate(for: provider)
     }
 
     func cycleAppFilter(reverse: Bool = false) {
@@ -369,10 +407,10 @@ final class AppStore: ObservableObject {
         cancelQuotaParticipants(disabledBy: enabledAgents)
         let filters = AppFilter.available(for: enabledAgents)
         if enabledAgents.isEmpty {
-            clearSelectedActivityDate()
+            closeActivityDetail()
             reload(enabledAgents: enabledAgents)
         } else if !filters.contains(appFilter) {
-            clearSelectedActivityDate()
+            closeActivityDetail()
             appFilter = .all
         } else {
             reload(enabledAgents: enabledAgents)
@@ -380,6 +418,8 @@ final class AppStore: ObservableObject {
         quotaSnapshots = quotaSnapshots.filter {
             isAgentEnabled(for: $0.key, in: enabledAgents)
         }
+        retainQuotaPresentationState { isAgentEnabled(for: $0, in: enabledAgents) }
+        restoreCachedQuotaSnapshots()
         applyRefreshInterval(
             refreshSettings.interval,
             enabledAgents: enabledAgents
@@ -583,6 +623,7 @@ final class AppStore: ObservableObject {
     func selectActivityDate(_ date: String) {
         guard let range = TimeRange.activityDay(date, now: currentDateProvider()) else { return }
 
+        activityPresentationSettings?.isPresented = true
         activityDetailState = .hourly(date: date, usage: [], isLoading: true)
         timeRange = range
         loadHourlyTokenUsage(for: date)
@@ -614,10 +655,11 @@ final class AppStore: ObservableObject {
     func toggleActivityDetail() {
         guard hasEnabledAgents else { return }
         if isActivityDetailPresented {
-            clearSelectedActivityDate()
+            closeActivityDetail()
             return
         }
 
+        activityPresentationSettings?.isPresented = true
         let selectedDate = activityDateString(for: timeRange)
         if let selectedDate {
             activityDetailState = .hourly(date: selectedDate, usage: [], isLoading: true)
@@ -646,9 +688,96 @@ final class AppStore: ObservableObject {
         return formatter.string(from: date)
     }
 
-    func clearSelectedActivityDate() {
+    func closeActivityDetail() {
         activityLoadGeneration += 1
+        activityPresentationSettings?.isPresented = false
         activityDetailState = .closed
+    }
+
+    func quotaRefreshPhase(for provider: QuotaProviderID) -> QuotaRefreshPhase {
+        quotaRefreshPhases[provider] ?? .idle
+    }
+
+    private func restoreCachedQuotaSnapshots() {
+        guard let quotaCache else { return }
+        for provider in QuotaProviderID.allCases
+            where quotaSettings.isEnabled(provider)
+                && isAgentEnabled(for: provider, in: enabledAgents)
+                && quotaSnapshots[provider]?.status != .available {
+            let generation = quotaRestoreGenerations[provider] ?? 0
+            quotaService.resolveIdentityDigest(provider: provider) { [weak self] identityDigest in
+                guard let self, let identityDigest,
+                      (self.quotaRestoreGenerations[provider] ?? 0) == generation else { return }
+                quotaCache.load(
+                    provider: provider,
+                    identityDigest: identityDigest,
+                    now: self.currentDateProvider()
+                ) { [weak self] snapshot in
+                    guard let self, let snapshot else { return }
+                    self.quotaService.resolveIdentityDigest(provider: provider) { [weak self] currentIdentity in
+                        guard let self,
+                              currentIdentity == identityDigest,
+                              (self.quotaRestoreGenerations[provider] ?? 0) == generation,
+                              self.quotaSnapshots[provider]?.status != .available,
+                              self.quotaSettings.isEnabled(provider),
+                              self.isAgentEnabled(for: provider, in: self.enabledAgents) else { return }
+                        self.quotaSnapshots[provider] = snapshot
+                        self.quotaSnapshotIdentities[provider] = identityDigest
+                        self.restoredQuotaProviders.insert(provider)
+                    }
+                }
+            }
+        }
+    }
+
+    private func applyQuotaRefreshResult(
+        _ result: QuotaRefreshResult,
+        provider: QuotaProviderID
+    ) {
+        let snapshot = result.snapshot
+        if snapshot.status == .available, let identityDigest = result.identityDigest {
+            quotaSnapshots[provider] = snapshot
+            quotaSnapshotIdentities[provider] = identityDigest
+            quotaRefreshPhases[provider] = .idle
+            restoredQuotaProviders.remove(provider)
+            quotaCache?.store(snapshot, identityDigest: identityDigest)
+            return
+        }
+
+        let canRetainSuccess = result.identityDigest != nil
+            && quotaSnapshotIdentities[provider] == result.identityDigest
+            && quotaSnapshots[provider]?.status == .available
+            && shouldRetainSuccessfulQuota(for: snapshot.status)
+        if !canRetainSuccess {
+            quotaSnapshots[provider] = snapshot
+            quotaSnapshotIdentities.removeValue(forKey: provider)
+            restoredQuotaProviders.remove(provider)
+        }
+        quotaRefreshPhases[provider] = .failed(
+            status: snapshot.status,
+            attemptedAt: snapshot.fetchedAt
+        )
+    }
+
+    private func shouldRetainSuccessfulQuota(for status: QuotaSnapshotStatus) -> Bool {
+        switch status {
+        case .authenticationExpired, .unavailable:
+            return true
+        case .available, .notInstalled, .thirdPartyConfigured, .signedOut:
+            return false
+        }
+    }
+
+    private func retainQuotaPresentationState(
+        where shouldRetain: (QuotaProviderID) -> Bool
+    ) {
+        quotaRefreshPhases = quotaRefreshPhases.filter { shouldRetain($0.key) }
+        quotaSnapshotIdentities = quotaSnapshotIdentities.filter { shouldRetain($0.key) }
+        restoredQuotaProviders = restoredQuotaProviders.filter(shouldRetain)
+        for provider in QuotaProviderID.allCases where !shouldRetain(provider) {
+            quotaRefreshGenerations[provider, default: 0] += 1
+            quotaRestoreGenerations[provider, default: 0] += 1
+        }
     }
 
     private func loadHourlyTokenUsage(for date: String) {

@@ -1,3 +1,5 @@
+import AppKit
+import SwiftUI
 import XCTest
 @testable import MonitorAgent
 
@@ -22,6 +24,42 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(QuotaCardLayout.resetTipSectionSpacing, 10)
         XCTAssertEqual(QuotaCardLayout.resetTipItemSpacing, 8)
         XCTAssertEqual(QuotaCardLayout.tipHoverBridgeHeight, 6)
+    }
+
+    func testQuotaCacheAndFailureIndicatorsDoNotChangeCardLayout() {
+        let snapshot = QuotaSnapshot(
+            provider: .codex,
+            plan: "PLUS",
+            fiveHour: QuotaWindow(
+                remainingPercent: 80,
+                resetsAt: Date(timeIntervalSince1970: 1_800_003_600),
+                durationSeconds: 18_000
+            ),
+            weekly: QuotaWindow(
+                remainingPercent: 60,
+                resetsAt: Date(timeIntervalSince1970: 1_800_086_400),
+                durationSeconds: 604_800
+            ),
+            opusWeekly: nil,
+            resetCredits: nil,
+            resetCreditExpirations: [],
+            status: .available,
+            fetchedAt: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+        let idle = quotaCardSize(snapshot: snapshot, phase: .idle, wasRestored: false)
+        let restored = quotaCardSize(snapshot: snapshot, phase: .refreshing, wasRestored: true)
+        let failed = quotaCardSize(
+            snapshot: snapshot,
+            phase: .failed(
+                status: .unavailable("Quota service unavailable"),
+                attemptedAt: Date(timeIntervalSince1970: 1_800_000_100)
+            ),
+            wasRestored: true
+        )
+
+        XCTAssertEqual(idle, restored)
+        XCTAssertEqual(idle, failed)
+        XCTAssertEqual(idle.height, QuotaCardLayout.cardHeight)
     }
 
     func testQuotaTipHoverStateKeepsTipPresentedDuringTriggerToSurfaceHandoff() {
@@ -385,8 +423,15 @@ final class QuotaFeatureTests: XCTestCase {
     }
 
     func testVisibleQuotaProvidersFollowAppFilter() {
+        let suiteName = "QuotaFeatureTests.visibleProviders.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        quotaSettings.claudeExpirationDate = Date(timeIntervalSince1970: 1_900_000_000)
+        quotaSettings.codexExpirationDate = Date(timeIntervalSince1970: 1_900_000_000)
         let store = AppStore(
             database: DatabaseManager(inMemory: true),
+            quotaSettings: quotaSettings,
             observeRefreshIntervalChanges: false
         )
 
@@ -400,6 +445,17 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(store.visibleQuotaProviders, [.codex])
 
         store.appFilter = .cursor
+        XCTAssertEqual(store.visibleQuotaProviders, [])
+
+        quotaSettings.codexExpirationDate = nil
+        store.quotaProviderSettingsDidChange()
+        store.appFilter = .all
+        XCTAssertEqual(store.visibleQuotaProviders, [.claude])
+        XCTAssertEqual(
+            store.quotaExpirationDate(for: .claude),
+            quotaSettings.claudeExpirationDate
+        )
+        store.appFilter = .codex
         XCTAssertEqual(store.visibleQuotaProviders, [])
     }
 
@@ -425,5 +481,39 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(weekly.durationSeconds, 604_800)
         XCTAssertEqual(weekly.displayLabel(fallback: "5h"), "1w")
         XCTAssertTrue(weekly.usesDateTimeReset)
+    }
+
+    private func quotaCardSize(
+        snapshot: QuotaSnapshot,
+        phase: QuotaRefreshPhase,
+        wasRestored: Bool
+    ) -> NSSize {
+        let hostingView = NSHostingView(rootView: QuotaCardRenderHarness(
+            snapshot: snapshot,
+            phase: phase,
+            wasRestored: wasRestored
+        ))
+        hostingView.layoutSubtreeIfNeeded()
+        return hostingView.fittingSize
+    }
+}
+
+private struct QuotaCardRenderHarness: View {
+    @State private var ownership = QuotaTipOwnership()
+    let snapshot: QuotaSnapshot
+    let phase: QuotaRefreshPhase
+    let wasRestored: Bool
+
+    var body: some View {
+        SubscriptionQuotaCard(
+            provider: .codex,
+            snapshot: snapshot,
+            refreshPhase: phase,
+            wasRestored: wasRestored,
+            expirationDate: Date(timeIntervalSince1970: 1_900_000_000),
+            tipOwnership: $ownership
+        )
+        .frame(width: 580)
+        .environmentObject(ThemeManager.shared)
     }
 }
