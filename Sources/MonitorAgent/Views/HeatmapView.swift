@@ -185,7 +185,7 @@ struct HeatmapView: View {
                 ActivityTokenChartView(
                     data: activityChartData,
                     isLoading: store.isActivityChartLoading,
-                    onClose: store.clearSelectedActivityDate
+                    onClose: store.closeActivityDetail
                 )
                     .environmentObject(theme)
                     .transition(

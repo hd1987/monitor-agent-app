@@ -5,7 +5,7 @@ struct SubscriptionQuotaView: View {
     @State private var tipOwnership = QuotaTipOwnership()
 
     private var providers: [QuotaProviderID] {
-        store.visibleQuotaProviders.filter(QuotaSettings.shared.isEnabled)
+        store.visibleQuotaProviders
     }
 
     var body: some View {
@@ -16,7 +16,8 @@ struct SubscriptionQuotaView: View {
                         SubscriptionQuotaCard(
                             provider: provider,
                             snapshot: store.quotaSnapshots[provider],
-                            expirationDate: QuotaSettings.shared.expirationDate(for: provider),
+                            refreshPhase: store.quotaRefreshPhase(for: provider),
+                            expirationDate: store.quotaExpirationDate(for: provider),
                             tipOwnership: $tipOwnership
                         )
                     }
@@ -32,7 +33,7 @@ struct SubscriptionQuotaView: View {
     }
 }
 
-private struct SubscriptionQuotaCard: View {
+struct SubscriptionQuotaCard: View {
     @EnvironmentObject private var theme: ThemeManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expirationTipHoverState = QuotaTipHoverState()
@@ -42,6 +43,7 @@ private struct SubscriptionQuotaCard: View {
     @State private var resetTipAnchorX: CGFloat = 0
     let provider: QuotaProviderID
     let snapshot: QuotaSnapshot?
+    let refreshPhase: QuotaRefreshPhase
     let expirationDate: Date?
     @Binding var tipOwnership: QuotaTipOwnership
 
@@ -136,7 +138,11 @@ private struct SubscriptionQuotaCard: View {
                     width: QuotaCardLayout.expirationTipWidth,
                     onHoverChanged: expirationTipSurfaceHoverChanged
                 ) {
-                    SubscriptionExpirationTip(expirationDate: expirationDate)
+                    SubscriptionExpirationTip(
+                        expirationDate: expirationDate,
+                        quotaSnapshot: snapshot?.status == .available ? snapshot : nil,
+                        refreshPhase: refreshPhase
+                    )
                 }
                 .padding(.leading, 8)
                 .offset(y: -QuotaCardLayout.cardHeight)
@@ -235,6 +241,15 @@ private struct SubscriptionQuotaCard: View {
     private var header: some View {
         HStack(spacing: 5) {
             ProviderIcon(provider: provider)
+                .overlay(alignment: .topTrailing) {
+                    if let color = quotaStateDotColor {
+                        Circle()
+                            .fill(color)
+                            .frame(width: 4, height: 4)
+                            .offset(x: 2, y: -2)
+                            .accessibilityHidden(true)
+                    }
+                }
             Text(provider.displayName)
                 .fontWeight(.semibold)
 
@@ -245,6 +260,28 @@ private struct SubscriptionQuotaCard: View {
         }
         .lineLimit(1)
         .layoutPriority(2)
+        .help(quotaStateHelp)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(quotaStateHelp)
+    }
+
+    private var quotaStateDotColor: Color? {
+        guard let status = QuotaRefreshPresentation.headerStatus(
+            snapshotStatus: snapshot?.status,
+            phase: refreshPhase
+        ) else { return nil }
+        return QuotaStatusPalette.color(for: status, unknown: .clear)
+    }
+
+    private var quotaStateHelp: String {
+        guard let snapshot, snapshot.status == .available else {
+            return provider.displayName
+        }
+        let updated = "Quota updated \(QuotaDateFormat.updateDateTime(snapshot.fetchedAt))"
+        if case .failed(_, let attemptedAt) = refreshPhase {
+            return "\(updated). Last refresh failed \(QuotaDateFormat.updateDateTime(attemptedAt))"
+        }
+        return updated
     }
 
     @ViewBuilder
@@ -479,6 +516,8 @@ private struct QuotaMetricItem {
 private struct SubscriptionExpirationTip: View {
     @EnvironmentObject var theme: ThemeManager
     let expirationDate: Date
+    let quotaSnapshot: QuotaSnapshot?
+    let refreshPhase: QuotaRefreshPhase
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -502,6 +541,24 @@ private struct SubscriptionExpirationTip: View {
                 Text(SubscriptionExpiration.dateText(expirationDate))
                     .font(.system(size: 10))
             }
+            if let quotaSnapshot {
+                Divider()
+                    .overlay(theme.tooltipForeground.opacity(0.12))
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(QuotaStatusPalette.color(
+                            for: QuotaRefreshPresentation.updateStatus(for: refreshPhase),
+                            unknown: .clear
+                        ))
+                        .frame(width: 6, height: 6)
+                    Text(QuotaRefreshPresentation.updateLabel(for: refreshPhase))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(theme.tooltipForeground.opacity(0.72))
+                    Spacer(minLength: 8)
+                    Text(QuotaDateFormat.updateDateTime(quotaSnapshot.fetchedAt))
+                        .font(.system(size: 10))
+                }
+            }
         }
         .foregroundStyle(theme.tooltipForeground)
         .padding(.horizontal, 10)
@@ -516,6 +573,7 @@ private struct SubscriptionExpirationTip: View {
             unknown: theme.tooltipForeground.opacity(0.72)
         )
     }
+
 }
 
 private struct ResetCreditsTip: View {
@@ -686,6 +744,29 @@ enum QuotaStatusPalette {
         case .critical: return critical
         case .unknown: return unknown
         }
+    }
+}
+
+enum QuotaRefreshPresentation {
+    static func headerStatus(
+        snapshotStatus: QuotaSnapshotStatus?,
+        phase: QuotaRefreshPhase
+    ) -> QuotaStatus? {
+        guard snapshotStatus == .available else { return nil }
+        if case .failed = phase { return .critical }
+        return nil
+    }
+
+    static func updateLabel(for phase: QuotaRefreshPhase) -> String {
+        if case .failed(let status, _) = phase {
+            return status == .authenticationExpired ? "Sign-in expired" : "Refresh failed"
+        }
+        return "Quota updated"
+    }
+
+    static func updateStatus(for phase: QuotaRefreshPhase) -> QuotaStatus {
+        if case .failed = phase { return .critical }
+        return .healthy
     }
 }
 

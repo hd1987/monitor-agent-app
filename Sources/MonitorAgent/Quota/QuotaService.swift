@@ -1,12 +1,26 @@
 import Foundation
 import Security
+import CryptoKit
 
 protocol QuotaRefreshing: AnyObject {
     func refresh(
         provider: QuotaProviderID,
         now: Date,
-        completion: @escaping (QuotaSnapshot) -> Void
+        completion: @escaping (QuotaRefreshResult) -> Void
     )
+    func resolveIdentityDigest(
+        provider: QuotaProviderID,
+        completion: @escaping (String?) -> Void
+    )
+}
+
+extension QuotaRefreshing {
+    func resolveIdentityDigest(
+        provider _: QuotaProviderID,
+        completion: @escaping (String?) -> Void
+    ) {
+        completion(nil)
+    }
 }
 
 final class QuotaService: QuotaRefreshing {
@@ -14,7 +28,7 @@ final class QuotaService: QuotaRefreshing {
 
     private let session: URLSession
     private let queue = DispatchQueue(label: "com.monitoragent.quota-service")
-    private var inFlightCompletions: [QuotaProviderID: [(QuotaSnapshot) -> Void]] = [:]
+    private var inFlightCompletions: [RequestKey: [(QuotaRefreshResult) -> Void]] = [:]
 
     init(session: URLSession = .shared) {
         self.session = session
@@ -23,48 +37,159 @@ final class QuotaService: QuotaRefreshing {
     func refresh(
         provider: QuotaProviderID,
         now: Date = Date(),
-        completion: @escaping (QuotaSnapshot) -> Void
+        completion: @escaping (QuotaRefreshResult) -> Void
     ) {
         queue.async {
-            if self.inFlightCompletions[provider] != nil {
-                self.inFlightCompletions[provider]?.append(completion)
-                return
-            }
-            self.inFlightCompletions[provider] = [completion]
-
-            let finish: (QuotaSnapshot) -> Void = { snapshot in
-                self.queue.async {
-                    let completions = self.inFlightCompletions.removeValue(forKey: provider) ?? []
-                    DispatchQueue.main.async {
-                        completions.forEach { $0(snapshot) }
-                    }
-                }
-            }
-
             guard QuotaEnvironmentDetector.isInstalled(provider) else {
-                finish(.failure(provider: provider, status: .notInstalled, at: now))
+                self.deliver(
+                    QuotaRefreshResult(
+                        snapshot: .failure(provider: provider, status: .notInstalled, at: now),
+                        identityDigest: nil
+                    ),
+                    to: completion
+                )
                 return
             }
             guard !QuotaEnvironmentDetector.usesThirdPartyAPI(provider) else {
-                finish(.failure(provider: provider, status: .thirdPartyConfigured, at: now))
+                self.deliver(
+                    QuotaRefreshResult(
+                        snapshot: .failure(provider: provider, status: .thirdPartyConfigured, at: now),
+                        identityDigest: nil
+                    ),
+                    to: completion
+                )
                 return
             }
 
             switch provider {
             case .claude:
-                self.fetchClaude(now: now, completion: finish)
+                guard let credentials = self.loadClaudeCredentials() else {
+                    self.deliver(
+                        QuotaRefreshResult(
+                            snapshot: .failure(provider: .claude, status: .signedOut, at: now),
+                            identityDigest: nil
+                        ),
+                        to: completion
+                    )
+                    return
+                }
+                let identityDigest = Self.identityDigest(
+                    provider: .claude,
+                    stableIdentity: credentials.stableIdentity
+                )
+                self.enqueue(
+                    key: RequestKey(provider: .claude, identityDigest: identityDigest),
+                    completion: completion
+                ) { finish in
+                    self.fetchClaude(credentials: credentials, now: now) { snapshot in
+                        finish(QuotaRefreshResult(snapshot: snapshot, identityDigest: identityDigest))
+                    }
+                }
             case .codex:
-                self.fetchCodex(now: now, completion: finish)
+                guard let auth = self.loadCodexAuth() else {
+                    self.deliver(
+                        QuotaRefreshResult(
+                            snapshot: .failure(provider: .codex, status: .signedOut, at: now),
+                            identityDigest: nil
+                        ),
+                        to: completion
+                    )
+                    return
+                }
+                let identityDigest = Self.identityDigest(
+                    provider: .codex,
+                    stableIdentity: auth.stableIdentity
+                )
+                self.enqueue(
+                    key: RequestKey(provider: .codex, identityDigest: identityDigest),
+                    completion: completion
+                ) { finish in
+                    self.fetchCodex(auth: auth, now: now) { snapshot in
+                        finish(QuotaRefreshResult(snapshot: snapshot, identityDigest: identityDigest))
+                    }
+                }
             }
         }
     }
 
-    private func fetchClaude(now: Date, completion: @escaping (QuotaSnapshot) -> Void) {
-        guard let credentials = loadClaudeCredentials() else {
-            completion(.failure(provider: .claude, status: .signedOut, at: now))
+    func resolveIdentityDigest(
+        provider: QuotaProviderID,
+        completion: @escaping (String?) -> Void
+    ) {
+        queue.async {
+            guard QuotaEnvironmentDetector.isInstalled(provider),
+                  !QuotaEnvironmentDetector.usesThirdPartyAPI(provider) else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            let digest = self.currentIdentityDigest(provider: provider)
+            DispatchQueue.main.async { completion(digest) }
+        }
+    }
+
+    private func enqueue(
+        key: RequestKey,
+        completion: @escaping (QuotaRefreshResult) -> Void,
+        start: (@escaping (QuotaRefreshResult) -> Void) -> Void
+    ) {
+        if inFlightCompletions[key] != nil {
+            inFlightCompletions[key]?.append(completion)
             return
         }
-        guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else { return }
+        inFlightCompletions[key] = [completion]
+        start { result in
+            self.queue.async {
+                let completions = self.inFlightCompletions.removeValue(forKey: key) ?? []
+                let deliveredResult: QuotaRefreshResult
+                let currentIdentityDigest = self.currentIdentityDigest(provider: key.provider)
+                if currentIdentityDigest == key.identityDigest {
+                    deliveredResult = result
+                } else {
+                    deliveredResult = QuotaRefreshResult(
+                        snapshot: .failure(
+                            provider: key.provider,
+                            status: .unavailable("Quota refresh superseded"),
+                            at: result.snapshot.fetchedAt
+                        ),
+                        identityDigest: currentIdentityDigest
+                    )
+                }
+                DispatchQueue.main.async {
+                    completions.forEach { $0(deliveredResult) }
+                }
+            }
+        }
+    }
+
+    private func deliver(
+        _ result: QuotaRefreshResult,
+        to completion: @escaping (QuotaRefreshResult) -> Void
+    ) {
+        DispatchQueue.main.async { completion(result) }
+    }
+
+    private func currentIdentityDigest(provider: QuotaProviderID) -> String? {
+        guard QuotaEnvironmentDetector.isInstalled(provider),
+              !QuotaEnvironmentDetector.usesThirdPartyAPI(provider) else { return nil }
+        let stableIdentity: String?
+        switch provider {
+        case .claude: stableIdentity = loadClaudeCredentials()?.stableIdentity
+        case .codex: stableIdentity = loadCodexAuth()?.stableIdentity
+        }
+        return stableIdentity.map {
+            Self.identityDigest(provider: provider, stableIdentity: $0)
+        }
+    }
+
+    private func fetchClaude(
+        credentials: ClaudeCredentials,
+        now: Date,
+        completion: @escaping (QuotaSnapshot) -> Void
+    ) {
+        guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
+            completion(.failure(provider: .claude, status: .unavailable("Quota service unavailable"), at: now))
+            return
+        }
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
         request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
@@ -107,12 +232,15 @@ final class QuotaService: QuotaRefreshing {
         }.resume()
     }
 
-    private func fetchCodex(now: Date, completion: @escaping (QuotaSnapshot) -> Void) {
-        guard let auth = loadCodexAuth() else {
-            completion(.failure(provider: .codex, status: .signedOut, at: now))
+    private func fetchCodex(
+        auth: CodexAuth,
+        now: Date,
+        completion: @escaping (QuotaSnapshot) -> Void
+    ) {
+        guard let url = URL(string: "https://chatgpt.com/backend-api/wham/usage") else {
+            completion(.failure(provider: .codex, status: .unavailable("Quota service unavailable"), at: now))
             return
         }
-        guard let url = URL(string: "https://chatgpt.com/backend-api/wham/usage") else { return }
         var request = codexRequest(url: url, auth: auth)
         request.timeoutInterval = 10
 
@@ -206,14 +334,21 @@ final class QuotaService: QuotaRefreshing {
 }
 
 private extension QuotaService {
+    struct RequestKey: Hashable {
+        let provider: QuotaProviderID
+        let identityDigest: String
+    }
+
     struct ClaudeCredentials {
         let accessToken: String
         let plan: String?
+        let stableIdentity: String
     }
 
     struct CodexAuth {
         let accessToken: String
         let accountID: String?
+        let stableIdentity: String
     }
 
     func loadClaudeCredentials() -> ClaudeCredentials? {
@@ -241,7 +376,17 @@ private extension QuotaService {
         guard let token = (oauth["accessToken"] ?? oauth["access_token"]) as? String,
               !token.isEmpty else { return nil }
         let plan = (oauth["subscriptionType"] ?? oauth["subscription_type"]) as? String
-        return ClaudeCredentials(accessToken: token, plan: plan?.uppercased())
+        let stableIdentity = (
+            oauth["accountUuid"]
+                ?? oauth["account_uuid"]
+                ?? oauth["userId"]
+                ?? oauth["user_id"]
+        ) as? String
+        return ClaudeCredentials(
+            accessToken: token,
+            plan: plan?.uppercased(),
+            stableIdentity: stableIdentity ?? token
+        )
     }
 
     func loadCodexAuth() -> CodexAuth? {
@@ -258,7 +403,17 @@ private extension QuotaService {
         guard let token = (tokens["access_token"] ?? tokens["accessToken"]) as? String,
               !token.isEmpty else { return nil }
         let directAccountID = (tokens["account_id"] ?? tokens["accountId"]) as? String
-        return CodexAuth(accessToken: token, accountID: directAccountID ?? Self.accountID(fromJWT: token))
+        let accountID = directAccountID ?? Self.accountID(fromJWT: token)
+        return CodexAuth(
+            accessToken: token,
+            accountID: accountID,
+            stableIdentity: accountID ?? token
+        )
+    }
+
+    static func identityDigest(provider: QuotaProviderID, stableIdentity: String) -> String {
+        let data = Data("\(provider.rawValue):\(stableIdentity)".utf8)
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     static func accountID(fromJWT token: String) -> String? {

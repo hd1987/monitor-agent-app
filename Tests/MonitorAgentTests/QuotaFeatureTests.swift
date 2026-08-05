@@ -1,3 +1,5 @@
+import AppKit
+import SwiftUI
 import XCTest
 @testable import MonitorAgent
 
@@ -22,6 +24,87 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(QuotaCardLayout.resetTipSectionSpacing, 10)
         XCTAssertEqual(QuotaCardLayout.resetTipItemSpacing, 8)
         XCTAssertEqual(QuotaCardLayout.tipHoverBridgeHeight, 6)
+    }
+
+    func testQuotaRefreshStatesDoNotChangeCardLayout() {
+        let snapshot = QuotaSnapshot(
+            provider: .codex,
+            plan: "PLUS",
+            fiveHour: QuotaWindow(
+                remainingPercent: 80,
+                resetsAt: Date(timeIntervalSince1970: 1_800_003_600),
+                durationSeconds: 18_000
+            ),
+            weekly: QuotaWindow(
+                remainingPercent: 60,
+                resetsAt: Date(timeIntervalSince1970: 1_800_086_400),
+                durationSeconds: 604_800
+            ),
+            opusWeekly: nil,
+            resetCredits: nil,
+            resetCreditExpirations: [],
+            status: .available,
+            fetchedAt: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+        let idle = quotaCardSize(snapshot: snapshot, phase: .idle)
+        let refreshing = quotaCardSize(snapshot: snapshot, phase: .refreshing)
+        let failed = quotaCardSize(
+            snapshot: snapshot,
+            phase: .failed(
+                status: .unavailable("Quota service unavailable"),
+                attemptedAt: Date(timeIntervalSince1970: 1_800_000_100)
+            )
+        )
+
+        XCTAssertEqual(idle, refreshing)
+        XCTAssertEqual(idle, failed)
+        XCTAssertEqual(idle.height, QuotaCardLayout.cardHeight)
+    }
+
+    func testQuotaRefreshPresentationMapsEveryPhaseToItsStatusContract() {
+        let failed = QuotaRefreshPhase.failed(
+            status: .unavailable("Quota service unavailable"),
+            attemptedAt: Date(timeIntervalSince1970: 1_800_000_100)
+        )
+        let authenticationExpired = QuotaRefreshPhase.failed(
+            status: .authenticationExpired,
+            attemptedAt: Date(timeIntervalSince1970: 1_800_000_200)
+        )
+
+        XCTAssertNil(QuotaRefreshPresentation.headerStatus(
+            snapshotStatus: .available,
+            phase: .idle
+        ))
+        XCTAssertNil(QuotaRefreshPresentation.headerStatus(
+            snapshotStatus: .available,
+            phase: .refreshing
+        ))
+        XCTAssertEqual(QuotaRefreshPresentation.headerStatus(
+            snapshotStatus: .available,
+            phase: failed
+        ), .critical)
+        XCTAssertNil(QuotaRefreshPresentation.headerStatus(
+            snapshotStatus: .unavailable("Quota service unavailable"),
+            phase: failed
+        ))
+
+        XCTAssertEqual(QuotaRefreshPresentation.updateLabel(for: .idle), "Quota updated")
+        XCTAssertEqual(
+            QuotaRefreshPresentation.updateLabel(for: .refreshing),
+            "Quota updated"
+        )
+        XCTAssertEqual(QuotaRefreshPresentation.updateLabel(for: failed), "Refresh failed")
+        XCTAssertEqual(
+            QuotaRefreshPresentation.updateLabel(for: authenticationExpired),
+            "Sign-in expired"
+        )
+        XCTAssertEqual(QuotaRefreshPresentation.updateStatus(for: .idle), .healthy)
+        XCTAssertEqual(QuotaRefreshPresentation.updateStatus(for: .refreshing), .healthy)
+        XCTAssertEqual(QuotaRefreshPresentation.updateStatus(for: failed), .critical)
+        XCTAssertEqual(
+            QuotaRefreshPresentation.updateStatus(for: authenticationExpired),
+            .critical
+        )
     }
 
     func testQuotaTipHoverStateKeepsTipPresentedDuringTriggerToSurfaceHandoff() {
@@ -385,8 +468,15 @@ final class QuotaFeatureTests: XCTestCase {
     }
 
     func testVisibleQuotaProvidersFollowAppFilter() {
+        let suiteName = "QuotaFeatureTests.visibleProviders.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        quotaSettings.claudeExpirationDate = Date(timeIntervalSince1970: 1_900_000_000)
+        quotaSettings.codexExpirationDate = Date(timeIntervalSince1970: 1_900_000_000)
         let store = AppStore(
             database: DatabaseManager(inMemory: true),
+            quotaSettings: quotaSettings,
             observeRefreshIntervalChanges: false
         )
 
@@ -400,6 +490,17 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(store.visibleQuotaProviders, [.codex])
 
         store.appFilter = .cursor
+        XCTAssertEqual(store.visibleQuotaProviders, [])
+
+        quotaSettings.codexExpirationDate = nil
+        store.quotaProviderSettingsDidChange()
+        store.appFilter = .all
+        XCTAssertEqual(store.visibleQuotaProviders, [.claude])
+        XCTAssertEqual(
+            store.quotaExpirationDate(for: .claude),
+            quotaSettings.claudeExpirationDate
+        )
+        store.appFilter = .codex
         XCTAssertEqual(store.visibleQuotaProviders, [])
     }
 
@@ -425,5 +526,35 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(weekly.durationSeconds, 604_800)
         XCTAssertEqual(weekly.displayLabel(fallback: "5h"), "1w")
         XCTAssertTrue(weekly.usesDateTimeReset)
+    }
+
+    private func quotaCardSize(
+        snapshot: QuotaSnapshot,
+        phase: QuotaRefreshPhase
+    ) -> NSSize {
+        let hostingView = NSHostingView(rootView: QuotaCardRenderHarness(
+            snapshot: snapshot,
+            phase: phase
+        ))
+        hostingView.layoutSubtreeIfNeeded()
+        return hostingView.fittingSize
+    }
+}
+
+private struct QuotaCardRenderHarness: View {
+    @State private var ownership = QuotaTipOwnership()
+    let snapshot: QuotaSnapshot
+    let phase: QuotaRefreshPhase
+
+    var body: some View {
+        SubscriptionQuotaCard(
+            provider: .codex,
+            snapshot: snapshot,
+            refreshPhase: phase,
+            expirationDate: Date(timeIntervalSince1970: 1_900_000_000),
+            tipOwnership: $ownership
+        )
+        .frame(width: 580)
+        .environmentObject(ThemeManager.shared)
     }
 }

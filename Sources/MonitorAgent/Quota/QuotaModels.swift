@@ -45,6 +45,17 @@ enum QuotaSnapshotStatus: Equatable {
     case unavailable(String)
 }
 
+enum QuotaRefreshPhase: Equatable {
+    case idle
+    case refreshing
+    case failed(status: QuotaSnapshotStatus, attemptedAt: Date)
+}
+
+struct QuotaRefreshResult: Equatable {
+    let snapshot: QuotaSnapshot
+    let identityDigest: String?
+}
+
 struct QuotaSnapshot: Equatable {
     let provider: QuotaProviderID
     let plan: String?
@@ -86,6 +97,10 @@ enum QuotaDateFormat {
         return dateTimeFormatter.string(from: date)
     }
 
+    static func updateDateTime(_ date: Date) -> String {
+        updateDateTimeFormatter.string(from: date)
+    }
+
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -94,6 +109,13 @@ enum QuotaDateFormat {
     }()
 
     private static let dateTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MMM d, HH:mm"
+        return formatter
+    }()
+
+    private static let updateDateTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "MMM d, HH:mm"

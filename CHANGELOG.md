@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-08-05
+
+### Added
+- Restore the Activity detail presentation intent after app restarts
+- Preserve account-scoped successful quota data across restarts and transient refresh failures without changing the compact card layout
+
+### Changed
+- Keep successful quota updates green during idle or shared refresh, and show retained-data refresh failures in red without adding a refreshing card status
+
 ## [0.10.4] - 2026-08-04
 
 ### Fixed
