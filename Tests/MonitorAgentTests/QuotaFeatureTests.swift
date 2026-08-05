@@ -26,7 +26,7 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(QuotaCardLayout.tipHoverBridgeHeight, 6)
     }
 
-    func testQuotaCacheAndFailureIndicatorsDoNotChangeCardLayout() {
+    func testQuotaRefreshStatesDoNotChangeCardLayout() {
         let snapshot = QuotaSnapshot(
             provider: .codex,
             plan: "PLUS",
@@ -46,20 +46,65 @@ final class QuotaFeatureTests: XCTestCase {
             status: .available,
             fetchedAt: Date(timeIntervalSince1970: 1_800_000_000)
         )
-        let idle = quotaCardSize(snapshot: snapshot, phase: .idle, wasRestored: false)
-        let restored = quotaCardSize(snapshot: snapshot, phase: .refreshing, wasRestored: true)
+        let idle = quotaCardSize(snapshot: snapshot, phase: .idle)
+        let refreshing = quotaCardSize(snapshot: snapshot, phase: .refreshing)
         let failed = quotaCardSize(
             snapshot: snapshot,
             phase: .failed(
                 status: .unavailable("Quota service unavailable"),
                 attemptedAt: Date(timeIntervalSince1970: 1_800_000_100)
-            ),
-            wasRestored: true
+            )
         )
 
-        XCTAssertEqual(idle, restored)
+        XCTAssertEqual(idle, refreshing)
         XCTAssertEqual(idle, failed)
         XCTAssertEqual(idle.height, QuotaCardLayout.cardHeight)
+    }
+
+    func testQuotaRefreshPresentationMapsEveryPhaseToItsStatusContract() {
+        let failed = QuotaRefreshPhase.failed(
+            status: .unavailable("Quota service unavailable"),
+            attemptedAt: Date(timeIntervalSince1970: 1_800_000_100)
+        )
+        let authenticationExpired = QuotaRefreshPhase.failed(
+            status: .authenticationExpired,
+            attemptedAt: Date(timeIntervalSince1970: 1_800_000_200)
+        )
+
+        XCTAssertNil(QuotaRefreshPresentation.headerStatus(
+            snapshotStatus: .available,
+            phase: .idle
+        ))
+        XCTAssertNil(QuotaRefreshPresentation.headerStatus(
+            snapshotStatus: .available,
+            phase: .refreshing
+        ))
+        XCTAssertEqual(QuotaRefreshPresentation.headerStatus(
+            snapshotStatus: .available,
+            phase: failed
+        ), .critical)
+        XCTAssertNil(QuotaRefreshPresentation.headerStatus(
+            snapshotStatus: .unavailable("Quota service unavailable"),
+            phase: failed
+        ))
+
+        XCTAssertEqual(QuotaRefreshPresentation.updateLabel(for: .idle), "Quota updated")
+        XCTAssertEqual(
+            QuotaRefreshPresentation.updateLabel(for: .refreshing),
+            "Quota updated"
+        )
+        XCTAssertEqual(QuotaRefreshPresentation.updateLabel(for: failed), "Refresh failed")
+        XCTAssertEqual(
+            QuotaRefreshPresentation.updateLabel(for: authenticationExpired),
+            "Sign-in expired"
+        )
+        XCTAssertEqual(QuotaRefreshPresentation.updateStatus(for: .idle), .healthy)
+        XCTAssertEqual(QuotaRefreshPresentation.updateStatus(for: .refreshing), .healthy)
+        XCTAssertEqual(QuotaRefreshPresentation.updateStatus(for: failed), .critical)
+        XCTAssertEqual(
+            QuotaRefreshPresentation.updateStatus(for: authenticationExpired),
+            .critical
+        )
     }
 
     func testQuotaTipHoverStateKeepsTipPresentedDuringTriggerToSurfaceHandoff() {
@@ -485,13 +530,11 @@ final class QuotaFeatureTests: XCTestCase {
 
     private func quotaCardSize(
         snapshot: QuotaSnapshot,
-        phase: QuotaRefreshPhase,
-        wasRestored: Bool
+        phase: QuotaRefreshPhase
     ) -> NSSize {
         let hostingView = NSHostingView(rootView: QuotaCardRenderHarness(
             snapshot: snapshot,
-            phase: phase,
-            wasRestored: wasRestored
+            phase: phase
         ))
         hostingView.layoutSubtreeIfNeeded()
         return hostingView.fittingSize
@@ -502,14 +545,12 @@ private struct QuotaCardRenderHarness: View {
     @State private var ownership = QuotaTipOwnership()
     let snapshot: QuotaSnapshot
     let phase: QuotaRefreshPhase
-    let wasRestored: Bool
 
     var body: some View {
         SubscriptionQuotaCard(
             provider: .codex,
             snapshot: snapshot,
             refreshPhase: phase,
-            wasRestored: wasRestored,
             expirationDate: Date(timeIntervalSince1970: 1_900_000_000),
             tipOwnership: $ownership
         )

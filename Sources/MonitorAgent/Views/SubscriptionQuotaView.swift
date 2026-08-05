@@ -17,7 +17,6 @@ struct SubscriptionQuotaView: View {
                             provider: provider,
                             snapshot: store.quotaSnapshots[provider],
                             refreshPhase: store.quotaRefreshPhase(for: provider),
-                            wasRestored: store.restoredQuotaProviders.contains(provider),
                             expirationDate: store.quotaExpirationDate(for: provider),
                             tipOwnership: $tipOwnership
                         )
@@ -45,7 +44,6 @@ struct SubscriptionQuotaCard: View {
     let provider: QuotaProviderID
     let snapshot: QuotaSnapshot?
     let refreshPhase: QuotaRefreshPhase
-    let wasRestored: Bool
     let expirationDate: Date?
     @Binding var tipOwnership: QuotaTipOwnership
 
@@ -268,9 +266,11 @@ struct SubscriptionQuotaCard: View {
     }
 
     private var quotaStateDotColor: Color? {
-        guard snapshot?.status == .available else { return nil }
-        if case .failed = refreshPhase { return QuotaStatusPalette.warning }
-        return wasRestored ? theme.panelSecondaryForeground.opacity(0.72) : nil
+        guard let status = QuotaRefreshPresentation.headerStatus(
+            snapshotStatus: snapshot?.status,
+            phase: refreshPhase
+        ) else { return nil }
+        return QuotaStatusPalette.color(for: status, unknown: .clear)
     }
 
     private var quotaStateHelp: String {
@@ -546,9 +546,12 @@ private struct SubscriptionExpirationTip: View {
                     .overlay(theme.tooltipForeground.opacity(0.12))
                 HStack(spacing: 8) {
                     Circle()
-                        .fill(quotaUpdateColor)
+                        .fill(QuotaStatusPalette.color(
+                            for: QuotaRefreshPresentation.updateStatus(for: refreshPhase),
+                            unknown: .clear
+                        ))
                         .frame(width: 6, height: 6)
-                    Text(quotaUpdateStatus)
+                    Text(QuotaRefreshPresentation.updateLabel(for: refreshPhase))
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(theme.tooltipForeground.opacity(0.72))
                     Spacer(minLength: 8)
@@ -571,22 +574,6 @@ private struct SubscriptionExpirationTip: View {
         )
     }
 
-    private var quotaUpdateStatus: String {
-        switch refreshPhase {
-        case .idle: return "Quota updated"
-        case .refreshing: return "Refreshing quota"
-        case .failed(let status, _):
-            if status == .authenticationExpired {
-                return "Sign-in expired"
-            }
-            return "Refresh failed"
-        }
-    }
-
-    private var quotaUpdateColor: Color {
-        if case .failed = refreshPhase { return QuotaStatusPalette.warning }
-        return theme.tooltipForeground.opacity(0.52)
-    }
 }
 
 private struct ResetCreditsTip: View {
@@ -757,6 +744,29 @@ enum QuotaStatusPalette {
         case .critical: return critical
         case .unknown: return unknown
         }
+    }
+}
+
+enum QuotaRefreshPresentation {
+    static func headerStatus(
+        snapshotStatus: QuotaSnapshotStatus?,
+        phase: QuotaRefreshPhase
+    ) -> QuotaStatus? {
+        guard snapshotStatus == .available else { return nil }
+        if case .failed = phase { return .critical }
+        return nil
+    }
+
+    static func updateLabel(for phase: QuotaRefreshPhase) -> String {
+        if case .failed(let status, _) = phase {
+            return status == .authenticationExpired ? "Sign-in expired" : "Refresh failed"
+        }
+        return "Quota updated"
+    }
+
+    static func updateStatus(for phase: QuotaRefreshPhase) -> QuotaStatus {
+        if case .failed = phase { return .critical }
+        return .healthy
     }
 }
 

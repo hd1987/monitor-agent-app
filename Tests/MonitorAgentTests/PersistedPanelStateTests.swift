@@ -232,7 +232,6 @@ final class PersistedPanelStateTests: XCTestCase {
             observeRefreshIntervalChanges: false
         )
         XCTAssertEqual(store.quotaSnapshots[.claude], cached)
-        XCTAssertTrue(store.restoredQuotaProviders.contains(.claude))
 
         store.panelDidOpen()
         wait(for: [quotaService.started], timeout: 1)

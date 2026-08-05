@@ -59,7 +59,6 @@ final class AppStore: ObservableObject {
     @Published var usageDataRebuildWasCancelled = false
     @Published var quotaSnapshots: [QuotaProviderID: QuotaSnapshot] = [:]
     @Published private(set) var quotaRefreshPhases: [QuotaProviderID: QuotaRefreshPhase] = [:]
-    @Published private(set) var restoredQuotaProviders: Set<QuotaProviderID> = []
     @Published private(set) var manualRefreshAvailableAt: Date?
     @Published private(set) var isRefreshInProgress = false
     @Published private(set) var isManualRefreshInProgress = false
@@ -723,7 +722,6 @@ final class AppStore: ObservableObject {
                               self.isAgentEnabled(for: provider, in: self.enabledAgents) else { return }
                         self.quotaSnapshots[provider] = snapshot
                         self.quotaSnapshotIdentities[provider] = identityDigest
-                        self.restoredQuotaProviders.insert(provider)
                     }
                 }
             }
@@ -739,7 +737,6 @@ final class AppStore: ObservableObject {
             quotaSnapshots[provider] = snapshot
             quotaSnapshotIdentities[provider] = identityDigest
             quotaRefreshPhases[provider] = .idle
-            restoredQuotaProviders.remove(provider)
             quotaCache?.store(snapshot, identityDigest: identityDigest)
             return
         }
@@ -751,7 +748,6 @@ final class AppStore: ObservableObject {
         if !canRetainSuccess {
             quotaSnapshots[provider] = snapshot
             quotaSnapshotIdentities.removeValue(forKey: provider)
-            restoredQuotaProviders.remove(provider)
         }
         quotaRefreshPhases[provider] = .failed(
             status: snapshot.status,
@@ -773,7 +769,6 @@ final class AppStore: ObservableObject {
     ) {
         quotaRefreshPhases = quotaRefreshPhases.filter { shouldRetain($0.key) }
         quotaSnapshotIdentities = quotaSnapshotIdentities.filter { shouldRetain($0.key) }
-        restoredQuotaProviders = restoredQuotaProviders.filter(shouldRetain)
         for provider in QuotaProviderID.allCases where !shouldRetain(provider) {
             quotaRefreshGenerations[provider, default: 0] += 1
             quotaRestoreGenerations[provider, default: 0] += 1
