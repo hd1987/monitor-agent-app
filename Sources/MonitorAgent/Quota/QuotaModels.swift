@@ -54,6 +54,62 @@ enum QuotaRefreshPhase: Equatable {
 struct QuotaRefreshResult: Equatable {
     let snapshot: QuotaSnapshot
     let identityDigest: String?
+    let resetCreditsUpdate: ResetCreditsUpdate
+
+    init(
+        snapshot: QuotaSnapshot,
+        identityDigest: String?,
+        resetCreditsUpdate: ResetCreditsUpdate = .notApplicable
+    ) {
+        self.snapshot = snapshot
+        self.identityDigest = identityDigest
+        self.resetCreditsUpdate = resetCreditsUpdate
+    }
+}
+
+enum ResetCreditsUpdate: Equatable {
+    case notApplicable
+    case notUpdated
+    case authoritative(ResetCreditsState)
+}
+
+struct ResetCreditsState: Equatable {
+    let count: Int
+    let expirations: [Date]
+
+    static func authoritative(
+        count: Int?,
+        expirations: [Date],
+        now: Date
+    ) -> ResetCreditsState? {
+        guard let count, count >= 0 else { return nil }
+        if count == 0 {
+            guard expirations.isEmpty else { return nil }
+            return ResetCreditsState(count: 0, expirations: [])
+        }
+        let sortedExpirations = expirations.sorted()
+        guard sortedExpirations.count == count,
+              sortedExpirations.allSatisfy({ $0 > now }) else { return nil }
+        return ResetCreditsState(count: count, expirations: sortedExpirations)
+    }
+
+    static func restored(
+        count: Int?,
+        expirations: [Date],
+        now: Date
+    ) -> ResetCreditsState? {
+        guard let count, count >= 0 else { return nil }
+        if count == 0 {
+            guard expirations.isEmpty else { return nil }
+            return ResetCreditsState(count: 0, expirations: [])
+        }
+        guard expirations.count == count else { return nil }
+        let futureExpirations = expirations.filter { $0 > now }.sorted()
+        return ResetCreditsState(
+            count: futureExpirations.count,
+            expirations: futureExpirations
+        )
+    }
 }
 
 struct QuotaSnapshot: Equatable {
@@ -82,6 +138,20 @@ struct QuotaSnapshot: Equatable {
             resetCreditExpirations: [],
             status: status,
             fetchedAt: date
+        )
+    }
+
+    func replacingResetCredits(with state: ResetCreditsState?) -> QuotaSnapshot {
+        QuotaSnapshot(
+            provider: provider,
+            plan: plan,
+            fiveHour: fiveHour,
+            weekly: weekly,
+            opusWeekly: opusWeekly,
+            resetCredits: state?.count,
+            resetCreditExpirations: state?.expirations ?? [],
+            status: status,
+            fetchedAt: fetchedAt
         )
     }
 }

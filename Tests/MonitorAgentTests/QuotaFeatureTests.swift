@@ -528,6 +528,155 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertTrue(weekly.usesDateTimeReset)
     }
 
+    func testCodexResetCreditsResponseTreats429AsNotUpdated() throws {
+        let response = try XCTUnwrap(HTTPURLResponse(
+            url: URL(string: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits")!,
+            statusCode: 429,
+            httpVersion: nil,
+            headerFields: nil
+        ))
+        let data = try JSONSerialization.data(withJSONObject: ["detail": "rate limited"])
+
+        XCTAssertEqual(
+            QuotaService.codexResetCreditsUpdate(
+                data: data,
+                response: response,
+                now: Date(timeIntervalSince1970: 1_800_000_000)
+            ),
+            .notUpdated
+        )
+    }
+
+    func testCodexResetCreditsResponseRequiresCompleteExpirations() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let response = try XCTUnwrap(HTTPURLResponse(
+            url: URL(string: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits")!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        ))
+        let incomplete = try JSONSerialization.data(withJSONObject: [
+            "available_count": 1,
+            "credits": []
+        ])
+        XCTAssertEqual(
+            QuotaService.codexResetCreditsUpdate(data: incomplete, response: response, now: now),
+            .notUpdated
+        )
+
+        let expiration = now.addingTimeInterval(86_400)
+        let complete = try JSONSerialization.data(withJSONObject: [
+            "available_count": 1,
+            "credits": [["status": "available", "expires_at": expiration.timeIntervalSince1970]]
+        ])
+        XCTAssertEqual(
+            QuotaService.codexResetCreditsUpdate(data: complete, response: response, now: now),
+            .authoritative(ResetCreditsState(count: 1, expirations: [expiration]))
+        )
+    }
+
+    func testCodexResetCreditsResponseAcceptsExplicitZero() throws {
+        let response = try XCTUnwrap(HTTPURLResponse(
+            url: URL(string: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits")!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        ))
+        let data = try JSONSerialization.data(withJSONObject: [
+            "available_count": 0,
+            "credits": []
+        ])
+
+        XCTAssertEqual(
+            QuotaService.codexResetCreditsUpdate(
+                data: data,
+                response: response,
+                now: Date(timeIntervalSince1970: 1_800_000_000)
+            ),
+            .authoritative(ResetCreditsState(count: 0, expirations: []))
+        )
+    }
+
+    func testCodexResetCreditsResponseRejectsOutOfRangeCount() throws {
+        let response = try XCTUnwrap(HTTPURLResponse(
+            url: URL(string: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits")!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        ))
+        let data = Data("{\"available_count\":1e100,\"credits\":[]}".utf8)
+
+        XCTAssertEqual(
+            QuotaService.codexResetCreditsUpdate(
+                data: data,
+                response: response,
+                now: Date(timeIntervalSince1970: 1_800_000_000)
+            ),
+            .notUpdated
+        )
+    }
+
+    func testCodexResetCreditsResponseRejectsBooleanCount() throws {
+        let response = try XCTUnwrap(HTTPURLResponse(
+            url: URL(string: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits")!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        ))
+        let data = try JSONSerialization.data(withJSONObject: [
+            "available_count": true,
+            "credits": []
+        ])
+
+        XCTAssertEqual(
+            QuotaService.codexResetCreditsUpdate(
+                data: data,
+                response: response,
+                now: Date(timeIntervalSince1970: 1_800_000_000)
+            ),
+            .notUpdated
+        )
+    }
+
+    func testCodexResetCreditsResponseRejectsContradictoryZero() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let response = try XCTUnwrap(HTTPURLResponse(
+            url: URL(string: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits")!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        ))
+        let data = try JSONSerialization.data(withJSONObject: [
+            "available_count": 0,
+            "credits": [["status": "available", "expires_at": now.addingTimeInterval(86_400).timeIntervalSince1970]]
+        ])
+
+        XCTAssertEqual(
+            QuotaService.codexResetCreditsUpdate(data: data, response: response, now: now),
+            .notUpdated
+        )
+    }
+
+    func testCodexResetCreditsResponseRejectsUnrecognizedExpirationShape() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let response = try XCTUnwrap(HTTPURLResponse(
+            url: URL(string: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits")!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        ))
+        let data = try JSONSerialization.data(withJSONObject: [
+            "available_count": 1,
+            "credits": "invalid",
+            "subscription_expires_at": now.addingTimeInterval(86_400).timeIntervalSince1970
+        ])
+
+        XCTAssertEqual(
+            QuotaService.codexResetCreditsUpdate(data: data, response: response, now: now),
+            .notUpdated
+        )
+    }
+
     private func quotaCardSize(
         snapshot: QuotaSnapshot,
         phase: QuotaRefreshPhase

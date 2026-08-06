@@ -186,31 +186,19 @@ private extension QuotaSnapshotCache {
                 now: now,
                 fallbackExpiration: fetchedAt.addingTimeInterval(7 * 24 * 60 * 60)
             )
-            let futureExpirations = resetCreditExpirations.filter { $0 > now }.sorted()
-            let validCredits: Int?
-            if let resetCredits, resetCredits > 0 {
-                if resetCreditExpirations.isEmpty {
-                    validCredits = now < fetchedAt.addingTimeInterval(7 * 24 * 60 * 60)
-                        ? resetCredits
-                        : nil
-                } else if futureExpirations.count == resetCreditExpirations.count {
-                    validCredits = resetCredits
-                } else if resetCredits == resetCreditExpirations.count, !futureExpirations.isEmpty {
-                    validCredits = futureExpirations.count
-                } else {
-                    validCredits = nil
-                }
-            } else {
-                validCredits = nil
-            }
+            let resetCreditsState = ResetCreditsState.restored(
+                count: resetCredits,
+                expirations: resetCreditExpirations,
+                now: now
+            )
             return QuotaSnapshot(
                 provider: provider,
                 plan: plan,
                 fiveHour: validFiveHour,
                 weekly: validWeekly,
                 opusWeekly: validOpus,
-                resetCredits: validCredits,
-                resetCreditExpirations: validCredits == nil ? [] : futureExpirations,
+                resetCredits: resetCreditsState?.count,
+                resetCreditExpirations: resetCreditsState?.expirations ?? [],
                 status: .available,
                 fetchedAt: fetchedAt
             )

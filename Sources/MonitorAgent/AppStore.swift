@@ -344,6 +344,7 @@ final class AppStore: ObservableObject {
     /// Start one unified visible-panel refresh lifecycle.
     func panelDidOpen() {
         isPanelVisible = true
+        normalizeCodexResetCredits(at: currentDateProvider())
         applyRefreshInterval(refreshSettings.interval, throttleInitialRefresh: true)
     }
 
@@ -717,11 +718,24 @@ final class AppStore: ObservableObject {
                         guard let self,
                               currentIdentity == identityDigest,
                               (self.quotaRestoreGenerations[provider] ?? 0) == generation,
-                              self.quotaSnapshots[provider]?.status != .available,
                               self.quotaSettings.isEnabled(provider),
                               self.isAgentEnabled(for: provider, in: self.enabledAgents) else { return }
-                        self.quotaSnapshots[provider] = snapshot
-                        self.quotaSnapshotIdentities[provider] = identityDigest
+                        if let current = self.quotaSnapshots[provider], current.status == .available {
+                            guard provider == .codex,
+                                  current.resetCredits == nil,
+                                  self.quotaSnapshotIdentities[provider] == identityDigest,
+                                  let state = ResetCreditsState.restored(
+                                    count: snapshot.resetCredits,
+                                    expirations: snapshot.resetCreditExpirations,
+                                    now: self.currentDateProvider()
+                                  ) else { return }
+                            let merged = current.replacingResetCredits(with: state)
+                            self.quotaSnapshots[provider] = merged
+                            self.quotaCache?.store(merged, identityDigest: identityDigest)
+                        } else {
+                            self.quotaSnapshots[provider] = snapshot
+                            self.quotaSnapshotIdentities[provider] = identityDigest
+                        }
                     }
                 }
             }
@@ -732,12 +746,37 @@ final class AppStore: ObservableObject {
         _ result: QuotaRefreshResult,
         provider: QuotaProviderID
     ) {
-        let snapshot = result.snapshot
+        var snapshot = result.snapshot
         if snapshot.status == .available, let identityDigest = result.identityDigest {
+            var shouldStoreSnapshot = true
+            if provider == .codex {
+                let resetCreditsState: ResetCreditsState?
+                switch result.resetCreditsUpdate {
+                case .authoritative(let state):
+                    resetCreditsState = state
+                case .notUpdated:
+                    if quotaSnapshotIdentities[provider] == identityDigest,
+                       let current = quotaSnapshots[provider] {
+                        resetCreditsState = ResetCreditsState.restored(
+                            count: current.resetCredits,
+                            expirations: current.resetCreditExpirations,
+                            now: currentDateProvider()
+                        )
+                    } else {
+                        resetCreditsState = nil
+                    }
+                    shouldStoreSnapshot = resetCreditsState != nil
+                case .notApplicable:
+                    resetCreditsState = nil
+                }
+                snapshot = snapshot.replacingResetCredits(with: resetCreditsState)
+            }
             quotaSnapshots[provider] = snapshot
             quotaSnapshotIdentities[provider] = identityDigest
             quotaRefreshPhases[provider] = .idle
-            quotaCache?.store(snapshot, identityDigest: identityDigest)
+            if shouldStoreSnapshot {
+                quotaCache?.store(snapshot, identityDigest: identityDigest)
+            }
             return
         }
 
@@ -753,6 +792,19 @@ final class AppStore: ObservableObject {
             status: snapshot.status,
             attemptedAt: snapshot.fetchedAt
         )
+    }
+
+    private func normalizeCodexResetCredits(at date: Date) {
+        guard let snapshot = quotaSnapshots[.codex], snapshot.status == .available else { return }
+        let state = ResetCreditsState.restored(
+            count: snapshot.resetCredits,
+            expirations: snapshot.resetCreditExpirations,
+            now: date
+        )
+        let normalized = snapshot.replacingResetCredits(with: state)
+        if normalized != snapshot {
+            quotaSnapshots[.codex] = normalized
+        }
     }
 
     private func shouldRetainSuccessfulQuota(for status: QuotaSnapshotStatus) -> Bool {

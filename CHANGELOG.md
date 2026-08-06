@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Fixed
+- Keep Codex reset-credit data stable when its supplemental endpoint is rate-limited or incomplete, and prevent partial reset data from replacing valid account-scoped memory or cache state
+
 ## [0.10.5] - 2026-08-05
 
 ### Added

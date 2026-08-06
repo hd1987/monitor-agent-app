@@ -104,8 +104,12 @@ final class QuotaService: QuotaRefreshing {
                     key: RequestKey(provider: .codex, identityDigest: identityDigest),
                     completion: completion
                 ) { finish in
-                    self.fetchCodex(auth: auth, now: now) { snapshot in
-                        finish(QuotaRefreshResult(snapshot: snapshot, identityDigest: identityDigest))
+                    self.fetchCodex(auth: auth, now: now) { snapshot, resetCreditsUpdate in
+                        finish(QuotaRefreshResult(
+                            snapshot: snapshot,
+                            identityDigest: identityDigest,
+                            resetCreditsUpdate: resetCreditsUpdate
+                        ))
                     }
                 }
             }
@@ -235,10 +239,13 @@ final class QuotaService: QuotaRefreshing {
     private func fetchCodex(
         auth: CodexAuth,
         now: Date,
-        completion: @escaping (QuotaSnapshot) -> Void
+        completion: @escaping (QuotaSnapshot, ResetCreditsUpdate) -> Void
     ) {
         guard let url = URL(string: "https://chatgpt.com/backend-api/wham/usage") else {
-            completion(.failure(provider: .codex, status: .unavailable("Quota service unavailable"), at: now))
+            completion(
+                .failure(provider: .codex, status: .unavailable("Quota service unavailable"), at: now),
+                .notUpdated
+            )
             return
         }
         var request = codexRequest(url: url, auth: auth)
@@ -246,16 +253,25 @@ final class QuotaService: QuotaRefreshing {
 
         session.dataTask(with: request) { data, response, error in
             guard error == nil, let http = response as? HTTPURLResponse else {
-                completion(.failure(provider: .codex, status: .unavailable("Quota service unavailable"), at: now))
+                completion(
+                    .failure(provider: .codex, status: .unavailable("Quota service unavailable"), at: now),
+                    .notUpdated
+                )
                 return
             }
             guard http.statusCode != 401 && http.statusCode != 403 else {
-                completion(.failure(provider: .codex, status: .authenticationExpired, at: now))
+                completion(
+                    .failure(provider: .codex, status: .authenticationExpired, at: now),
+                    .notUpdated
+                )
                 return
             }
             guard http.statusCode == 200, let data, data.count <= 1_048_576,
                   let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                completion(.failure(provider: .codex, status: .unavailable("Quota service unavailable"), at: now))
+                completion(
+                    .failure(provider: .codex, status: .unavailable("Quota service unavailable"), at: now),
+                    .notUpdated
+                )
                 return
             }
 
@@ -267,22 +283,32 @@ final class QuotaService: QuotaRefreshing {
                 rateLimit["secondary_window"] ?? rateLimit["weekly_window"]
             )
             guard fiveHour != nil || weekly != nil else {
-                completion(.failure(provider: .codex, status: .unavailable("Quota response unavailable"), at: now))
+                completion(
+                    .failure(provider: .codex, status: .unavailable("Quota response unavailable"), at: now),
+                    .notUpdated
+                )
                 return
             }
 
-            let embeddedCredits = Self.parseResetCredits(root["rate_limit_reset_credits"])
             let base = QuotaSnapshot(
                 provider: .codex,
                 plan: (root["plan_type"] as? String)?.uppercased(),
                 fiveHour: fiveHour,
                 weekly: weekly,
                 opusWeekly: nil,
-                resetCredits: embeddedCredits.count,
-                resetCreditExpirations: embeddedCredits.expirations,
+                resetCredits: nil,
+                resetCreditExpirations: [],
                 status: .available,
                 fetchedAt: now
             )
+            let embeddedUpdate = Self.resetCreditsUpdate(
+                from: root["rate_limit_reset_credits"],
+                now: now
+            )
+            if case .authoritative = embeddedUpdate {
+                completion(base, embeddedUpdate)
+                return
+            }
             self.fetchCodexResetCredits(auth: auth, base: base, completion: completion)
         }.resume()
     }
@@ -290,33 +316,19 @@ final class QuotaService: QuotaRefreshing {
     private func fetchCodexResetCredits(
         auth: CodexAuth,
         base: QuotaSnapshot,
-        completion: @escaping (QuotaSnapshot) -> Void
+        completion: @escaping (QuotaSnapshot, ResetCreditsUpdate) -> Void
     ) {
         guard let url = URL(string: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits") else {
-            completion(base)
+            completion(base, .notUpdated)
             return
         }
         var request = codexRequest(url: url, auth: auth)
         request.timeoutInterval = 10
         session.dataTask(with: request) { data, response, _ in
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200,
-                  let data, data.count <= 1_048_576,
-                  let root = try? JSONSerialization.jsonObject(with: data) else {
-                completion(base)
-                return
-            }
-            let credits = Self.parseResetCredits(root)
-            completion(QuotaSnapshot(
-                provider: base.provider,
-                plan: base.plan,
-                fiveHour: base.fiveHour,
-                weekly: base.weekly,
-                opusWeekly: base.opusWeekly,
-                resetCredits: credits.count ?? base.resetCredits,
-                resetCreditExpirations: credits.expirations.isEmpty ? base.resetCreditExpirations : credits.expirations,
-                status: base.status,
-                fetchedAt: base.fetchedAt
-            ))
+            completion(
+                base,
+                Self.codexResetCreditsUpdate(data: data, response: response, now: base.fetchedAt)
+            )
         }.resume()
     }
 
@@ -330,6 +342,14 @@ final class QuotaService: QuotaRefreshing {
             request.setValue(accountID, forHTTPHeaderField: "ChatGPT-Account-Id")
         }
         return request
+    }
+
+    static func codexResetCreditsUpdate(
+        data: Data?,
+        response: URLResponse?,
+        now: Date
+    ) -> ResetCreditsUpdate {
+        resetCreditsUpdate(data: data, response: response, now: now)
     }
 }
 
@@ -458,36 +478,68 @@ private extension QuotaService {
         )
     }
 
-    static func parseResetCredits(_ value: Any?) -> (count: Int?, expirations: [Date]) {
-        guard let value else { return (nil, []) }
-        let dictionary = value as? [String: Any]
-        let count = number(
-            dictionary?["available_count"]
-                ?? dictionary?["availableCount"]
-                ?? dictionary?["remaining"]
-                ?? dictionary?["count"]
-        ).map(Int.init)
+    static func parseResetCredits(_ value: Any?) -> (count: Int?, expirations: [Date])? {
+        guard let dictionary = value as? [String: Any] else { return nil }
+        let rawCount = number(
+            dictionary["available_count"]
+                ?? dictionary["availableCount"]
+                ?? dictionary["remaining"]
+                ?? dictionary["count"]
+        )
+        let count = rawCount.flatMap { value -> Int? in
+            guard value.isFinite, value >= 0 else { return nil }
+            return Int(exactly: value)
+        }
         var dates: [Date] = []
-        collectDates(value, into: &dates)
-        return (count, Array(Set(dates)).sorted())
+        if let rawCredits = dictionary["credits"] {
+            guard let credits = rawCredits as? [Any] else { return nil }
+            for rawCredit in credits {
+                guard let credit = rawCredit as? [String: Any] else { return nil }
+                if let status = credit["status"] as? String,
+                   status.caseInsensitiveCompare("available") != .orderedSame {
+                    continue
+                }
+                guard let expiration = parseDate(credit["expires_at"] ?? credit["expiresAt"]) else {
+                    return nil
+                }
+                dates.append(expiration)
+            }
+        }
+        return (count, dates.sorted())
     }
 
-    static func collectDates(_ value: Any, into dates: inout [Date]) {
-        if let dictionary = value as? [String: Any] {
-            for (key, item) in dictionary {
-                if key.lowercased().contains("expir"), let date = parseDate(item) {
-                    dates.append(date)
-                } else {
-                    collectDates(item, into: &dates)
-                }
-            }
-        } else if let array = value as? [Any] {
-            array.forEach { collectDates($0, into: &dates) }
+    static func resetCreditsUpdate(
+        data: Data?,
+        response: URLResponse?,
+        now: Date
+    ) -> ResetCreditsUpdate {
+        guard let http = response as? HTTPURLResponse,
+              http.statusCode == 200,
+              let data,
+              data.count <= 1_048_576,
+              let root = try? JSONSerialization.jsonObject(with: data) else {
+            return .notUpdated
         }
+        return resetCreditsUpdate(from: root, now: now)
+    }
+
+    static func resetCreditsUpdate(from value: Any?, now: Date) -> ResetCreditsUpdate {
+        guard let parsed = parseResetCredits(value) else { return .notUpdated }
+        guard let state = ResetCreditsState.authoritative(
+            count: parsed.count,
+            expirations: parsed.expirations,
+            now: now
+        ) else {
+            return .notUpdated
+        }
+        return .authoritative(state)
     }
 
     static func number(_ value: Any?) -> Double? {
-        if let value = value as? NSNumber { return value.doubleValue }
+        if let value = value as? NSNumber {
+            guard CFGetTypeID(value) != CFBooleanGetTypeID() else { return nil }
+            return value.doubleValue
+        }
         if let value = value as? String { return Double(value) }
         return nil
     }

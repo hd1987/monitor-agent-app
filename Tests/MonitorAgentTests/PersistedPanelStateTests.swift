@@ -186,6 +186,49 @@ final class PersistedPanelStateTests: XCTestCase {
         wait(for: [ignored], timeout: 1)
     }
 
+    func testQuotaCacheRejectsIncompleteResetCreditsAndPreservesExplicitZero() {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("quota-cache-\(UUID().uuidString).json").path
+        let cache = QuotaSnapshotCache(path: path)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        cache.store(
+            quotaSnapshot(resetCredits: 1, resetCreditExpirations: []),
+            identityDigest: "account-a"
+        )
+
+        let incomplete = expectation(description: "Incomplete resets are removed")
+        cache.load(provider: .codex, identityDigest: "account-a", now: now) { snapshot in
+            XCTAssertNil(snapshot?.resetCredits)
+            XCTAssertEqual(snapshot?.resetCreditExpirations, [])
+            incomplete.fulfill()
+        }
+        wait(for: [incomplete], timeout: 1)
+
+        cache.store(
+            quotaSnapshot(resetCredits: 0, resetCreditExpirations: []),
+            identityDigest: "account-a"
+        )
+        let explicitZero = expectation(description: "Explicit zero is preserved")
+        cache.load(provider: .codex, identityDigest: "account-a", now: now) { snapshot in
+            XCTAssertEqual(snapshot?.resetCredits, 0)
+            XCTAssertEqual(snapshot?.resetCreditExpirations, [])
+            explicitZero.fulfill()
+        }
+        wait(for: [explicitZero], timeout: 1)
+
+        cache.store(
+            quotaSnapshot(resetCredits: 0, resetCreditExpirations: [now.addingTimeInterval(86_400)]),
+            identityDigest: "account-a"
+        )
+        let contradictoryZero = expectation(description: "Contradictory zero resets are removed")
+        cache.load(provider: .codex, identityDigest: "account-a", now: now) { snapshot in
+            XCTAssertNil(snapshot?.resetCredits)
+            XCTAssertEqual(snapshot?.resetCreditExpirations, [])
+            contradictoryZero.fulfill()
+        }
+        wait(for: [contradictoryZero], timeout: 1)
+    }
+
     func testQuotaCachePathsSeparateProductionAndDevelopment() {
         let production = QuotaCachePaths.make(
             homeDirectory: "/Users/test",
@@ -309,11 +352,241 @@ final class PersistedPanelStateTests: XCTestCase {
         store.panelDidClose()
     }
 
+    func testDelayedQuotaCacheMergesResetsAfterAvailableUsageFinishesFirst() {
+        let suiteName = "PersistedPanelStateTests.quotaAvailableRestoreRace.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let expiration = now.addingTimeInterval(86_400)
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        monitoringSettings.enabledAgents = [.codex]
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        quotaSettings.codexExpirationDate = now.addingTimeInterval(30 * 24 * 60 * 60)
+        let cached = quotaSnapshot(
+            resetCredits: 1,
+            resetCreditExpirations: [expiration]
+        )
+        let cache = MemoryQuotaCache(records: [
+            .codex: MemoryQuotaRecord(identityDigest: "account-a", snapshot: cached)
+        ])
+        let quotaService = DelayedIdentityQuotaService(identityDigest: "account-a")
+        let store = makeQuotaStore(
+            monitoringSettings: monitoringSettings,
+            quotaService: quotaService,
+            quotaSettings: quotaSettings,
+            quotaCache: cache,
+            now: now
+        )
+
+        store.panelDidOpen()
+        wait(for: [quotaService.started], timeout: 1)
+        let updatedUsage = quotaSnapshot(fetchedAt: now.addingTimeInterval(60))
+        quotaService.finish(snapshot: updatedUsage, resetCreditsUpdate: .notUpdated)
+
+        let usageApplied = expectation(description: "Usage finishes before cache identity resolution")
+        DispatchQueue.main.async {
+            XCTAssertEqual(store.quotaSnapshots[.codex]?.fiveHour, updatedUsage.fiveHour)
+            XCTAssertNil(store.quotaSnapshots[.codex]?.resetCredits)
+            usageApplied.fulfill()
+        }
+        wait(for: [usageApplied], timeout: 1)
+        quotaService.releaseNextIdentityResolution()
+        quotaService.releaseNextIdentityResolution()
+
+        let merged = expectation(description: "Delayed cached resets merge into newer usage")
+        DispatchQueue.main.async {
+            XCTAssertEqual(store.quotaSnapshots[.codex]?.fiveHour, updatedUsage.fiveHour)
+            XCTAssertEqual(store.quotaSnapshots[.codex]?.resetCredits, 1)
+            XCTAssertEqual(store.quotaSnapshots[.codex]?.resetCreditExpirations, [expiration])
+            XCTAssertEqual(cache.snapshot(for: .codex)?.resetCreditExpirations, [expiration])
+            merged.fulfill()
+        }
+        wait(for: [merged], timeout: 1)
+        store.panelDidClose()
+    }
+
+    func testUnavailableCodexResetCreditsRetainMatchingValidatedData() {
+        let suiteName = "PersistedPanelStateTests.codexResetRetention.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let expiration = now.addingTimeInterval(7 * 24 * 60 * 60)
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        monitoringSettings.enabledAgents = [.codex]
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        quotaSettings.codexExpirationDate = now.addingTimeInterval(30 * 24 * 60 * 60)
+        let cached = quotaSnapshot(
+            resetCredits: 1,
+            resetCreditExpirations: [expiration]
+        )
+        let cache = MemoryQuotaCache(
+            records: [.codex: MemoryQuotaRecord(identityDigest: "account-a", snapshot: cached)]
+        )
+        let quotaService = ControlledQuotaService(identityDigest: "account-a")
+        let store = makeQuotaStore(
+            monitoringSettings: monitoringSettings,
+            quotaService: quotaService,
+            quotaSettings: quotaSettings,
+            quotaCache: cache,
+            now: now
+        )
+        XCTAssertEqual(store.quotaSnapshots[.codex], cached)
+
+        store.panelDidOpen()
+        wait(for: [quotaService.started], timeout: 1)
+        let updatedUsage = quotaSnapshot(
+            fetchedAt: now.addingTimeInterval(60),
+            fiveHourReset: now.addingTimeInterval(10_000),
+            weeklyReset: now.addingTimeInterval(100_000)
+        )
+        quotaService.finish(snapshot: updatedUsage, resetCreditsUpdate: .notUpdated)
+
+        let merged = expectation(description: "Validated resets survive a supplemental failure")
+        DispatchQueue.main.async {
+            let snapshot = store.quotaSnapshots[.codex]
+            XCTAssertEqual(snapshot?.fiveHour, updatedUsage.fiveHour)
+            XCTAssertEqual(snapshot?.resetCredits, 1)
+            XCTAssertEqual(snapshot?.resetCreditExpirations, [expiration])
+            XCTAssertEqual(store.quotaRefreshPhase(for: .codex), .idle)
+            XCTAssertEqual(cache.snapshot(for: .codex)?.resetCreditExpirations, [expiration])
+            merged.fulfill()
+        }
+        wait(for: [merged], timeout: 1)
+        store.panelDidClose()
+    }
+
+    func testAuthoritativeZeroClearsCodexResetCredits() {
+        let suiteName = "PersistedPanelStateTests.codexResetZero.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        monitoringSettings.enabledAgents = [.codex]
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        quotaSettings.codexExpirationDate = now.addingTimeInterval(30 * 24 * 60 * 60)
+        let cache = MemoryQuotaCache(records: [
+            .codex: MemoryQuotaRecord(
+                identityDigest: "account-a",
+                snapshot: quotaSnapshot(
+                    resetCredits: 1,
+                    resetCreditExpirations: [now.addingTimeInterval(86_400)]
+                )
+            )
+        ])
+        let quotaService = ControlledQuotaService(identityDigest: "account-a")
+        let store = makeQuotaStore(
+            monitoringSettings: monitoringSettings,
+            quotaService: quotaService,
+            quotaSettings: quotaSettings,
+            quotaCache: cache,
+            now: now
+        )
+
+        store.panelDidOpen()
+        wait(for: [quotaService.started], timeout: 1)
+        quotaService.finish(
+            snapshot: quotaSnapshot(fetchedAt: now.addingTimeInterval(60)),
+            resetCreditsUpdate: .authoritative(ResetCreditsState(count: 0, expirations: []))
+        )
+
+        let cleared = expectation(description: "Authoritative zero clears resets")
+        DispatchQueue.main.async {
+            XCTAssertEqual(store.quotaSnapshots[.codex]?.resetCredits, 0)
+            XCTAssertEqual(store.quotaSnapshots[.codex]?.resetCreditExpirations, [])
+            cleared.fulfill()
+        }
+        wait(for: [cleared], timeout: 1)
+        store.panelDidClose()
+    }
+
+    func testCodexResetCreditsDoNotCrossAccountIdentity() {
+        let suiteName = "PersistedPanelStateTests.codexResetIdentity.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        monitoringSettings.enabledAgents = [.codex]
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        quotaSettings.codexExpirationDate = now.addingTimeInterval(30 * 24 * 60 * 60)
+        let cached = quotaSnapshot(
+            resetCredits: 1,
+            resetCreditExpirations: [now.addingTimeInterval(86_400)]
+        )
+        let cache = MemoryQuotaCache(records: [
+            .codex: MemoryQuotaRecord(identityDigest: "account-a", snapshot: cached)
+        ])
+        let quotaService = ControlledQuotaService(identityDigest: "account-a")
+        let store = makeQuotaStore(
+            monitoringSettings: monitoringSettings,
+            quotaService: quotaService,
+            quotaSettings: quotaSettings,
+            quotaCache: cache,
+            now: now
+        )
+        XCTAssertEqual(store.quotaSnapshots[.codex]?.resetCredits, 1)
+
+        quotaService.setIdentityDigest("account-b")
+        store.panelDidOpen()
+        wait(for: [quotaService.started], timeout: 1)
+        quotaService.finish(
+            snapshot: quotaSnapshot(fetchedAt: now.addingTimeInterval(60)),
+            resetCreditsUpdate: .notUpdated
+        )
+
+        let isolated = expectation(description: "Reset credits stay account scoped")
+        DispatchQueue.main.async {
+            XCTAssertNil(store.quotaSnapshots[.codex]?.resetCredits)
+            XCTAssertEqual(store.quotaSnapshots[.codex]?.resetCreditExpirations, [])
+            isolated.fulfill()
+        }
+        wait(for: [isolated], timeout: 1)
+        store.panelDidClose()
+    }
+
+    func testPanelOpenRemovesIncompleteInMemoryCodexResetCredits() {
+        let suiteName = "PersistedPanelStateTests.codexResetNormalization.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        monitoringSettings.enabledAgents = [.codex]
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        quotaSettings.codexExpirationDate = now.addingTimeInterval(30 * 24 * 60 * 60)
+        let cache = MemoryQuotaCache(records: [
+            .codex: MemoryQuotaRecord(
+                identityDigest: "account-a",
+                snapshot: quotaSnapshot(resetCredits: 1, resetCreditExpirations: [])
+            )
+        ])
+        let quotaService = ControlledQuotaService(identityDigest: "account-a")
+        let store = makeQuotaStore(
+            monitoringSettings: monitoringSettings,
+            quotaService: quotaService,
+            quotaSettings: quotaSettings,
+            quotaCache: cache,
+            now: now
+        )
+        XCTAssertEqual(store.quotaSnapshots[.codex]?.resetCredits, 1)
+
+        store.panelDidOpen()
+
+        XCTAssertNil(store.quotaSnapshots[.codex]?.resetCredits)
+        XCTAssertEqual(store.quotaSnapshots[.codex]?.resetCreditExpirations, [])
+        wait(for: [quotaService.started], timeout: 1)
+        quotaService.finish(
+            snapshot: quotaSnapshot(fetchedAt: now.addingTimeInterval(60)),
+            resetCreditsUpdate: .notUpdated
+        )
+        store.panelDidClose()
+    }
+
     private func quotaSnapshot(
         provider: QuotaProviderID = .codex,
         fetchedAt: Date = Date(timeIntervalSince1970: 1_800_000_000),
         fiveHourReset: Date = Date(timeIntervalSince1970: 1_800_003_600),
-        weeklyReset: Date = Date(timeIntervalSince1970: 1_800_086_400)
+        weeklyReset: Date = Date(timeIntervalSince1970: 1_800_086_400),
+        resetCredits: Int? = nil,
+        resetCreditExpirations: [Date] = []
     ) -> QuotaSnapshot {
         QuotaSnapshot(
             provider: provider,
@@ -329,10 +602,35 @@ final class PersistedPanelStateTests: XCTestCase {
                 durationSeconds: 604_800
             ),
             opusWeekly: nil,
-            resetCredits: nil,
-            resetCreditExpirations: [],
+            resetCredits: resetCredits,
+            resetCreditExpirations: resetCreditExpirations,
             status: .available,
             fetchedAt: fetchedAt
+        )
+    }
+
+    private func makeQuotaStore(
+        monitoringSettings: AgentMonitoringSettings,
+        quotaService: QuotaRefreshing,
+        quotaSettings: QuotaSettings,
+        quotaCache: QuotaSnapshotCaching,
+        now: Date
+    ) -> AppStore {
+        let database = DatabaseManager(inMemory: true)
+        return AppStore(
+            database: database,
+            syncManager: SessionSyncManager(
+                database: database,
+                claudeProjectsPath: "/nonexistent/claude",
+                codexSessionsPath: "/nonexistent/codex",
+                codexArchivedSessionsPath: "/nonexistent/codex-archive"
+            ),
+            monitoringSettings: monitoringSettings,
+            quotaService: quotaService,
+            quotaSettings: quotaSettings,
+            quotaCache: quotaCache,
+            observeRefreshIntervalChanges: false,
+            currentDateProvider: { now }
         )
     }
 
@@ -367,6 +665,10 @@ private final class MemoryQuotaCache: QuotaSnapshotCaching {
             snapshot: snapshot
         )
     }
+
+    func snapshot(for provider: QuotaProviderID) -> QuotaSnapshot? {
+        records[provider]?.snapshot
+    }
 }
 
 private struct MemoryQuotaRecord: Equatable {
@@ -376,10 +678,14 @@ private struct MemoryQuotaRecord: Equatable {
 
 private final class ControlledQuotaService: QuotaRefreshing {
     let started = XCTestExpectation(description: "Quota refresh starts")
-    private let identityDigest: String
+    private var identityDigest: String
     private var completion: ((QuotaRefreshResult) -> Void)?
 
     init(identityDigest: String) {
+        self.identityDigest = identityDigest
+    }
+
+    func setIdentityDigest(_ identityDigest: String) {
         self.identityDigest = identityDigest
     }
 
@@ -399,10 +705,14 @@ private final class ControlledQuotaService: QuotaRefreshing {
         started.fulfill()
     }
 
-    func finish(snapshot: QuotaSnapshot) {
+    func finish(
+        snapshot: QuotaSnapshot,
+        resetCreditsUpdate: ResetCreditsUpdate = .notApplicable
+    ) {
         completion?(QuotaRefreshResult(
             snapshot: snapshot,
-            identityDigest: identityDigest
+            identityDigest: identityDigest,
+            resetCreditsUpdate: resetCreditsUpdate
         ))
         completion = nil
     }
@@ -442,10 +752,14 @@ private final class DelayedIdentityQuotaService: QuotaRefreshing {
         identityCompletions.removeFirst()(identityDigest)
     }
 
-    func finish(snapshot: QuotaSnapshot) {
+    func finish(
+        snapshot: QuotaSnapshot,
+        resetCreditsUpdate: ResetCreditsUpdate = .notApplicable
+    ) {
         refreshCompletion?(QuotaRefreshResult(
             snapshot: snapshot,
-            identityDigest: identityDigest
+            identityDigest: identityDigest,
+            resetCreditsUpdate: resetCreditsUpdate
         ))
         refreshCompletion = nil
     }
