@@ -139,7 +139,8 @@ struct MainPanelHeaderToolButton<Label: View>: View {
     }
 }
 
-struct MainPanelLineChartButton: View {
+struct MainPanelChartButton: View {
+    let chartStyle: ActivityChartStyle
     let helpText: String
     let accessibilityText: String
     let isSelected: Bool
@@ -152,7 +153,33 @@ struct MainPanelLineChartButton: View {
             isSelected: isSelected,
             action: action
         ) { foreground in
-            Image(nsImage: MainPanelIconAsset.lineChartImage)
+            Image(nsImage: chartStyle == .line
+                ? MainPanelIconAsset.lineChartImage
+                : MainPanelIconAsset.barChartImage)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(foreground)
+                .frame(width: 11, height: 11)
+        }
+    }
+}
+
+struct MainPanelChartStyleSwitchButton: View {
+    let currentStyle: ActivityChartStyle
+    let action: () -> Void
+
+    private var targetStyle: ActivityChartStyle { currentStyle.toggled }
+
+    var body: some View {
+        MainPanelHeaderToolButton(
+            helpText: "Switch to \(targetStyle.displayName)",
+            accessibilityText: "Switch Activity detail to \(targetStyle.displayName.lowercased())",
+            action: action
+        ) { foreground in
+            Image(nsImage: currentStyle == .line
+                ? MainPanelIconAsset.lineChartImage
+                : MainPanelIconAsset.barChartImage)
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()

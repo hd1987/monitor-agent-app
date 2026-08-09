@@ -50,6 +50,7 @@ final class AppStore: ObservableObject {
     @Published var stats = UsageStats()
     @Published var heatmap: [DayActivity] = []
     @Published private(set) var activityDetailState: ActivityDetailState = .closed
+    @Published private(set) var activityChartStyle: ActivityChartStyle
     @Published var modelDistribution: [ModelShare] = []
     @Published var availableYears: [Int] = []
     @Published var isRebuildingUsageData = false
@@ -121,6 +122,7 @@ final class AppStore: ObservableObject {
         self.quotaSettings = quotaSettings
         self.quotaCache = quotaCache
         self.activityPresentationSettings = activityPresentationSettings
+        self.activityChartStyle = activityPresentationSettings?.chartStyle ?? .line
         self.refreshCoordinator = refreshCoordinator
         self.hourlyTokenUsageLoader = hourlyTokenUsageLoader
         self.activityRangeTokenUsageLoader = activityRangeTokenUsageLoader
@@ -668,6 +670,11 @@ final class AppStore: ObservableObject {
             activityDetailState = .range(range: timeRange, series: .empty, isLoading: true)
             loadActivityRangeTokenUsage(for: timeRange)
         }
+    }
+
+    func toggleActivityChartStyle() {
+        activityChartStyle = activityChartStyle.toggled
+        activityPresentationSettings?.chartStyle = activityChartStyle
     }
 
     private func activityDateString(for range: TimeRange) -> String? {

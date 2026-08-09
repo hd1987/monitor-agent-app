@@ -102,7 +102,8 @@ struct FilterBar: View {
                         )
                 }
 
-                MainPanelLineChartButton(
+                MainPanelChartButton(
+                    chartStyle: store.activityChartStyle,
                     helpText: store.isActivityDetailPresented
                         ? "Collapse Activity detail"
                         : "Show Activity detail",

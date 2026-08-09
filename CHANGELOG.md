@@ -6,6 +6,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Added
+- Switch Activity detail between the existing line chart and a persisted stacked bar chart from a current-style icon button in the detail header
+
+### Changed
+- Match the Activity line-chart icon frame to the bar-chart icon
+- Show the current Activity chart style in the top-panel toggle and remove the redundant detail collapse button
+
 ## [0.10.6] - 2026-08-06
 
 ### Fixed

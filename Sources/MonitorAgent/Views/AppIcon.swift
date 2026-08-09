@@ -70,6 +70,17 @@ enum MainPanelIconAsset {
         image.isTemplate = true
         return image
     }()
+
+    static let barChartImage: NSImage = {
+        guard
+            let data = AppIconAsset.data(named: "barchart"),
+            let image = NSImage(data: data)
+        else {
+            return NSImage()
+        }
+        image.isTemplate = true
+        return image
+    }()
 }
 
 struct AppIconView: View {
