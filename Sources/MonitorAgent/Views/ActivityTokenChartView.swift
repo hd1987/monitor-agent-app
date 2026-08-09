@@ -12,7 +12,8 @@ struct ActivityTokenChartView: View {
     @EnvironmentObject var theme: ThemeManager
     let data: ActivityChartData
     let isLoading: Bool
-    let onClose: () -> Void
+    let chartStyle: ActivityChartStyle
+    let onToggleChartStyle: () -> Void
     @State private var hoveredIndex: Int?
     @State private var hiddenMetrics: Set<String> = []
 
@@ -37,7 +38,40 @@ struct ActivityTokenChartView: View {
     }
 
     private var maxValue: Double {
-        max(points.map(\.value).max() ?? 0, 1)
+        let maximum = switch chartStyle {
+        case .line:
+            points.map(\.value).max() ?? 0
+        case .bar:
+            barSegments.map(\.yEnd).max() ?? 0
+        }
+        return max(maximum, 1)
+    }
+
+    private var barSegments: [TokenBarSegment] {
+        let barMetricNames = [
+            "Cache Creation",
+            "Output Tokens",
+            "Input Tokens",
+            "Cache Read",
+        ]
+        return data.usage.flatMap { item in
+            var yStart = 0.0
+            return barMetricNames.compactMap { metricName -> TokenBarSegment? in
+                let value = metricValue(metricName, for: item)
+                guard value > 0 else { return nil }
+
+                let segment = TokenBarSegment(
+                    metric: metricName,
+                    index: item.index,
+                    xStart: max(0, Double(item.index) - 0.36),
+                    xEnd: min(Double(data.chartDomainEnd), Double(item.index) + 0.36),
+                    yStart: yStart,
+                    yEnd: yStart + value
+                )
+                yStart += value
+                return segment
+            }
+        }
     }
 
     private var hoveredUsage: ActivityChartUsage? {
@@ -71,23 +105,32 @@ struct ActivityTokenChartView: View {
             .padding(.trailing, MainPanelDesign.headerControlItemHeight)
             .frame(height: ActivityTokenChartLayout.chartHeaderHeight)
 
-            Chart(points) { point in
-                AreaMark(
-                    x: .value("Period", point.index),
-                    yStart: .value("Baseline", 0),
-                    yEnd: .value("Tokens", point.value)
-                )
-                .interpolationMethod(.catmullRom)
-                .foregroundStyle(by: .value("Metric", point.metric))
-                .opacity(0.12)
+            Chart {
+                if chartStyle == .line {
+                    ForEach(points) { point in
+                        AreaMark(
+                            x: .value("Period", point.index),
+                            yStart: .value("Baseline", 0),
+                            yEnd: .value("Tokens", point.value)
+                        )
+                        .interpolationMethod(.catmullRom)
+                        .foregroundStyle(by: .value("Metric", point.metric))
+                        .opacity(0.12)
 
-                LineMark(
-                    x: .value("Period", point.index),
-                    y: .value("Tokens", point.value)
-                )
-                .interpolationMethod(.catmullRom)
-                .foregroundStyle(by: .value("Metric", point.metric))
-                .lineStyle(StrokeStyle(lineWidth: 1.5))
+                        LineMark(
+                            x: .value("Period", point.index),
+                            y: .value("Tokens", point.value)
+                        )
+                        .interpolationMethod(.catmullRom)
+                        .foregroundStyle(by: .value("Metric", point.metric))
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
+                    }
+                } else {
+                    ForEach(barSegments) { segment in
+                        barMark(for: segment)
+                            .foregroundStyle(metricColor(for: segment.metric))
+                    }
+                }
             }
             .chartForegroundStyleScale([
                 "Input Tokens": ActivityTokenPalette.input,
@@ -191,14 +234,16 @@ struct ActivityTokenChartView: View {
                                     availableWidth: geometry.size.width
                                 )
 
-                                ForEach(hoveredPoints) { point in
-                                    if let plotY = proxy.position(forY: point.value) {
-                                        chartIntersectionMarker(color: metricColor(for: point.metric))
-                                            .position(
-                                                x: anchorX,
-                                                y: plotAreaFrame.minY + plotY
-                                            )
-                                            .allowsHitTesting(false)
+                                if chartStyle == .line {
+                                    ForEach(hoveredPoints) { point in
+                                        if let plotY = proxy.position(forY: point.value) {
+                                            chartIntersectionMarker(color: metricColor(for: point.metric))
+                                                .position(
+                                                    x: anchorX,
+                                                    y: plotAreaFrame.minY + plotY
+                                                )
+                                                .allowsHitTesting(false)
+                                        }
                                     }
                                 }
 
@@ -247,11 +292,9 @@ struct ActivityTokenChartView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, ActivityTokenChartLayout.chartVerticalPadding)
         .overlay(alignment: .topTrailing) {
-            MainPanelLineChartButton(
-                helpText: "Collapse Activity detail",
-                accessibilityText: "Collapse Activity detail",
-                isSelected: false,
-                action: onClose
+            MainPanelChartStyleSwitchButton(
+                currentStyle: chartStyle,
+                action: onToggleChartStyle
             )
             .padding(.top, 5)
             .padding(.trailing, 10)
@@ -262,6 +305,24 @@ struct ActivityTokenChartView: View {
         .onChange(of: data) { _, _ in
             hoveredIndex = nil
         }
+    }
+
+    private func metricValue(_ metric: String, for item: ActivityChartUsage) -> Double {
+        guard !hiddenMetrics.contains(metric) else { return 0 }
+        return switch metric {
+        case "Input Tokens": Double(item.inputTokens)
+        case "Output Tokens": Double(item.outputTokens)
+        case "Cache Read": Double(item.cacheReadTokens)
+        default: Double(item.cacheCreationTokens)
+        }
+    }
+
+    private func barMark(for segment: TokenBarSegment) -> RectangleMark {
+        let xStart: PlottableValue<Double> = .value("Period Start", segment.xStart)
+        let xEnd: PlottableValue<Double> = .value("Period End", segment.xEnd)
+        let yStart: PlottableValue<Double> = .value("Token Start", segment.yStart)
+        let yEnd: PlottableValue<Double> = .value("Token End", segment.yEnd)
+        return RectangleMark(xStart: xStart, xEnd: xEnd, yStart: yStart, yEnd: yEnd)
     }
 
     private func toggleMetric(_ metric: String) {
@@ -377,6 +438,16 @@ private struct TokenSeriesPoint: Identifiable {
     let metric: String
     let index: Int
     let value: Double
+    var id: String { "\(metric)-\(index)" }
+}
+
+private struct TokenBarSegment: Identifiable {
+    let metric: String
+    let index: Int
+    let xStart: Double
+    let xEnd: Double
+    let yStart: Double
+    let yEnd: Double
     var id: String { "\(metric)-\(index)" }
 }
 

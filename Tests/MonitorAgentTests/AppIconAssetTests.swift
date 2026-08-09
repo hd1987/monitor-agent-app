@@ -21,4 +21,14 @@ final class AppIconAssetTests: XCTestCase {
         XCTAssertNotNil(AppIconAsset.data(named: "linechart"))
         XCTAssertTrue(image.isTemplate)
     }
+
+    func testBarChartIconLoadsAsTemplateImage() {
+        let image = MainPanelIconAsset.barChartImage
+
+        XCTAssertNotNil(AppIconAsset.data(named: "barchart"))
+        XCTAssertTrue(image.isValid)
+        XCTAssertTrue(image.isTemplate)
+        XCTAssertGreaterThan(image.size.width, 0)
+        XCTAssertGreaterThan(image.size.height, 0)
+    }
 }

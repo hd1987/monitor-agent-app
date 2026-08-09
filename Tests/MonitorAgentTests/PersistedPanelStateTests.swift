@@ -2,6 +2,44 @@ import XCTest
 @testable import MonitorAgent
 
 final class PersistedPanelStateTests: XCTestCase {
+    func testActivityChartStyleDefaultsToLineAndPersistsPerEnvironment() {
+        let suiteName = "PersistedPanelStateTests.activityChartStyle.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let production = ActivityPresentationSettings(defaults: defaults, environment: .production)
+        let development = ActivityPresentationSettings(defaults: defaults, environment: .development)
+
+        XCTAssertEqual(production.chartStyle, .line)
+        XCTAssertEqual(development.chartStyle, .line)
+
+        production.chartStyle = .bar
+
+        XCTAssertEqual(
+            ActivityPresentationSettings(defaults: defaults, environment: .production).chartStyle,
+            .bar
+        )
+        XCTAssertEqual(development.chartStyle, .line)
+    }
+
+    func testActivityChartStyleToggleUpdatesStoreAndPersistence() {
+        let suiteName = "PersistedPanelStateTests.activityChartStyleToggle.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = ActivityPresentationSettings(defaults: defaults, environment: .production)
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            activityPresentationSettings: settings,
+            observeRefreshIntervalChanges: false
+        )
+
+        XCTAssertEqual(store.activityChartStyle, .line)
+
+        store.toggleActivityChartStyle()
+
+        XCTAssertEqual(store.activityChartStyle, .bar)
+        XCTAssertEqual(settings.chartStyle, .bar)
+    }
+
     func testActivityPresentationIntentRestoresOneCurrentRangeLoad() {
         let suiteName = "PersistedPanelStateTests.activity.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
