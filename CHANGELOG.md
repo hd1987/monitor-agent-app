@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-09
+
 ### Added
 - Switch Activity detail between the existing line chart and a persisted stacked bar chart from a current-style icon button in the detail header
 
