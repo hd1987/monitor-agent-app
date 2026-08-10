@@ -989,6 +989,39 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         wait(for: [cleared], timeout: 1)
     }
 
+    func testCursorSpendRefreshStartsOnlyAfterSelectingCursorTab() {
+        let database = DatabaseManager(inMemory: true)
+        let refresher = RecordingCursorSpendRefresher()
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
+            codexSessionsPath: "/missing-codex-\(UUID().uuidString)",
+            codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)"
+        )
+        let store = AppStore(
+            database: database,
+            syncManager: syncManager,
+            cursorSpendRefresher: refresher,
+            observeRefreshIntervalChanges: false
+        )
+        store.panelDidOpen()
+        XCTAssertEqual(refresher.refreshCount, 0)
+
+        store.appFilter = .cursor
+        wait(for: [refresher.started], timeout: 1)
+        XCTAssertEqual(refresher.refreshCount, 1)
+
+        store.appFilter = .codex
+        store.setTimeRangeFromFilter(.last7)
+        let unchanged = expectation(description: "Non-Cursor filters skip spend refresh")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            XCTAssertEqual(refresher.refreshCount, 1)
+            unchanged.fulfill()
+        }
+        wait(for: [unchanged], timeout: 1)
+        store.panelDidClose()
+    }
+
     private func waitUntil(
         attemptsRemaining: Int,
         condition: @escaping () -> Bool,
@@ -1068,6 +1101,22 @@ private final class BlockingQuotaService: QuotaRefreshing {
             identityDigest: nil
         ))
         completion = nil
+    }
+}
+
+private final class RecordingCursorSpendRefresher: CursorSpendRefreshing {
+    let started = XCTestExpectation(description: "Cursor spend refresh started")
+    private(set) var refreshCount = 0
+
+    func refresh(
+        range: CursorSpendRange,
+        force: Bool,
+        cancellation: AgentSyncCancellation?,
+        completion: @escaping (CursorSpendSnapshot?) -> Void
+    ) {
+        refreshCount += 1
+        started.fulfill()
+        completion(nil)
     }
 }
 

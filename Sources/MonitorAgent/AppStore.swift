@@ -60,6 +60,7 @@ final class AppStore: ObservableObject {
     @Published var usageDataRebuildWasCancelled = false
     @Published var quotaSnapshots: [QuotaProviderID: QuotaSnapshot] = [:]
     @Published private(set) var quotaRefreshPhases: [QuotaProviderID: QuotaRefreshPhase] = [:]
+    @Published private(set) var cursorSpendSnapshot: CursorSpendSnapshot?
     @Published private(set) var manualRefreshAvailableAt: Date?
     @Published private(set) var isRefreshInProgress = false
     @Published private(set) var isManualRefreshInProgress = false
@@ -73,6 +74,7 @@ final class AppStore: ObservableObject {
     private let quotaService: QuotaRefreshing
     private let quotaSettings: QuotaSettings
     private let quotaCache: QuotaSnapshotCaching?
+    private let cursorSpendRefresher: CursorSpendRefreshing?
     private let activityPresentationSettings: ActivityPresentationPersisting?
     private let refreshCoordinator: PanelRefreshCoordinator
     private let hourlyTokenUsageLoader: HourlyTokenUsageLoader
@@ -85,6 +87,7 @@ final class AppStore: ObservableObject {
     private var quotaSnapshotIdentities: [QuotaProviderID: String] = [:]
     private var quotaRefreshGenerations: [QuotaProviderID: Int] = [:]
     private var quotaRestoreGenerations: [QuotaProviderID: Int] = [:]
+    private var cursorSpendRefreshGeneration = 0
     private var reloadGeneration = 0
     private var activityLoadGeneration = 0
     private(set) var isPanelVisible = false
@@ -98,6 +101,7 @@ final class AppStore: ObservableObject {
         quotaService: QuotaRefreshing = QuotaService.shared,
         quotaSettings: QuotaSettings = .shared,
         quotaCache: QuotaSnapshotCaching? = nil,
+        cursorSpendRefresher: CursorSpendRefreshing? = nil,
         activityPresentationSettings: ActivityPresentationPersisting? = nil,
         refreshCoordinator: PanelRefreshCoordinator = PanelRefreshCoordinator(),
         observeRefreshIntervalChanges: Bool = true,
@@ -121,6 +125,7 @@ final class AppStore: ObservableObject {
         self.quotaService = quotaService
         self.quotaSettings = quotaSettings
         self.quotaCache = quotaCache
+        self.cursorSpendRefresher = cursorSpendRefresher
         self.activityPresentationSettings = activityPresentationSettings
         self.activityChartStyle = activityPresentationSettings?.chartStyle ?? .line
         self.refreshCoordinator = refreshCoordinator
@@ -149,6 +154,16 @@ final class AppStore: ObservableObject {
             .debounce(for: .milliseconds(100), scheduler: DispatchQueue.main)
             .sink { [weak self] _, _, _ in
                 self?.reload()
+            }
+            .store(in: &cancellables)
+
+        Publishers.CombineLatest($appFilter, $timeRange)
+            .removeDuplicates { lhs, rhs in
+                lhs.0 == rhs.0 && lhs.1 == rhs.1
+            }
+            .debounce(for: .milliseconds(100), scheduler: DispatchQueue.main)
+            .sink { [weak self] _, _ in
+                self?.cursorSpendSelectionDidChange()
             }
             .store(in: &cancellables)
 
@@ -299,12 +314,43 @@ final class AppStore: ObservableObject {
                 DispatchQueue.main.async {
                     guard let self, self.isPanelVisible else { return }
                     self.reload()
+                    if self.appFilter == .cursor,
+                       self.enabledAgents.contains(.cursor) {
+                        let currentIdentity = self.db.getSyncState(
+                            for: CursorUsageService.syncStateKey
+                        )?.sessionId
+                        if self.cursorSpendSnapshot?.accountIdentity != currentIdentity {
+                            self.cursorSpendSnapshot = nil
+                        }
+                        self.refreshCursorSpend(
+                            range: CursorSpendRange(
+                                timeRange: self.timeRange,
+                                now: self.currentDateProvider()
+                            ),
+                            force: false,
+                            cancellation: syncCancellation
+                        )
+                    }
                 }
             },
             completion: {
                 group.leave()
             }
         )
+
+        if enabledAgents.contains(.cursor), appFilter == .cursor {
+            group.enter()
+            refreshCursorSpend(
+                range: CursorSpendRange(
+                    timeRange: timeRange,
+                    now: currentDateProvider()
+                ),
+                force: isManualRefreshInProgress,
+                cancellation: syncCancellation
+            ) {
+                group.leave()
+            }
+        }
 
         for provider in QuotaProviderID.allCases
             where quotaSettings.isEnabled(provider) && isAgentEnabled(for: provider, in: enabledAgents) {
@@ -347,12 +393,14 @@ final class AppStore: ObservableObject {
     func panelDidOpen() {
         isPanelVisible = true
         normalizeCodexResetCredits(at: currentDateProvider())
+        cursorSpendSelectionDidChange()
         applyRefreshInterval(refreshSettings.interval, throttleInitialRefresh: true)
     }
 
     /// Stop periodic refreshing when the panel is hidden.
     func panelDidClose() {
         isPanelVisible = false
+        cursorSpendRefreshGeneration += 1
         refreshCoordinator.stop()
     }
 
@@ -410,12 +458,17 @@ final class AppStore: ObservableObject {
         let filters = AppFilter.available(for: enabledAgents)
         if enabledAgents.isEmpty {
             closeActivityDetail()
+            cursorSpendSnapshot = nil
             reload(enabledAgents: enabledAgents)
         } else if !filters.contains(appFilter) {
             closeActivityDetail()
             appFilter = .all
         } else {
             reload(enabledAgents: enabledAgents)
+        }
+        if !enabledAgents.contains(.cursor) {
+            cursorSpendRefreshGeneration += 1
+            cursorSpendSnapshot = nil
         }
         quotaSnapshots = quotaSnapshots.filter {
             isAgentEnabled(for: $0.key, in: enabledAgents)
@@ -619,6 +672,75 @@ final class AppStore: ObservableObject {
                     self.heatmapMode = .trailing
                 }
             }
+        }
+    }
+
+    private func cursorSpendSelectionDidChange() {
+        cursorSpendRefreshGeneration += 1
+        let generation = cursorSpendRefreshGeneration
+        guard appFilter == .cursor,
+              enabledAgents.contains(.cursor) else {
+            cursorSpendSnapshot = nil
+            return
+        }
+
+        let range = CursorSpendRange(
+            timeRange: timeRange,
+            now: currentDateProvider()
+        )
+        let db = db
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let cached = db.fetchCursorSpendSnapshot(range: range)
+            DispatchQueue.main.async {
+                guard let self,
+                      self.cursorSpendRefreshGeneration == generation,
+                      self.appFilter == .cursor,
+                      CursorSpendRange(
+                          timeRange: self.timeRange,
+                          now: self.currentDateProvider()
+                      ) == range else {
+                    return
+                }
+                self.cursorSpendSnapshot = cached
+                guard self.isPanelVisible else { return }
+                self.refreshCursorSpend(range: range, force: false, cancellation: nil)
+            }
+        }
+    }
+
+    private func refreshCursorSpend(
+        range: CursorSpendRange,
+        force: Bool,
+        cancellation: AgentSyncCancellation?,
+        completion: @escaping () -> Void = {}
+    ) {
+        guard let cursorSpendRefresher,
+              appFilter == .cursor,
+              enabledAgents.contains(.cursor) else {
+            completion()
+            return
+        }
+        cursorSpendRefreshGeneration += 1
+        let generation = cursorSpendRefreshGeneration
+        if cursorSpendSnapshot?.range != range {
+            cursorSpendSnapshot = nil
+        }
+        cursorSpendRefresher.refresh(
+            range: range,
+            force: force,
+            cancellation: cancellation
+        ) { [weak self] snapshot in
+            defer { completion() }
+            guard let self,
+                  self.cursorSpendRefreshGeneration == generation,
+                  self.appFilter == .cursor,
+                  CursorSpendRange(
+                      timeRange: self.timeRange,
+                      now: self.currentDateProvider()
+                  ) == range else {
+                return
+            }
+            self.cursorSpendSnapshot = snapshot
         }
     }
 

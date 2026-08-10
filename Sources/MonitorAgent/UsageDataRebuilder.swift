@@ -72,6 +72,12 @@ final class UsageDataRebuilder {
             let activeClaudeStats = activeDatabase.fetchStats(app: .claude, range: .allTime)
             let activeCodexStats = activeDatabase.fetchStats(app: .codex, range: .allTime)
             let activeCursorStats = activeDatabase.fetchStats(app: .cursor, range: .allTime)
+            let activeCursorIdentity = activeDatabase.getSyncState(
+                for: CursorUsageService.syncStateKey
+            )?.sessionId
+            let activeCursorSpendSnapshots = activeCursorIdentity.map {
+                activeDatabase.fetchCursorSpendSnapshots(accountIdentity: $0)
+            } ?? []
             let activeDataMustBePreserved = activeStats.totalRequests > 0
                 || (!activeDatabase.isAvailable && activeDatabase.hasExistingDatabaseFile)
             let localDataMustBePreserved =
@@ -111,14 +117,24 @@ final class UsageDataRebuilder {
                             || rebuiltCursorStats.totalRequests > 0 else {
                         throw UsageDataRebuildError.cursorRefreshFailed
                     }
+                    if let rebuiltIdentity = rebuildDatabase.getSyncState(
+                        for: CursorUsageService.syncStateKey
+                    )?.sessionId,
+                       rebuiltIdentity == activeCursorIdentity {
+                        try rebuildDatabase.restoreCursorSpendSnapshots(
+                            activeCursorSpendSnapshots
+                        )
+                    }
                     syncResult.add(cursorResult)
                 } catch let error as CursorUsageError
                     where activeCursorStats.totalRequests == 0
+                        && activeCursorSpendSnapshots.isEmpty
                         && error.allowsRebuildWithoutCursorData {
                     // A missing Cursor session does not block rebuilding other sources.
                 } catch let error as UsageDataRebuildError {
                     throw error
-                } catch where activeCursorStats.totalRequests > 0 {
+                } catch where activeCursorStats.totalRequests > 0
+                    || !activeCursorSpendSnapshots.isEmpty {
                     throw UsageDataRebuildError.cursorRefreshFailed
                 } catch {
                     throw error

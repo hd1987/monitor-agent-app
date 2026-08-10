@@ -113,6 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var rightClickHandled = false
     private let store = AppStore(
         quotaCache: QuotaSnapshotCache.shared,
+        cursorSpendRefresher: CursorSpendRefreshCoordinator(),
         activityPresentationSettings: ActivityPresentationSettings.shared
     )
     private let panelPresentationState = PanelPresentationState()

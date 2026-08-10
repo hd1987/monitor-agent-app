@@ -6,6 +6,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Added
+- Show Cursor Total Usage and On-Demand spend directly in an account-scoped selected-range card
+
+### Changed
+- Distribute all visible main-panel stat cards evenly within the fixed panel width
+- Share Cursor authentication and bounded DashboardService transport between token and spend refreshes
+
 ## [0.11.0] - 2026-08-09
 
 ### Added
