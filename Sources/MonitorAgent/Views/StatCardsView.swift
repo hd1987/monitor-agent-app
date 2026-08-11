@@ -305,6 +305,7 @@ func formatPercent(_ rate: Double) -> String {
 
 func formatCursorSpend(_ cents: Int?) -> String {
     guard let cents, cents >= 0 else { return "—" }
+    guard cents != 0 else { return "$0" }
     return String(
         format: "$%.2f",
         locale: Locale(identifier: "en_US_POSIX"),

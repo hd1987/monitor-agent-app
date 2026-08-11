@@ -11,6 +11,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ### Changed
 - Distribute all visible main-panel stat cards evenly within the fixed panel width
+- Display zero Cursor spend as compact `$0` while retaining two decimal places for nonzero amounts
 - Share Cursor authentication and bounded DashboardService transport between token and spend refreshes
 - Gate every Cursor-backed presentation on a freshly verified matching account identity while retaining unverified cache data on disk
 

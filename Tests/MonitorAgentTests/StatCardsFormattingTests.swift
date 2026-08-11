@@ -20,10 +20,10 @@ final class StatCardsFormattingTests: XCTestCase {
         XCTAssertEqual(formatTokenDetail(1_234_567), formatTokens(1_234_567))
     }
 
-    func testCursorSpendFormattingUsesExactDollarCentsAndUnavailableState() {
+    func testCursorSpendFormattingUsesCompactZeroExactCentsAndUnavailableState() {
         XCTAssertEqual(formatCursorSpend(nil), "—")
         XCTAssertEqual(formatCursorSpend(-1), "—")
-        XCTAssertEqual(formatCursorSpend(0), "$0.00")
+        XCTAssertEqual(formatCursorSpend(0), "$0")
         XCTAssertEqual(formatCursorSpend(22_481), "$224.81")
     }
 }
