@@ -1240,7 +1240,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         store.panelDidClose()
     }
 
-    func testCursorVerificationFailurePreservesCacheButExcludesItFromAll() throws {
+    func testCursorVerificationFailureKeepsCachedDataVisibleInAll() throws {
         let database = DatabaseManager(inMemory: true)
         let identity = cursorAuthenticatedAccount(userId: 1).account.syncIdentity
         try seedCursorCache(
@@ -1258,10 +1258,10 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         )
         store.panelDidOpen()
 
-        let unavailable = expectation(description: "Cursor cache becomes unavailable")
+        let unavailable = expectation(description: "Cursor refresh becomes unavailable")
         waitUntil(attemptsRemaining: 100) {
             store.cursorAccountPresentationState == .unavailable
-                && store.stats.totalRequests == 0
+                && store.stats.totalRequests == 1
         } completion: {
             unavailable.fulfill()
         }
@@ -1271,6 +1271,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             database.getSyncState(for: CursorUsageService.syncStateKey)?.sessionId,
             identity
         )
+        XCTAssertTrue(store.isCursorDataPresentationAvailable)
         store.panelDidClose()
     }
 
@@ -1344,14 +1345,23 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         XCTAssertFalse(store.isCursorDataPresentationAvailable)
     }
 
-    func testCursorVerificationImmediatelyClearsPresentationAndPreservesHeatmapYear() throws {
+    func testCursorVerificationFailureRetainsCachedPresentationAndSpend() throws {
         let database = DatabaseManager(inMemory: true)
         let account = cursorAuthenticatedAccount(userId: 1)
+        let now = Date()
         try seedCursorCache(
             database: database,
             identity: account.account.syncIdentity,
             model: "account-one",
             inputTokens: 100
+        )
+        let spendRange = CursorSpendRange(timeRange: .today, now: now)
+        _ = try database.mergeCursorSpendSnapshot(
+            accountIdentity: account.account.syncIdentity,
+            range: spendRange,
+            totalCents: 500,
+            onDemandCents: 100,
+            updatedAt: now
         )
         let resolver = StaticCursorAccountResolver(result: .success(account))
         let syncManager = SessionSyncManager(
@@ -1365,9 +1375,10 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             database: database,
             syncManager: syncManager,
             cursorAccountResolver: resolver,
-            observeRefreshIntervalChanges: false
+            observeRefreshIntervalChanges: false,
+            currentDateProvider: { now }
         )
-        let selectedYear = Calendar.current.component(.year, from: Date())
+        let selectedYear = Calendar.current.component(.year, from: now)
         store.appFilter = .cursor
         store.heatmapMode = .year(selectedYear)
         store.panelDidOpen()
@@ -1378,6 +1389,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
                 && store.stats.totalRequests == 1
                 && !store.heatmap.isEmpty
                 && !store.modelDistribution.isEmpty
+                && store.cursorSpendSnapshot?.totalCents == 500
         } completion: {
             verified.fulfill()
         }
@@ -1388,12 +1400,13 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         store.panelDidOpen()
 
         XCTAssertEqual(store.cursorAccountPresentationState, .verifying(nil))
-        XCTAssertEqual(store.stats.totalRequests, 0)
-        XCTAssertEqual(store.stats.totalSessions, 0)
-        XCTAssertEqual(store.stats.totalTokens, 0)
-        XCTAssertTrue(store.heatmap.isEmpty)
-        XCTAssertTrue(store.modelDistribution.isEmpty)
-        XCTAssertTrue(store.availableYears.isEmpty)
+        XCTAssertEqual(store.stats.totalRequests, 1)
+        XCTAssertEqual(store.stats.totalSessions, 1)
+        XCTAssertEqual(store.stats.totalTokens, 100)
+        XCTAssertFalse(store.heatmap.isEmpty)
+        XCTAssertFalse(store.modelDistribution.isEmpty)
+        XCTAssertFalse(store.availableYears.isEmpty)
+        XCTAssertEqual(store.cursorSpendSnapshot?.totalCents, 500)
 
         let unavailable = expectation(description: "Cursor verification failure settles")
         waitUntil(attemptsRemaining: 100) {
@@ -1403,6 +1416,9 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         }
         wait(for: [unavailable], timeout: 1)
         XCTAssertEqual(store.heatmapMode, .year(selectedYear))
+        XCTAssertTrue(store.isCursorDataPresentationAvailable)
+        XCTAssertEqual(store.stats.totalRequests, 1)
+        XCTAssertEqual(store.cursorSpendSnapshot?.onDemandCents, 100)
         store.panelDidClose()
     }
 

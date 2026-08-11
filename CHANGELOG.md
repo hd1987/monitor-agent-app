@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Keep the last successful Cursor account's local history and selected-range spend visible while Cursor is signed out, unavailable, or being verified, without changing account-replacement behavior
+
 ## [0.12.0] - 2026-08-11
 
 ### Added
