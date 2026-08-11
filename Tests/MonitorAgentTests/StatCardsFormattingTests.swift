@@ -19,4 +19,11 @@ final class StatCardsFormattingTests: XCTestCase {
         XCTAssertEqual(formatTokens(1_234_567_890), "1.23B")
         XCTAssertEqual(formatTokenDetail(1_234_567), formatTokens(1_234_567))
     }
+
+    func testCursorSpendFormattingUsesCompactZeroExactCentsAndUnavailableState() {
+        XCTAssertEqual(formatCursorSpend(nil), "—")
+        XCTAssertEqual(formatCursorSpend(-1), "—")
+        XCTAssertEqual(formatCursorSpend(0), "$0")
+        XCTAssertEqual(formatCursorSpend(22_481), "$224.81")
+    }
 }

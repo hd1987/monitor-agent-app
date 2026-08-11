@@ -5,7 +5,7 @@ struct PopoverView: View {
     @EnvironmentObject var theme: ThemeManager
     let onOpenGeneralSettings: () -> Void
     let onResetPanelPosition: () -> Void
-    @State private var isTokenBreakdownPresented = false
+    @State private var activeStatCardTip: StatCardTip?
     @State private var isTimeRangePopoverPresented = false
 
     var body: some View {
@@ -16,9 +16,10 @@ struct PopoverView: View {
                 isTimeRangePopoverPresented: $isTimeRangePopoverPresented
             )
             if store.hasEnabledAgents {
-                StatCardsView(isTokenBreakdownPresented: $isTokenBreakdownPresented)
+                StatCardsView(activeTip: $activeStatCardTip)
+                    .zIndex(StatCardTipLayer.zIndex(for: activeStatCardTip))
                 HeatmapView()
-                    .allowsHitTesting(!isTokenBreakdownPresented)
+                    .allowsHitTesting(activeStatCardTip == nil)
                 ModelDistributionView()
                 SubscriptionQuotaView()
             } else {

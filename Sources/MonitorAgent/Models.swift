@@ -247,6 +247,52 @@ struct UsageStats {
     }
 }
 
+struct CursorSpendRange: Equatable {
+    let key: String
+    let startMilliseconds: Int64?
+    let endMilliseconds: Int64?
+
+    init(
+        timeRange: TimeRange,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) {
+        let bounds = timeRange.bounds(now: now, calendar: calendar)
+        key = timeRange.id
+        startMilliseconds = bounds.start.map { Int64($0) * 1_000 }
+        endMilliseconds = bounds.end.map { Int64($0) * 1_000 }
+    }
+
+    init(
+        key: String,
+        startMilliseconds: Int64?,
+        endMilliseconds: Int64?
+    ) {
+        self.key = key
+        self.startMilliseconds = startMilliseconds
+        self.endMilliseconds = endMilliseconds
+    }
+}
+
+struct CursorSpendSnapshot: Equatable {
+    let accountIdentity: String
+    let range: CursorSpendRange
+    let totalCents: Int?
+    let onDemandCents: Int?
+    let totalUpdatedAt: Date?
+    let onDemandUpdatedAt: Date?
+
+    func isFresh(at date: Date, maximumAge: TimeInterval) -> Bool {
+        guard let totalUpdatedAt,
+              let onDemandUpdatedAt else {
+            return false
+        }
+        let oldestUpdate = min(totalUpdatedAt, onDemandUpdatedAt)
+        return oldestUpdate <= date
+            && date.timeIntervalSince(oldestUpdate) < maximumAge
+    }
+}
+
 struct DayActivity: Identifiable {
     let date: String   // "yyyy-MM-dd"
     let count: Int     // request count for that day

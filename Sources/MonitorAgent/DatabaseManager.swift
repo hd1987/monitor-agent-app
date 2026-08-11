@@ -9,6 +9,11 @@ enum DatabaseManagerError: LocalizedError {
     }
 }
 
+struct CursorDataPresentationToken: Equatable {
+    let accountIdentity: String
+    let revision: UInt64
+}
+
 final class DatabaseManager {
     static let shared = openOrUnavailable(path: defaultDatabasePath)
     static let defaultDirectory = DatabasePaths.current.directory
@@ -18,6 +23,7 @@ final class DatabaseManager {
     private var dbQueue: DatabaseQueue?
     private let databasePath: String?
     private let lifecycleLock = NSRecursiveLock()
+    private var cursorDataRevision: UInt64 = 0
 
     var isAvailable: Bool {
         withLifecycleLock { dbQueue != nil }
@@ -107,6 +113,19 @@ final class DatabaseManager {
                     last_modified INTEGER NOT NULL,
                     last_synced_at INTEGER NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS cursor_spend_snapshots (
+                    account_identity TEXT NOT NULL,
+                    range_key TEXT NOT NULL,
+                    range_start_ms INTEGER,
+                    range_end_ms INTEGER,
+                    total_cents INTEGER,
+                    on_demand_cents INTEGER,
+                    total_updated_at INTEGER,
+                    on_demand_updated_at INTEGER,
+                    last_accessed_at INTEGER NOT NULL,
+                    PRIMARY KEY (account_identity, range_key)
+                );
                 """)
             try addColumnIfMissing(
                 db,
@@ -183,6 +202,7 @@ final class DatabaseManager {
             }
             try removeDatabaseSidecars(at: temporaryPath)
             try reopen()
+            cursorDataRevision &+= 1
         } catch {
             try? reopen()
             throw error
@@ -240,8 +260,291 @@ final class DatabaseManager {
                 sql: "DELETE FROM request_logs WHERE app_type = ?",
                 arguments: [appType]
             )
+            if appType == AgentID.cursor.appType {
+                if let accountIdentity = state.sessionId {
+                    try db.execute(
+                        sql: "DELETE FROM cursor_spend_snapshots WHERE account_identity <> ?",
+                        arguments: [accountIdentity]
+                    )
+                } else {
+                    try db.execute(sql: "DELETE FROM cursor_spend_snapshots")
+                }
+            }
             try insertRecords(records, in: db)
             try upsertSyncState(state, in: db)
+        }
+        if appType == AgentID.cursor.appType {
+            cursorDataRevision &+= 1
+        }
+    }
+
+    func cursorDataPresentationToken(
+        matching accountIdentity: String
+    ) -> CursorDataPresentationToken? {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard let db = dbQueue else { return nil }
+        let currentIdentity = try? db.read { db in
+            try String.fetchOne(
+                db,
+                sql: "SELECT session_id FROM sync_state WHERE file_path = ? LIMIT 1",
+                arguments: [CursorUsageService.syncStateKey]
+            )
+        }
+        guard currentIdentity == accountIdentity else { return nil }
+        return CursorDataPresentationToken(
+            accountIdentity: accountIdentity,
+            revision: cursorDataRevision
+        )
+    }
+
+    func isCursorDataPresentationTokenCurrent(
+        _ token: CursorDataPresentationToken
+    ) -> Bool {
+        cursorDataPresentationToken(matching: token.accountIdentity) == token
+    }
+
+    @discardableResult
+    func performIfCursorDataPresentationTokenCurrent(
+        _ token: CursorDataPresentationToken,
+        operation: () -> Void
+    ) -> Bool {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard cursorDataPresentationToken(matching: token.accountIdentity) == token else {
+            return false
+        }
+        operation()
+        return true
+    }
+
+    func fetchCursorSpendSnapshot(
+        accountIdentity: String,
+        range: CursorSpendRange
+    ) -> CursorSpendSnapshot? {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard let db = dbQueue else { return nil }
+        return try? db.write { db in
+            guard let row = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT total_cents, on_demand_cents,
+                           total_updated_at, on_demand_updated_at
+                    FROM cursor_spend_snapshots
+                    WHERE account_identity = ?
+                      AND range_key = ?
+                      AND range_start_ms IS ?
+                      AND range_end_ms IS ?
+                    LIMIT 1
+                    """,
+                arguments: [
+                    accountIdentity,
+                    range.key,
+                    range.startMilliseconds,
+                    range.endMilliseconds,
+                ]
+            ) else {
+                return nil
+            }
+            let accessedAt = Int(Date().timeIntervalSince1970)
+            try db.execute(
+                sql: """
+                    UPDATE cursor_spend_snapshots
+                    SET last_accessed_at = ?
+                    WHERE account_identity = ? AND range_key = ?
+                    """,
+                arguments: [accessedAt, accountIdentity, range.key]
+            )
+            return cursorSpendSnapshot(
+                row: row,
+                accountIdentity: accountIdentity,
+                range: range
+            )
+        }
+    }
+
+    @discardableResult
+    func mergeCursorSpendSnapshot(
+        accountIdentity: String,
+        range: CursorSpendRange,
+        totalCents: Int?,
+        onDemandCents: Int?,
+        updatedAt: Date
+    ) throws -> CursorSpendSnapshot? {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard let db = dbQueue else { throw DatabaseManagerError.unavailable }
+        guard totalCents != nil || onDemandCents != nil else {
+            return fetchCursorSpendSnapshot(
+                accountIdentity: accountIdentity,
+                range: range
+            )
+        }
+        let timestamp = Int(updatedAt.timeIntervalSince1970)
+        return try db.write { db in
+            let currentIdentity = try String.fetchOne(
+                db,
+                sql: "SELECT session_id FROM sync_state WHERE file_path = ? LIMIT 1",
+                arguments: [CursorUsageService.syncStateKey]
+            )
+            guard currentIdentity == accountIdentity else { return nil }
+
+            try db.execute(
+                sql: """
+                    INSERT INTO cursor_spend_snapshots (
+                        account_identity, range_key, range_start_ms, range_end_ms,
+                        total_cents, on_demand_cents,
+                        total_updated_at, on_demand_updated_at, last_accessed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(account_identity, range_key) DO UPDATE SET
+                        range_start_ms = excluded.range_start_ms,
+                        range_end_ms = excluded.range_end_ms,
+                        total_cents = CASE
+                            WHEN cursor_spend_snapshots.range_start_ms IS excluded.range_start_ms
+                             AND cursor_spend_snapshots.range_end_ms IS excluded.range_end_ms
+                            THEN COALESCE(excluded.total_cents, cursor_spend_snapshots.total_cents)
+                            ELSE excluded.total_cents
+                        END,
+                        on_demand_cents = CASE
+                            WHEN cursor_spend_snapshots.range_start_ms IS excluded.range_start_ms
+                             AND cursor_spend_snapshots.range_end_ms IS excluded.range_end_ms
+                            THEN COALESCE(excluded.on_demand_cents, cursor_spend_snapshots.on_demand_cents)
+                            ELSE excluded.on_demand_cents
+                        END,
+                        total_updated_at = CASE
+                            WHEN cursor_spend_snapshots.range_start_ms IS excluded.range_start_ms
+                             AND cursor_spend_snapshots.range_end_ms IS excluded.range_end_ms
+                            THEN COALESCE(excluded.total_updated_at, cursor_spend_snapshots.total_updated_at)
+                            ELSE excluded.total_updated_at
+                        END,
+                        on_demand_updated_at = CASE
+                            WHEN cursor_spend_snapshots.range_start_ms IS excluded.range_start_ms
+                             AND cursor_spend_snapshots.range_end_ms IS excluded.range_end_ms
+                            THEN COALESCE(excluded.on_demand_updated_at, cursor_spend_snapshots.on_demand_updated_at)
+                            ELSE excluded.on_demand_updated_at
+                        END,
+                        last_accessed_at = excluded.last_accessed_at
+                    """,
+                arguments: [
+                    accountIdentity,
+                    range.key,
+                    range.startMilliseconds,
+                    range.endMilliseconds,
+                    totalCents,
+                    onDemandCents,
+                    totalCents == nil ? nil : timestamp,
+                    onDemandCents == nil ? nil : timestamp,
+                    timestamp,
+                ]
+            )
+            try db.execute(
+                sql: """
+                    DELETE FROM cursor_spend_snapshots
+                    WHERE account_identity = ?
+                      AND range_key IN (
+                          SELECT range_key FROM cursor_spend_snapshots
+                          WHERE account_identity = ?
+                          ORDER BY last_accessed_at DESC, range_key DESC
+                          LIMIT -1 OFFSET 32
+                      )
+                    """,
+                arguments: [accountIdentity, accountIdentity]
+            )
+            guard let row = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT total_cents, on_demand_cents,
+                           total_updated_at, on_demand_updated_at
+                    FROM cursor_spend_snapshots
+                    WHERE account_identity = ? AND range_key = ?
+                    LIMIT 1
+                    """,
+                arguments: [accountIdentity, range.key]
+            ) else {
+                return nil
+            }
+            return cursorSpendSnapshot(
+                row: row,
+                accountIdentity: accountIdentity,
+                range: range
+            )
+        }
+    }
+
+    func fetchCursorSpendSnapshots(accountIdentity: String) -> [CursorSpendSnapshot] {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard let db = dbQueue else { return [] }
+        return (try? db.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT range_key, range_start_ms, range_end_ms,
+                           total_cents, on_demand_cents,
+                           total_updated_at, on_demand_updated_at
+                    FROM cursor_spend_snapshots
+                    WHERE account_identity = ?
+                    ORDER BY last_accessed_at DESC
+                    """,
+                arguments: [accountIdentity]
+            )
+            return rows.map { row in
+                let range = CursorSpendRange(
+                    key: row["range_key"],
+                    startMilliseconds: row["range_start_ms"],
+                    endMilliseconds: row["range_end_ms"]
+                )
+                return cursorSpendSnapshot(
+                    row: row,
+                    accountIdentity: accountIdentity,
+                    range: range
+                )
+            }
+        }) ?? []
+    }
+
+    func restoreCursorSpendSnapshots(_ snapshots: [CursorSpendSnapshot]) throws {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard let db = dbQueue else { throw DatabaseManagerError.unavailable }
+        guard !snapshots.isEmpty else { return }
+        try db.write { db in
+            for snapshot in snapshots {
+                let currentIdentity = try String.fetchOne(
+                    db,
+                    sql: "SELECT session_id FROM sync_state WHERE file_path = ? LIMIT 1",
+                    arguments: [CursorUsageService.syncStateKey]
+                )
+                guard currentIdentity == snapshot.accountIdentity else { continue }
+                let totalUpdatedAt = snapshot.totalUpdatedAt.map {
+                    Int($0.timeIntervalSince1970)
+                }
+                let onDemandUpdatedAt = snapshot.onDemandUpdatedAt.map {
+                    Int($0.timeIntervalSince1970)
+                }
+                let lastAccessedAt = max(totalUpdatedAt ?? 0, onDemandUpdatedAt ?? 0)
+                try db.execute(
+                    sql: """
+                        INSERT OR REPLACE INTO cursor_spend_snapshots (
+                            account_identity, range_key, range_start_ms, range_end_ms,
+                            total_cents, on_demand_cents,
+                            total_updated_at, on_demand_updated_at, last_accessed_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                    arguments: [
+                        snapshot.accountIdentity,
+                        snapshot.range.key,
+                        snapshot.range.startMilliseconds,
+                        snapshot.range.endMilliseconds,
+                        snapshot.totalCents,
+                        snapshot.onDemandCents,
+                        totalUpdatedAt,
+                        onDemandUpdatedAt,
+                        lastAccessedAt,
+                    ]
+                )
+            }
         }
     }
 
@@ -279,6 +582,37 @@ final class DatabaseManager {
                             record.sessionId, record.createdAt]
             )
         }
+    }
+
+    private func cursorSpendSnapshot(
+        row: Row,
+        accountIdentity: String,
+        range: CursorSpendRange
+    ) -> CursorSpendSnapshot {
+        let storedTotalCents: Int? = row["total_cents"]
+        let totalCents: Int? = storedTotalCents.flatMap { $0 >= 0 ? $0 : nil }
+        let storedOnDemandCents: Int? = row["on_demand_cents"]
+        let onDemandCents: Int? = storedOnDemandCents.flatMap { value in
+            guard value >= 0,
+                  totalCents.map({ value <= $0 }) != false else {
+                return nil
+            }
+            return value
+        }
+        let storedTotalUpdatedAt: Int? = row["total_updated_at"]
+        let storedOnDemandUpdatedAt: Int? = row["on_demand_updated_at"]
+        return CursorSpendSnapshot(
+            accountIdentity: accountIdentity,
+            range: range,
+            totalCents: totalCents,
+            onDemandCents: onDemandCents,
+            totalUpdatedAt: totalCents == nil ? nil : storedTotalUpdatedAt.map {
+                Date(timeIntervalSince1970: TimeInterval($0))
+            },
+            onDemandUpdatedAt: onDemandCents == nil ? nil : storedOnDemandUpdatedAt.map {
+                Date(timeIntervalSince1970: TimeInterval($0))
+            }
+        )
     }
 
     func getSyncState(for filePath: String) -> SyncState? {

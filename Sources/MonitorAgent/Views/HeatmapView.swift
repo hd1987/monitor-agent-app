@@ -205,7 +205,11 @@ struct HeatmapView: View {
     /// Build the list of picker options: [.trailing, .year(2025), .year(2026), ...]
     private var heatmapModeOptions: [HeatmapMode] {
         var options: [HeatmapMode] = [.trailing]
-        for year in store.availableYears {
+        var years = Set(store.availableYears)
+        if case .year(let selectedYear) = store.heatmapMode {
+            years.insert(selectedYear)
+        }
+        for year in years.sorted(by: >) {
             options.append(.year(year))
         }
         return options

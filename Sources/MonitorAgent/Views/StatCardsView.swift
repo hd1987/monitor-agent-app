@@ -2,31 +2,65 @@ import SwiftUI
 
 struct StatCardsView: View {
     @EnvironmentObject var store: AppStore
-    @Binding var isTokenBreakdownPresented: Bool
+    @Binding var activeTip: StatCardTip?
 
     var body: some View {
-        HStack(spacing: 8) {
-            StatCard(title: "Requests", value: formatCount(store.stats.totalRequests))
-                .frame(width: StatCardLayout.requestsWidth)
-            StatCard(title: "Sessions", value: formatCount(store.stats.totalSessions))
-                .frame(width: StatCardLayout.sessionsWidth)
-            TokenSummaryCard(stats: store.stats, isDetailPresented: $isTokenBreakdownPresented)
-                .frame(width: StatCardLayout.tokensWidth)
-            CacheHitCard(stats: store.stats)
-                .frame(width: StatCardLayout.cacheHitWidth)
+        HStack(spacing: StatCardLayout.spacing) {
+            StatCard(
+                title: "Requests",
+                value: isCursorUnavailable ? "—" : formatCount(store.stats.totalRequests)
+            )
+                .frame(width: cardWidth)
+            StatCard(
+                title: "Sessions",
+                value: isCursorUnavailable ? "—" : formatCount(store.stats.totalSessions)
+            )
+                .frame(width: cardWidth)
+            TokenSummaryCard(
+                stats: store.stats,
+                isAvailable: !isCursorUnavailable,
+                activeTip: $activeTip
+            )
+                .frame(width: cardWidth)
+            CacheHitCard(stats: store.stats, isAvailable: !isCursorUnavailable)
+                .frame(width: cardWidth)
+            if store.appFilter == .cursor {
+                CursorSpendSummaryCard(snapshot: store.cursorSpendSnapshot)
+                    .frame(width: cardWidth)
+            }
         }
         .padding(.horizontal, MainPanelDesign.horizontalPadding)
         .padding(.vertical, MainPanelDesign.sectionVerticalPadding)
     }
+
+    private var cardWidth: CGFloat {
+        StatCardLayout.equalCardWidth(cardCount: store.appFilter == .cursor ? 5 : 4)
+    }
+
+    private var isCursorUnavailable: Bool {
+        store.appFilter == .cursor && !store.isCursorDataPresentationAvailable
+    }
+}
+
+enum StatCardTip: Hashable {
+    case tokenBreakdown
+}
+
+enum StatCardTipLayer {
+    static func zIndex(for activeTip: StatCardTip?) -> Double {
+        activeTip == nil ? 0 : 1
+    }
 }
 
 enum StatCardLayout {
-    static let metricWidth: CGFloat = 128
-    static let requestsWidth: CGFloat = metricWidth
-    static let sessionsWidth: CGFloat = metricWidth
-    static let cacheHitWidth: CGFloat = metricWidth
-    static let tokensWidth: CGFloat = 180
+    static let spacing: CGFloat = 8
+    static let availableWidth = MainPanelDesign.width - 2 * MainPanelDesign.horizontalPadding
     static let titleRowHeight: CGFloat = 12
+
+    static func equalCardWidth(cardCount: Int) -> CGFloat {
+        guard cardCount > 0 else { return 0 }
+        return (availableWidth - spacing * CGFloat(cardCount - 1)) / CGFloat(cardCount)
+    }
 }
 
 enum TokenBreakdownTipLayout {
@@ -57,7 +91,12 @@ private struct TokenSummaryCard: View {
     @EnvironmentObject private var theme: ThemeManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let stats: UsageStats
-    @Binding var isDetailPresented: Bool
+    let isAvailable: Bool
+    @Binding var activeTip: StatCardTip?
+
+    private var isDetailPresented: Bool {
+        isAvailable && activeTip == .tokenBreakdown
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,7 +104,7 @@ private struct TokenSummaryCard: View {
                 ZStack(alignment: .topTrailing) {
                     VStack(spacing: 4) {
                         statCardTitle("Tokens", color: theme.panelSecondaryForeground)
-                        Text(formatTokenDetail(stats.totalTokens))
+                        Text(isAvailable ? formatTokenDetail(stats.totalTokens) : "—")
                             .font(.system(size: 17, weight: .semibold, design: .rounded))
                             .lineLimit(1)
                             .minimumScaleFactor(0.82)
@@ -73,16 +112,19 @@ private struct TokenSummaryCard: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
 
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(theme.panelTertiaryForeground)
-                        .padding(.top, 2)
+                    if isAvailable {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(theme.panelTertiaryForeground)
+                            .padding(.top, 2)
+                    }
                 }
             }
         }
         .overlay(alignment: .top) {
             if isDetailPresented {
                 TokenBreakdownTip(stats: stats)
+                    .frame(width: 180)
                     .offset(y: 56)
                     .transition(
                         reduceMotion
@@ -92,8 +134,21 @@ private struct TokenSummaryCard: View {
             }
         }
         .onHover { isHovering in
+            guard isAvailable else {
+                activeTip = nil
+                return
+            }
             withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
-                isDetailPresented = isHovering
+                if isHovering {
+                    activeTip = .tokenBreakdown
+                } else if activeTip == .tokenBreakdown {
+                    activeTip = nil
+                }
+            }
+        }
+        .onChange(of: isAvailable) { _, isAvailable in
+            if !isAvailable, activeTip == .tokenBreakdown {
+                activeTip = nil
             }
         }
         .zIndex(isDetailPresented ? 1 : 0)
@@ -102,10 +157,49 @@ private struct TokenSummaryCard: View {
 
 private struct CacheHitCard: View {
     let stats: UsageStats
+    let isAvailable: Bool
 
     var body: some View {
-        StatCard(title: "Cache Hit", value: formatPercent(stats.cacheHitRate))
+        StatCard(
+            title: "Cache Hit",
+            value: isAvailable ? formatPercent(stats.cacheHitRate) : "—"
+        )
             .help(cacheHitHelp())
+    }
+}
+
+private struct CursorSpendSummaryCard: View {
+    @EnvironmentObject private var theme: ThemeManager
+    let snapshot: CursorSpendSnapshot?
+
+    var body: some View {
+        StatCardContainer {
+            VStack(spacing: 4) {
+                spendRow(label: "Total", cents: snapshot?.totalCents, emphasized: true)
+                spendRow(label: "On-Demand", cents: snapshot?.onDemandCents, emphasized: false)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        }
+    }
+
+    private func spendRow(label: String, cents: Int?, emphasized: Bool) -> some View {
+        HStack(spacing: 3) {
+            Text(label)
+                .font(.system(size: 8, weight: .medium))
+                .foregroundStyle(theme.panelSecondaryForeground)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Spacer(minLength: 2)
+            Text(formatCursorSpend(cents))
+                .font(.system(
+                    size: emphasized ? 12 : 10,
+                    weight: emphasized ? .semibold : .medium,
+                    design: .rounded
+                ))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .foregroundStyle(.primary)
+        }
     }
 }
 
@@ -207,4 +301,14 @@ func formatTokenDetail(_ n: Int64) -> String {
 
 func formatPercent(_ rate: Double) -> String {
     String(format: "%.1f%%", rate * 100)
+}
+
+func formatCursorSpend(_ cents: Int?) -> String {
+    guard let cents, cents >= 0 else { return "—" }
+    guard cents != 0 else { return "$0" }
+    return String(
+        format: "$%.2f",
+        locale: Locale(identifier: "en_US_POSIX"),
+        arguments: [Double(cents) / 100]
+    )
 }
