@@ -9,6 +9,11 @@ enum DatabaseManagerError: LocalizedError {
     }
 }
 
+struct CursorDataPresentationToken: Equatable {
+    let accountIdentity: String
+    let revision: UInt64
+}
+
 final class DatabaseManager {
     static let shared = openOrUnavailable(path: defaultDatabasePath)
     static let defaultDirectory = DatabasePaths.current.directory
@@ -18,6 +23,7 @@ final class DatabaseManager {
     private var dbQueue: DatabaseQueue?
     private let databasePath: String?
     private let lifecycleLock = NSRecursiveLock()
+    private var cursorDataRevision: UInt64 = 0
 
     var isAvailable: Bool {
         withLifecycleLock { dbQueue != nil }
@@ -196,6 +202,7 @@ final class DatabaseManager {
             }
             try removeDatabaseSidecars(at: temporaryPath)
             try reopen()
+            cursorDataRevision &+= 1
         } catch {
             try? reopen()
             throw error
@@ -266,20 +273,59 @@ final class DatabaseManager {
             try insertRecords(records, in: db)
             try upsertSyncState(state, in: db)
         }
+        if appType == AgentID.cursor.appType {
+            cursorDataRevision &+= 1
+        }
     }
 
-    func fetchCursorSpendSnapshot(range: CursorSpendRange) -> CursorSpendSnapshot? {
+    func cursorDataPresentationToken(
+        matching accountIdentity: String
+    ) -> CursorDataPresentationToken? {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard let db = dbQueue else { return nil }
+        let currentIdentity = try? db.read { db in
+            try String.fetchOne(
+                db,
+                sql: "SELECT session_id FROM sync_state WHERE file_path = ? LIMIT 1",
+                arguments: [CursorUsageService.syncStateKey]
+            )
+        }
+        guard currentIdentity == accountIdentity else { return nil }
+        return CursorDataPresentationToken(
+            accountIdentity: accountIdentity,
+            revision: cursorDataRevision
+        )
+    }
+
+    func isCursorDataPresentationTokenCurrent(
+        _ token: CursorDataPresentationToken
+    ) -> Bool {
+        cursorDataPresentationToken(matching: token.accountIdentity) == token
+    }
+
+    @discardableResult
+    func performIfCursorDataPresentationTokenCurrent(
+        _ token: CursorDataPresentationToken,
+        operation: () -> Void
+    ) -> Bool {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard cursorDataPresentationToken(matching: token.accountIdentity) == token else {
+            return false
+        }
+        operation()
+        return true
+    }
+
+    func fetchCursorSpendSnapshot(
+        accountIdentity: String,
+        range: CursorSpendRange
+    ) -> CursorSpendSnapshot? {
         lifecycleLock.lock()
         defer { lifecycleLock.unlock() }
         guard let db = dbQueue else { return nil }
         return try? db.write { db in
-            guard let accountIdentity = try String.fetchOne(
-                db,
-                sql: "SELECT session_id FROM sync_state WHERE file_path = ? LIMIT 1",
-                arguments: [CursorUsageService.syncStateKey]
-            ) else {
-                return nil
-            }
             guard let row = try Row.fetchOne(
                 db,
                 sql: """
@@ -330,7 +376,10 @@ final class DatabaseManager {
         defer { lifecycleLock.unlock() }
         guard let db = dbQueue else { throw DatabaseManagerError.unavailable }
         guard totalCents != nil || onDemandCents != nil else {
-            return fetchCursorSpendSnapshot(range: range)
+            return fetchCursorSpendSnapshot(
+                accountIdentity: accountIdentity,
+                range: range
+            )
         }
         let timestamp = Int(updatedAt.timeIntervalSince1970)
         return try db.write { db in

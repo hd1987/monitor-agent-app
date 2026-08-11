@@ -89,38 +89,93 @@ enum SessionLogLineFilter {
 /// Syncs Claude Code and Codex JSONL logs plus Cursor usage events into the
 /// local database for one refresh cycle.
 final class SessionSyncManager {
+    private struct CursorSyncWaiter {
+        let cancellation: AgentSyncCancellation?
+        let onSuccess: () -> Void
+        let completion: () -> Void
+    }
+
+    private final class CursorSyncRequest {
+        let expectedIdentity: String?
+        let cancellation: AgentSyncCancellation?
+        var waiters: [CursorSyncWaiter]
+        var acceptsWaiters = true
+
+        init(
+            expectedIdentity: String?,
+            cancellation: AgentSyncCancellation?,
+            waiter: CursorSyncWaiter
+        ) {
+            self.expectedIdentity = expectedIdentity
+            self.cancellation = cancellation
+            waiters = [waiter]
+        }
+
+        func canCoalesce(
+            expectedIdentity: String?,
+            cancellation: AgentSyncCancellation?
+        ) -> Bool {
+            guard self.expectedIdentity == expectedIdentity else { return false }
+            switch (self.cancellation, cancellation) {
+            case (nil, nil):
+                return true
+            case (let current?, let candidate?):
+                return current === candidate
+            default:
+                return false
+            }
+        }
+    }
+
+    private final class CursorOperationResultBox<T> {
+        var result: Result<T, Error>?
+    }
+
     private static let rebuildReadChunkSize = 1_048_576
     private static let rebuildRecordBatchSize = 10_000
     private static let newlineDelimiter = Data([UInt8(0x0A)])
     private let queue = DispatchQueue(label: "com.monitoragent.sync", qos: .utility)
-    private let cursorQueue = DispatchQueue(label: "com.monitoragent.cursor-sync", qos: .utility)
+    private let cursorQueue: DispatchQueue
     private let cursorScheduleLock = NSLock()
-    private var isCursorSyncScheduled = false
+    private let cursorSubmissionLock = NSLock()
+    private var lastSubmittedCursorSyncRequest: CursorSyncRequest?
     private let db: DatabaseManager
     private let fm = FileManager.default
     private let claudeProjectsPath: String
     private let codexSessionsPath: String
     private let codexArchivedSessionsPath: String
     private let cursorUsageSyncer: CursorUsageSyncing?
+    private let beforeCursorDrainSubmission: (() -> Void)?
+    private let beforeCursorOperationSubmission: (() -> Void)?
 
     init(
         database: DatabaseManager = .shared,
         claudeProjectsPath: String = NSHomeDirectory() + "/.claude/projects",
         codexSessionsPath: String = NSHomeDirectory() + "/.codex/sessions",
         codexArchivedSessionsPath: String = NSHomeDirectory() + "/.codex/archived_sessions",
-        cursorUsageSyncer: CursorUsageSyncing? = nil
+        cursorUsageSyncer: CursorUsageSyncing? = nil,
+        cursorQueue: DispatchQueue? = nil,
+        beforeCursorDrainSubmission: (() -> Void)? = nil,
+        beforeCursorOperationSubmission: (() -> Void)? = nil
     ) {
         self.db = database
         self.claudeProjectsPath = claudeProjectsPath
         self.codexSessionsPath = codexSessionsPath
         self.codexArchivedSessionsPath = codexArchivedSessionsPath
         self.cursorUsageSyncer = cursorUsageSyncer
+        self.cursorQueue = cursorQueue ?? DispatchQueue(
+            label: "com.monitoragent.cursor-sync",
+            qos: .utility
+        )
+        self.beforeCursorDrainSubmission = beforeCursorDrainSubmission
+        self.beforeCursorOperationSubmission = beforeCursorOperationSubmission
     }
 
     /// Run local and Cursor syncs on separate background queues.
     func syncOnce(
         enabledAgents: Set<AgentID> = Set(AgentID.allCases),
         cancellation: AgentSyncCancellation? = nil,
+        expectedCursorIdentity: String? = nil,
         onLocalComplete: @escaping () -> Void,
         onCursorComplete: @escaping () -> Void,
         completion: @escaping () -> Void
@@ -141,6 +196,7 @@ final class SessionSyncManager {
                 return
             }
             self.scheduleCursorSync(
+                expectedIdentity: expectedCursorIdentity,
                 cancellation: cancellation,
                 onSuccess: onCursorComplete,
                 completion: completion
@@ -155,16 +211,53 @@ final class SessionSyncManager {
         var result = syncLocal(enabledAgents: enabledAgents, onProgress: onProgress)
         if enabledAgents.contains(.cursor),
            let cursorUsageSyncer,
-           let cursorResult = cursorQueue.sync(execute: { try? cursorUsageSyncer.sync() }) {
+           let cursorResult = try? performSubmittedCursorOperation({
+               try cursorUsageSyncer.sync()
+           }) {
             result.add(cursorResult)
         }
         return result
     }
 
-    func performExclusive<T>(_ operation: () throws -> T) rethrows -> T {
+    func syncCursorOnce(
+        expectedIdentity: String,
+        cancellation: AgentSyncCancellation? = nil,
+        onSuccess: @escaping () -> Void,
+        completion: @escaping () -> Void
+    ) {
+        scheduleCursorSync(
+            expectedIdentity: expectedIdentity,
+            cancellation: cancellation,
+            onSuccess: onSuccess,
+            completion: completion
+        )
+    }
+
+    func performExclusive<T>(_ operation: @escaping () throws -> T) throws -> T {
         try queue.sync {
-            try cursorQueue.sync(execute: operation)
+            try performSubmittedCursorOperation(operation)
         }
+    }
+
+    private func performSubmittedCursorOperation<T>(
+        _ operation: @escaping () throws -> T
+    ) throws -> T {
+        let completion = DispatchSemaphore(value: 0)
+        let resultBox = CursorOperationResultBox<T>()
+        cursorSubmissionLock.lock()
+        cursorScheduleLock.lock()
+        lastSubmittedCursorSyncRequest = nil
+        beforeCursorOperationSubmission?()
+        cursorQueue.async {
+            resultBox.result = Result {
+                try operation()
+            }
+            completion.signal()
+        }
+        cursorScheduleLock.unlock()
+        cursorSubmissionLock.unlock()
+        completion.wait()
+        return try resultBox.result!.get()
     }
 
     func makeSourceSnapshot(
@@ -315,6 +408,7 @@ final class SessionSyncManager {
     }
 
     private func scheduleCursorSync(
+        expectedIdentity: String?,
         cancellation: AgentSyncCancellation?,
         onSuccess: @escaping () -> Void,
         completion: @escaping () -> Void
@@ -324,40 +418,91 @@ final class SessionSyncManager {
             return
         }
 
+        let waiter = CursorSyncWaiter(
+            cancellation: cancellation,
+            onSuccess: onSuccess,
+            completion: completion
+        )
+        cursorSubmissionLock.lock()
         cursorScheduleLock.lock()
-        guard !isCursorSyncScheduled else {
+        if let lastSubmittedCursorSyncRequest,
+           lastSubmittedCursorSyncRequest.acceptsWaiters,
+           lastSubmittedCursorSyncRequest.canCoalesce(
+               expectedIdentity: expectedIdentity,
+               cancellation: cancellation
+           ) {
+            lastSubmittedCursorSyncRequest.waiters.append(waiter)
             cursorScheduleLock.unlock()
-            completion()
+            cursorSubmissionLock.unlock()
             return
         }
-        isCursorSyncScheduled = true
+        let request = CursorSyncRequest(
+            expectedIdentity: expectedIdentity,
+            cancellation: cancellation,
+            waiter: waiter
+        )
+        lastSubmittedCursorSyncRequest = request
+        beforeCursorDrainSubmission?()
+        executeCursorSync(request, using: cursorUsageSyncer)
+        cursorScheduleLock.unlock()
+        cursorSubmissionLock.unlock()
+    }
+
+    private func executeCursorSync(
+        _ initialRequest: CursorSyncRequest,
+        using cursorUsageSyncer: CursorUsageSyncing
+    ) {
+        cursorQueue.async { [self] in
+            let didSucceed = self.runCursorSync(
+                initialRequest,
+                using: cursorUsageSyncer
+            )
+            self.finishCursorSync(initialRequest, didSucceed: didSucceed)
+        }
+    }
+
+    private func runCursorSync(
+        _ request: CursorSyncRequest,
+        using cursorUsageSyncer: CursorUsageSyncing
+    ) -> Bool {
+        guard request.cancellation?.isEnabled(.cursor) != false else { return false }
+        let cursorResult: SessionSyncResult?
+        if let cursorUsageSyncer = cursorUsageSyncer as? CancellableCursorUsageSyncing {
+            cursorResult = try? cursorUsageSyncer.sync(cancellation: request.cancellation)
+        } else {
+            cursorResult = try? cursorUsageSyncer.sync()
+        }
+        guard request.cancellation?.isEnabled(.cursor) != false,
+              let result = cursorResult,
+              result.filesSynced > 0,
+              request.expectedIdentity == nil
+                || db.getSyncState(
+                    for: CursorUsageService.syncStateKey
+                )?.sessionId == request.expectedIdentity else {
+            return false
+        }
+        return true
+    }
+
+    private func finishCursorSync(
+        _ request: CursorSyncRequest,
+        didSucceed: Bool
+    ) {
+        cursorScheduleLock.lock()
+        request.acceptsWaiters = false
+        let waiters = request.waiters
+        if lastSubmittedCursorSyncRequest === request {
+            lastSubmittedCursorSyncRequest = nil
+        }
         cursorScheduleLock.unlock()
 
-        cursorQueue.async { [weak self] in
-            guard let self else {
-                completion()
-                return
+        if didSucceed {
+            waiters.forEach {
+                guard $0.cancellation?.isEnabled(.cursor) != false else { return }
+                $0.onSuccess()
             }
-            defer {
-                self.cursorScheduleLock.lock()
-                self.isCursorSyncScheduled = false
-                self.cursorScheduleLock.unlock()
-                completion()
-            }
-            guard cancellation?.isEnabled(.cursor) != false else { return }
-            let cursorResult: SessionSyncResult?
-            if let cursorUsageSyncer = cursorUsageSyncer as? CancellableCursorUsageSyncing {
-                cursorResult = try? cursorUsageSyncer.sync(cancellation: cancellation)
-            } else {
-                cursorResult = try? cursorUsageSyncer.sync()
-            }
-            guard cancellation?.isEnabled(.cursor) != false,
-                  let result = cursorResult,
-                  result.filesSynced > 0 else {
-                return
-            }
-            onSuccess()
         }
+        waiters.forEach { $0.completion() }
     }
 
     // MARK: - File Discovery

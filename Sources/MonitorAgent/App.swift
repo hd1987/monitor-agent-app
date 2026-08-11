@@ -114,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = AppStore(
         quotaCache: QuotaSnapshotCache.shared,
         cursorSpendRefresher: CursorSpendRefreshCoordinator(),
+        cursorAccountResolver: CursorAccountSession.shared,
         activityPresentationSettings: ActivityPresentationSettings.shared
     )
     private let panelPresentationState = PanelPresentationState()

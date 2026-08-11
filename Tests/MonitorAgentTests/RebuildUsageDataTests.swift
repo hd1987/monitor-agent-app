@@ -170,7 +170,7 @@ final class RebuildUsageDataTests: XCTestCase {
         let releaseFirst = DispatchSemaphore(value: 0)
 
         DispatchQueue.global().async {
-            syncManager.performExclusive {
+            try! syncManager.performExclusive {
                 firstEntered.fulfill()
                 releaseFirst.wait()
             }
@@ -178,7 +178,7 @@ final class RebuildUsageDataTests: XCTestCase {
         wait(for: [firstEntered], timeout: 1)
 
         DispatchQueue.global().async {
-            syncManager.performExclusive {
+            try! syncManager.performExclusive {
                 _ = secondEntered.signal()
             }
         }
@@ -219,6 +219,330 @@ final class RebuildUsageDataTests: XCTestCase {
 
         cursorSyncer.release.signal()
         XCTAssertEqual(callback.wait(timeout: .now() + 1), .success)
+    }
+
+    func testCursorSyncQueuesDifferentExpectedAccountIdentity() {
+        let database = DatabaseManager(inMemory: true)
+        let firstIdentity = "cursor-account:first"
+        let secondIdentity = "cursor-account:second"
+        let cursorSyncer = SequencedIdentityCursorUsageSyncer(
+            database: database,
+            identities: [firstIdentity, secondIdentity]
+        )
+        let syncManager = SessionSyncManager(
+            database: database,
+            cursorUsageSyncer: cursorSyncer
+        )
+        let firstSuccess = expectation(description: "First account sync succeeds")
+        let secondSuccess = expectation(description: "Second account sync succeeds")
+
+        syncManager.syncCursorOnce(
+            expectedIdentity: firstIdentity,
+            onSuccess: { firstSuccess.fulfill() },
+            completion: {}
+        )
+        XCTAssertEqual(cursorSyncer.firstStarted.wait(timeout: .now() + 1), .success)
+        syncManager.syncCursorOnce(
+            expectedIdentity: secondIdentity,
+            onSuccess: { secondSuccess.fulfill() },
+            completion: {}
+        )
+        XCTAssertEqual(cursorSyncer.syncCount, 1)
+
+        cursorSyncer.releaseFirst.signal()
+        wait(for: [firstSuccess, secondSuccess], timeout: 1)
+        XCTAssertEqual(cursorSyncer.syncCount, 2)
+        XCTAssertEqual(
+            database.getSyncState(for: CursorUsageService.syncStateKey)?.sessionId,
+            secondIdentity
+        )
+    }
+
+    func testQueuedCursorSyncRetainsManagerUntilCompletion() {
+        let cursorQueue = DispatchQueue(label: "test.cursor-sync-retention")
+        cursorQueue.suspend()
+        var syncManager: SessionSyncManager? = SessionSyncManager(
+            database: DatabaseManager(inMemory: true),
+            cursorUsageSyncer: CountingCursorUsageSyncer(),
+            cursorQueue: cursorQueue
+        )
+        weak let retainedManager = syncManager
+        let completed = expectation(description: "Queued Cursor request completes")
+
+        syncManager?.syncCursorOnce(
+            expectedIdentity: "cursor-account:first",
+            onSuccess: {},
+            completion: { completed.fulfill() }
+        )
+        syncManager = nil
+
+        XCTAssertNotNil(retainedManager)
+        cursorQueue.resume()
+        wait(for: [completed], timeout: 1)
+    }
+
+    func testCursorPresentationPublicationBlocksAccountReplacement() throws {
+        let database = DatabaseManager(inMemory: true)
+        let firstIdentity = "cursor-account:first"
+        let secondIdentity = "cursor-account:second"
+        let firstState = SyncState(
+            filePath: CursorUsageService.syncStateKey,
+            byteOffset: 1,
+            recordCount: 0,
+            sessionId: firstIdentity,
+            model: nil,
+            lastModified: 1,
+            lastSyncedAt: 1
+        )
+        let secondState = SyncState(
+            filePath: CursorUsageService.syncStateKey,
+            byteOffset: 2,
+            recordCount: 0,
+            sessionId: secondIdentity,
+            model: nil,
+            lastModified: 2,
+            lastSyncedAt: 2
+        )
+        try database.replaceAppRecords(
+            appType: AgentID.cursor.appType,
+            records: [],
+            state: firstState
+        )
+        let token = try XCTUnwrap(
+            database.cursorDataPresentationToken(matching: firstIdentity)
+        )
+        let publicationEntered = DispatchSemaphore(value: 0)
+        let releasePublication = DispatchSemaphore(value: 0)
+        let replacementAttempted = DispatchSemaphore(value: 0)
+        let replacementCompleted = DispatchSemaphore(value: 0)
+        let publicationCompleted = expectation(description: "Atomic publication completes")
+
+        DispatchQueue.global().async {
+            let didPublish = database.performIfCursorDataPresentationTokenCurrent(token) {
+                publicationEntered.signal()
+                _ = releasePublication.wait(timeout: .now() + 2)
+            }
+            XCTAssertTrue(didPublish)
+            publicationCompleted.fulfill()
+        }
+        XCTAssertEqual(publicationEntered.wait(timeout: .now() + 1), .success)
+
+        DispatchQueue.global().async {
+            replacementAttempted.signal()
+            try! database.replaceAppRecords(
+                appType: AgentID.cursor.appType,
+                records: [],
+                state: secondState
+            )
+            replacementCompleted.signal()
+        }
+        XCTAssertEqual(replacementAttempted.wait(timeout: .now() + 1), .success)
+        XCTAssertEqual(replacementCompleted.wait(timeout: .now() + 0.05), .timedOut)
+
+        releasePublication.signal()
+        wait(for: [publicationCompleted], timeout: 1)
+        XCTAssertEqual(replacementCompleted.wait(timeout: .now() + 1), .success)
+        XCTAssertEqual(
+            database.getSyncState(for: CursorUsageService.syncStateKey)?.sessionId,
+            secondIdentity
+        )
+    }
+
+    func testCursorSyncPreservesAccountGenerationOrderAcrossRepeatedIdentity() {
+        let database = DatabaseManager(inMemory: true)
+        let firstIdentity = "cursor-account:first"
+        let secondIdentity = "cursor-account:second"
+        let cursorSyncer = SequencedIdentityCursorUsageSyncer(
+            database: database,
+            identities: [firstIdentity, secondIdentity, firstIdentity]
+        )
+        let syncManager = SessionSyncManager(
+            database: database,
+            cursorUsageSyncer: cursorSyncer
+        )
+        let successes = expectation(description: "Every account generation succeeds")
+        successes.expectedFulfillmentCount = 3
+
+        syncManager.syncCursorOnce(
+            expectedIdentity: firstIdentity,
+            onSuccess: { successes.fulfill() },
+            completion: {}
+        )
+        XCTAssertEqual(cursorSyncer.firstStarted.wait(timeout: .now() + 1), .success)
+        syncManager.syncCursorOnce(
+            expectedIdentity: secondIdentity,
+            onSuccess: { successes.fulfill() },
+            completion: {}
+        )
+        syncManager.syncCursorOnce(
+            expectedIdentity: firstIdentity,
+            onSuccess: { successes.fulfill() },
+            completion: {}
+        )
+
+        cursorSyncer.releaseFirst.signal()
+        wait(for: [successes], timeout: 1)
+        XCTAssertEqual(cursorSyncer.syncCount, 3)
+        XCTAssertEqual(
+            database.getSyncState(for: CursorUsageService.syncStateKey)?.sessionId,
+            firstIdentity
+        )
+    }
+
+    func testExclusiveOperationWaitsForPendingCursorGenerations() {
+        let database = DatabaseManager(inMemory: true)
+        let firstIdentity = "cursor-account:first"
+        let secondIdentity = "cursor-account:second"
+        let cursorSyncer = SequencedIdentityCursorUsageSyncer(
+            database: database,
+            identities: [firstIdentity, secondIdentity]
+        )
+        let syncManager = SessionSyncManager(
+            database: database,
+            cursorUsageSyncer: cursorSyncer
+        )
+        let syncsCompleted = expectation(description: "Cursor generations complete")
+        syncsCompleted.expectedFulfillmentCount = 2
+        let exclusiveAttempted = DispatchSemaphore(value: 0)
+        let exclusiveEntered = DispatchSemaphore(value: 0)
+        let resultLock = NSLock()
+        var syncCountAtExclusiveEntry: Int?
+
+        syncManager.syncCursorOnce(
+            expectedIdentity: firstIdentity,
+            onSuccess: { syncsCompleted.fulfill() },
+            completion: {}
+        )
+        XCTAssertEqual(cursorSyncer.firstStarted.wait(timeout: .now() + 1), .success)
+        syncManager.syncCursorOnce(
+            expectedIdentity: secondIdentity,
+            onSuccess: { syncsCompleted.fulfill() },
+            completion: {}
+        )
+        DispatchQueue.global().async {
+            exclusiveAttempted.signal()
+            try! syncManager.performExclusive {
+                resultLock.lock()
+                syncCountAtExclusiveEntry = cursorSyncer.syncCount
+                resultLock.unlock()
+                exclusiveEntered.signal()
+            }
+        }
+        XCTAssertEqual(exclusiveAttempted.wait(timeout: .now() + 1), .success)
+        XCTAssertEqual(exclusiveEntered.wait(timeout: .now() + 0.05), .timedOut)
+
+        cursorSyncer.releaseFirst.signal()
+        wait(for: [syncsCompleted], timeout: 1)
+        XCTAssertEqual(exclusiveEntered.wait(timeout: .now() + 1), .success)
+        resultLock.lock()
+        let capturedSyncCount = syncCountAtExclusiveEntry
+        resultLock.unlock()
+        XCTAssertEqual(capturedSyncCount, 2)
+        XCTAssertEqual(
+            database.getSyncState(for: CursorUsageService.syncStateKey)?.sessionId,
+            secondIdentity
+        )
+    }
+
+    func testExclusiveOperationCannotOvertakePublishedCursorDrain() {
+        let database = DatabaseManager(inMemory: true)
+        let identity = "cursor-account:first"
+        let beforeSubmission = DispatchSemaphore(value: 0)
+        let allowSubmission = DispatchSemaphore(value: 0)
+        let cursorSyncer = SequencedIdentityCursorUsageSyncer(
+            database: database,
+            identities: [identity]
+        )
+        let syncManager = SessionSyncManager(
+            database: database,
+            cursorUsageSyncer: cursorSyncer,
+            beforeCursorDrainSubmission: {
+                beforeSubmission.signal()
+                _ = allowSubmission.wait(timeout: .now() + 2)
+            }
+        )
+        let syncCompleted = expectation(description: "Published Cursor drain completes")
+        let exclusiveAttempted = DispatchSemaphore(value: 0)
+        let exclusiveEntered = DispatchSemaphore(value: 0)
+
+        DispatchQueue.global().async {
+            syncManager.syncCursorOnce(
+                expectedIdentity: identity,
+                onSuccess: { syncCompleted.fulfill() },
+                completion: {}
+            )
+        }
+        XCTAssertEqual(beforeSubmission.wait(timeout: .now() + 1), .success)
+        DispatchQueue.global().async {
+            exclusiveAttempted.signal()
+            _ = try! syncManager.performExclusive {
+                exclusiveEntered.signal()
+            }
+        }
+        XCTAssertEqual(exclusiveAttempted.wait(timeout: .now() + 1), .success)
+        XCTAssertEqual(exclusiveEntered.wait(timeout: .now() + 0.05), .timedOut)
+
+        allowSubmission.signal()
+        XCTAssertEqual(cursorSyncer.firstStarted.wait(timeout: .now() + 1), .success)
+        XCTAssertEqual(exclusiveEntered.wait(timeout: .now() + 0.05), .timedOut)
+        cursorSyncer.releaseFirst.signal()
+        wait(for: [syncCompleted], timeout: 1)
+        XCTAssertEqual(exclusiveEntered.wait(timeout: .now() + 1), .success)
+    }
+
+    func testCursorRequestSubmittedAfterExclusiveOperationRunsAfterBarrier() {
+        let database = DatabaseManager(inMemory: true)
+        let firstIdentity = "cursor-account:first"
+        let secondIdentity = "cursor-account:second"
+        let operationPublished = DispatchSemaphore(value: 0)
+        let cursorSyncer = SequencedIdentityCursorUsageSyncer(
+            database: database,
+            identities: [firstIdentity, secondIdentity]
+        )
+        let syncManager = SessionSyncManager(
+            database: database,
+            cursorUsageSyncer: cursorSyncer,
+            beforeCursorOperationSubmission: {
+                operationPublished.signal()
+            }
+        )
+        let firstCompleted = expectation(description: "First Cursor request completes")
+        let secondCompleted = expectation(description: "Second Cursor request completes")
+        let resultLock = NSLock()
+        var syncCountAtExclusiveEntry: Int?
+
+        syncManager.syncCursorOnce(
+            expectedIdentity: firstIdentity,
+            onSuccess: { firstCompleted.fulfill() },
+            completion: {}
+        )
+        XCTAssertEqual(cursorSyncer.firstStarted.wait(timeout: .now() + 1), .success)
+
+        DispatchQueue.global().async {
+            _ = try! syncManager.performExclusive {
+                resultLock.lock()
+                syncCountAtExclusiveEntry = cursorSyncer.syncCount
+                resultLock.unlock()
+            }
+        }
+        XCTAssertEqual(operationPublished.wait(timeout: .now() + 1), .success)
+
+        syncManager.syncCursorOnce(
+            expectedIdentity: secondIdentity,
+            onSuccess: { secondCompleted.fulfill() },
+            completion: {}
+        )
+        cursorSyncer.releaseFirst.signal()
+
+        wait(for: [firstCompleted, secondCompleted], timeout: 1)
+        resultLock.lock()
+        let capturedSyncCount = syncCountAtExclusiveEntry
+        resultLock.unlock()
+        XCTAssertEqual(capturedSyncCount, 1)
+        XCTAssertEqual(
+            database.getSyncState(for: CursorUsageService.syncStateKey)?.sessionId,
+            secondIdentity
+        )
     }
 
     func testIncrementalSyncRestartsFromBeginningAfterFileTruncation() throws {
@@ -857,7 +1181,10 @@ final class RebuildUsageDataTests: XCTestCase {
         )
 
         _ = try rebuilder.rebuild()
-        let restored = try XCTUnwrap(activeDatabase.fetchCursorSpendSnapshot(range: range))
+        let restored = try XCTUnwrap(activeDatabase.fetchCursorSpendSnapshot(
+            accountIdentity: identity,
+            range: range
+        ))
 
         XCTAssertEqual(restored.totalCents, 500)
         XCTAssertEqual(restored.onDemandCents, 100)
@@ -960,6 +1287,55 @@ private final class CountingCursorUsageSyncer: CursorUsageSyncing {
 
     func sync() throws -> SessionSyncResult {
         syncCount += 1
+        return SessionSyncResult(filesSynced: 1, recordsSynced: 0)
+    }
+}
+
+private final class SequencedIdentityCursorUsageSyncer: CursorUsageSyncing {
+    let firstStarted = DispatchSemaphore(value: 0)
+    let releaseFirst = DispatchSemaphore(value: 0)
+    private let database: DatabaseManager
+    private let identities: [String]
+    private let lock = NSLock()
+    private var storedSyncCount = 0
+
+    var syncCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedSyncCount
+    }
+
+    init(database: DatabaseManager, identities: [String]) {
+        self.database = database
+        self.identities = identities
+    }
+
+    func sync() throws -> SessionSyncResult {
+        lock.lock()
+        let index = storedSyncCount
+        storedSyncCount += 1
+        lock.unlock()
+        guard identities.indices.contains(index) else {
+            throw CursorUsageError.invalidResponse
+        }
+        if index == 0 {
+            firstStarted.signal()
+            _ = releaseFirst.wait(timeout: .now() + 2)
+        }
+        let state = SyncState(
+            filePath: CursorUsageService.syncStateKey,
+            byteOffset: Int64(index + 1),
+            recordCount: 0,
+            sessionId: identities[index],
+            model: nil,
+            lastModified: index + 1,
+            lastSyncedAt: index + 1
+        )
+        try database.replaceAppRecords(
+            appType: AgentID.cursor.appType,
+            records: [],
+            state: state
+        )
         return SessionSyncResult(filesSynced: 1, recordsSynced: 0)
     }
 }

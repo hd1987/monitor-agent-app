@@ -3,10 +3,19 @@ import Foundation
 protocol CursorSpendRefreshing: AnyObject {
     func refresh(
         range: CursorSpendRange,
+        expectedAccountIdentity: String?,
         force: Bool,
         cancellation: AgentSyncCancellation?,
         completion: @escaping (CursorSpendSnapshot?) -> Void
     )
+}
+
+protocol CursorSpendServicing: AnyObject {
+    func refresh(
+        range: CursorSpendRange,
+        force: Bool,
+        cancellation: AgentSyncCancellation?
+    ) throws -> CursorSpendSnapshot?
 }
 
 enum CursorSpendError: LocalizedError, Equatable {
@@ -26,7 +35,7 @@ enum CursorSpendError: LocalizedError, Equatable {
     }
 }
 
-final class CursorSpendService {
+final class CursorSpendService: CursorSpendServicing {
     static let automaticCacheLifetime: TimeInterval = 5 * 60
 
     private enum Scope: CaseIterable {
@@ -42,21 +51,41 @@ final class CursorSpendService {
     }
 
     private let database: DatabaseManager
+    private let accountSession: CursorAccountResolving
     private let client: CursorDashboardClient
     private let now: () -> Date
 
     init(
         database: DatabaseManager = .shared,
-        authenticationReader: CursorAuthenticationReading = CursorStateAuthenticationReader(),
-        transport: CursorHTTPTransport = CursorURLSessionTransport(),
+        accountSession: CursorAccountResolving = CursorAccountSession.shared,
+        client: CursorDashboardClient = CursorDashboardClient(),
         now: @escaping () -> Date = Date.init
     ) {
         self.database = database
-        self.client = CursorDashboardClient(
-            authenticationReader: authenticationReader,
-            transport: transport
-        )
+        self.accountSession = accountSession
+        self.client = client
         self.now = now
+    }
+
+    convenience init(
+        database: DatabaseManager = .shared,
+        authenticationReader: CursorAuthenticationReading,
+        transport: CursorHTTPTransport,
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.init(
+            database: database,
+            accountSession: CursorAccountSession(
+                authenticationReader: authenticationReader,
+                transport: transport,
+                normalReuseInterval: 0
+            ),
+            client: CursorDashboardClient(
+                authenticationReader: authenticationReader,
+                transport: transport
+            ),
+            now: now
+        )
     }
 
     func refresh(
@@ -65,14 +94,20 @@ final class CursorSpendService {
         cancellation: AgentSyncCancellation? = nil
     ) throws -> CursorSpendSnapshot? {
         let currentDate = now()
+        let authenticated = try accountSession.resolve(
+            force: true,
+            cancellation: cancellation
+        )
+        let account = authenticated.account
         if !force,
-           let cached = database.fetchCursorSpendSnapshot(range: range),
+           let cached = database.fetchCursorSpendSnapshot(
+               accountIdentity: account.syncIdentity,
+               range: range
+           ),
            cached.isFresh(at: currentDate, maximumAge: Self.automaticCacheLifetime) {
             return cached
         }
 
-        let authenticated = try client.authenticatedAccount(cancellation: cancellation)
-        let account = authenticated.account
         let startMilliseconds = range.startMilliseconds
             ?? account.createdAtMilliseconds
             ?? 0
@@ -99,6 +134,12 @@ final class CursorSpendService {
             onDemandCents = nil
         }
         if totalCents == nil, onDemandCents == nil {
+            if let cached = database.fetchCursorSpendSnapshot(
+                accountIdentity: account.syncIdentity,
+                range: range
+            ) {
+                return cached
+            }
             throw results.values.compactMap(\.failureValue).first
                 ?? CursorUsageError.invalidResponse
         }
@@ -215,33 +256,163 @@ final class CursorSpendService {
 }
 
 final class CursorSpendRefreshCoordinator: CursorSpendRefreshing {
-    private let service: CursorSpendService
-    private let database: DatabaseManager
+    private final class Request {
+        let range: CursorSpendRange
+        let expectedAccountIdentity: String?
+        var force: Bool
+        let cancellation: AgentSyncCancellation?
+        var completions: [(CursorSpendSnapshot?) -> Void]
+
+        init(
+            range: CursorSpendRange,
+            expectedAccountIdentity: String?,
+            force: Bool,
+            cancellation: AgentSyncCancellation?,
+            completion: @escaping (CursorSpendSnapshot?) -> Void
+        ) {
+            self.range = range
+            self.expectedAccountIdentity = expectedAccountIdentity
+            self.force = force
+            self.cancellation = cancellation
+            completions = [completion]
+        }
+
+        func matches(
+            range: CursorSpendRange,
+            expectedAccountIdentity: String?,
+            cancellation: AgentSyncCancellation?
+        ) -> Bool {
+            guard matchesScope(
+                range: range,
+                expectedAccountIdentity: expectedAccountIdentity
+            ) else {
+                return false
+            }
+            switch (self.cancellation, cancellation) {
+            case (nil, nil):
+                return true
+            case (let current?, let candidate?):
+                return current === candidate
+            default:
+                return false
+            }
+        }
+
+        func matchesScope(
+            range: CursorSpendRange,
+            expectedAccountIdentity: String?
+        ) -> Bool {
+            self.range == range
+                && self.expectedAccountIdentity == expectedAccountIdentity
+        }
+    }
+
+    private let service: CursorSpendServicing
     private let queue = DispatchQueue(label: "com.monitoragent.cursor-spend", qos: .utility)
+    private let stateLock = NSLock()
+    private var activeRequest: Request?
+    private var pendingRequest: Request?
 
     init(
         database: DatabaseManager = .shared,
-        service: CursorSpendService? = nil
+        service: CursorSpendServicing? = nil
     ) {
-        self.database = database
         self.service = service ?? CursorSpendService(database: database)
     }
 
     func refresh(
         range: CursorSpendRange,
+        expectedAccountIdentity: String?,
         force: Bool,
         cancellation: AgentSyncCancellation?,
         completion: @escaping (CursorSpendSnapshot?) -> Void
     ) {
-        queue.async {
-            let snapshot = (try? self.service.refresh(
-                range: range,
-                force: force,
-                cancellation: cancellation
-            )) ?? self.database.fetchCursorSpendSnapshot(range: range)
-            DispatchQueue.main.async {
-                completion(snapshot)
+        let request = Request(
+            range: range,
+            expectedAccountIdentity: expectedAccountIdentity,
+            force: force,
+            cancellation: cancellation,
+            completion: completion
+        )
+        var requestToStart: Request?
+        var supersededCompletions: [(CursorSpendSnapshot?) -> Void] = []
+
+        stateLock.lock()
+        if let activeRequest {
+            if let pendingRequest,
+               pendingRequest.matches(
+                   range: range,
+                   expectedAccountIdentity: expectedAccountIdentity,
+                   cancellation: cancellation
+               ) {
+                pendingRequest.force = pendingRequest.force || force
+                pendingRequest.completions.append(completion)
+            } else if let pendingRequest,
+                      pendingRequest.force,
+                      pendingRequest.matchesScope(
+                          range: range,
+                          expectedAccountIdentity: expectedAccountIdentity
+                      ) {
+                pendingRequest.completions.append(completion)
+            } else {
+                supersededCompletions = pendingRequest?.completions ?? []
+                pendingRequest = nil
+                if activeRequest.matches(
+                    range: range,
+                    expectedAccountIdentity: expectedAccountIdentity,
+                    cancellation: cancellation
+                ),
+                   activeRequest.force || !request.force {
+                    activeRequest.completions.append(completion)
+                } else {
+                    pendingRequest = request
+                }
             }
+        } else {
+            activeRequest = request
+            requestToStart = request
+        }
+        stateLock.unlock()
+
+        let completionsToSupersede = supersededCompletions
+        if !completionsToSupersede.isEmpty {
+            DispatchQueue.main.async {
+                completionsToSupersede.forEach { $0(nil) }
+            }
+        }
+        if let requestToStart {
+            execute(requestToStart)
+        }
+    }
+
+    private func execute(_ request: Request) {
+        queue.async {
+            let snapshot = try? self.service.refresh(
+                range: request.range,
+                force: request.force,
+                cancellation: request.cancellation
+            )
+            self.finish(request, snapshot: snapshot)
+        }
+    }
+
+    private func finish(_ request: Request, snapshot: CursorSpendSnapshot?) {
+        stateLock.lock()
+        guard activeRequest === request else {
+            stateLock.unlock()
+            return
+        }
+        let completions = request.completions
+        let nextRequest = pendingRequest
+        activeRequest = nextRequest
+        pendingRequest = nil
+        stateLock.unlock()
+
+        DispatchQueue.main.async {
+            completions.forEach { $0(snapshot) }
+        }
+        if let nextRequest {
+            execute(nextRequest)
         }
     }
 }
@@ -255,10 +426,10 @@ private struct CursorDailySpendResponse: Decodable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        dailySpend = try container.decodeIfPresent(
+        dailySpend = try container.decode(
             [CursorDailySpendItem].self,
             forKey: .dailySpend
-        ) ?? []
+        )
     }
 }
 

@@ -1022,6 +1022,658 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         store.panelDidClose()
     }
 
+    func testUnifiedRefreshRunsCursorSpendOnceAndWaitsForItsCompletion() throws {
+        let suiteName = "AppStoreTodayRolloverTests.cursorSpendRefreshParticipant"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let refreshSettings = RefreshSettings(defaults: defaults)
+        refreshSettings.interval = .never
+        let database = DatabaseManager(inMemory: true)
+        let account = cursorAuthenticatedAccount(userId: 1)
+        try seedCursorCache(
+            database: database,
+            identity: account.account.syncIdentity,
+            model: "cursor-model",
+            inputTokens: 100
+        )
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
+            codexSessionsPath: "/missing-codex-\(UUID().uuidString)",
+            codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)",
+            cursorUsageSyncer: CountingCursorUsageSyncerProbe()
+        )
+        let refresher = ControllableCursorSpendRefresher()
+        let store = AppStore(
+            database: database,
+            syncManager: syncManager,
+            refreshSettings: refreshSettings,
+            cursorSpendRefresher: refresher,
+            cursorAccountResolver: StaticCursorAccountResolver(result: .success(account)),
+            observeRefreshIntervalChanges: false
+        )
+        store.appFilter = .cursor
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+
+        store.panelDidOpen()
+        wait(for: [refresher.started], timeout: 1)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+
+        XCTAssertEqual(refresher.refreshCount, 1)
+        XCTAssertTrue(store.isRefreshInProgress)
+        refresher.finishNext()
+
+        let refreshFinished = expectation(description: "Unified refresh waits for Cursor spend")
+        waitUntil(attemptsRemaining: 100) {
+            !store.isRefreshInProgress
+        } completion: {
+            refreshFinished.fulfill()
+        }
+        wait(for: [refreshFinished], timeout: 1)
+        store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testLeavingCursorCancelsSelectionDrivenSpendRefresh() throws {
+        let suiteName = "AppStoreTodayRolloverTests.cursorSpendSelectionCancellation"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let refreshSettings = RefreshSettings(defaults: defaults)
+        refreshSettings.interval = .never
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        let database = DatabaseManager(inMemory: true)
+        let now = Date(timeIntervalSince1970: 1_786_435_200)
+        let account = cursorAuthenticatedAccount(userId: 1)
+        try seedCursorCache(
+            database: database,
+            identity: account.account.syncIdentity,
+            model: "cursor-model",
+            inputTokens: 100
+        )
+        let refreshCoordinator = PanelRefreshCoordinator(currentDateProvider: { now })
+        refreshCoordinator.start(interval: .never) { completion in
+            completion()
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        let refresher = ControllableCursorSpendRefresher()
+        let store = AppStore(
+            database: database,
+            refreshSettings: refreshSettings,
+            monitoringSettings: monitoringSettings,
+            cursorSpendRefresher: refresher,
+            cursorAccountResolver: StaticCursorAccountResolver(result: .success(account)),
+            refreshCoordinator: refreshCoordinator,
+            observeRefreshIntervalChanges: false,
+            currentDateProvider: { now }
+        )
+        store.appFilter = .cursor
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+
+        store.panelDidOpen()
+        wait(for: [refresher.started], timeout: 1)
+        let cancellation = try XCTUnwrap(refresher.cancellations.first ?? nil)
+        XCTAssertTrue(cancellation.isEnabled(.cursor))
+
+        store.appFilter = .claude
+
+        XCTAssertFalse(cancellation.isEnabled(.cursor))
+        refresher.finishNext()
+        store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testUnifiedRefreshWaitsForDeferredCursorSpendAfterAccountReplacement() {
+        let suiteName = "AppStoreTodayRolloverTests.deferredCursorSpendParticipant"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let refreshSettings = RefreshSettings(defaults: defaults)
+        refreshSettings.interval = .never
+        let database = DatabaseManager(inMemory: true)
+        let now = Date(timeIntervalSince1970: 1_786_435_200)
+        let account = cursorAuthenticatedAccount(userId: 2)
+        let syncer = BlockingReplacementCursorUsageSyncer(
+            database: database,
+            account: account,
+            inputTokens: 200
+        )
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
+            codexSessionsPath: "/missing-codex-\(UUID().uuidString)",
+            codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)",
+            cursorUsageSyncer: syncer
+        )
+        let refresher = ControllableCursorSpendRefresher()
+        let store = AppStore(
+            database: database,
+            syncManager: syncManager,
+            refreshSettings: refreshSettings,
+            cursorSpendRefresher: refresher,
+            cursorAccountResolver: StaticCursorAccountResolver(result: .success(account)),
+            observeRefreshIntervalChanges: false,
+            currentDateProvider: { now }
+        )
+        store.appFilter = .cursor
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+
+        store.panelDidOpen()
+        wait(for: [syncer.started], timeout: 1)
+        store.setTimeRangeFromFilter(.last7)
+        syncer.release.signal()
+        wait(for: [refresher.started], timeout: 1)
+
+        XCTAssertTrue(store.isRefreshInProgress)
+        XCTAssertEqual(refresher.refreshCount, 1)
+        XCTAssertEqual(
+            refresher.ranges,
+            [CursorSpendRange(timeRange: .last7, now: now)]
+        )
+        refresher.finishNext()
+
+        let refreshFinished = expectation(description: "Deferred Cursor spend finishes cycle")
+        waitUntil(attemptsRemaining: 100) {
+            !store.isRefreshInProgress
+        } completion: {
+            refreshFinished.fulfill()
+        }
+        wait(for: [refreshFinished], timeout: 1)
+        store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testChangedCursorAccountHidesOldCacheUntilAtomicReplacementCompletes() throws {
+        let database = DatabaseManager(inMemory: true)
+        try seedCursorCache(
+            database: database,
+            identity: cursorAuthenticatedAccount(userId: 1).account.syncIdentity,
+            model: "account-one",
+            inputTokens: 100
+        )
+        let secondAccount = cursorAuthenticatedAccount(userId: 2)
+        let syncer = BlockingReplacementCursorUsageSyncer(
+            database: database,
+            account: secondAccount,
+            inputTokens: 200
+        )
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
+            codexSessionsPath: "/missing-codex-\(UUID().uuidString)",
+            codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)",
+            cursorUsageSyncer: syncer
+        )
+        let store = AppStore(
+            database: database,
+            syncManager: syncManager,
+            cursorAccountResolver: StaticCursorAccountResolver(
+                result: .success(secondAccount)
+            ),
+            observeRefreshIntervalChanges: false
+        )
+        store.appFilter = .cursor
+
+        store.panelDidOpen()
+        wait(for: [syncer.started], timeout: 1)
+
+        let oldCacheHidden = expectation(description: "Old Cursor cache is hidden")
+        waitUntil(attemptsRemaining: 100) {
+            store.cursorAccountPresentationState == .verifying(secondAccount.account.syncIdentity)
+                && store.stats.totalRequests == 0
+        } completion: {
+            oldCacheHidden.fulfill()
+        }
+        wait(for: [oldCacheHidden], timeout: 1)
+
+        syncer.release.signal()
+        let replacementVisible = expectation(description: "New Cursor cache becomes visible")
+        waitUntil(attemptsRemaining: 100) {
+            store.cursorAccountPresentationState == .verified(secondAccount.account.syncIdentity)
+                && store.stats.inputTokens == 200
+        } completion: {
+            replacementVisible.fulfill()
+        }
+        wait(for: [replacementVisible], timeout: 1)
+        XCTAssertEqual(
+            database.fetchModelDistribution(app: .cursor, range: .allTime).map(\.model),
+            ["account-two"]
+        )
+        store.panelDidClose()
+    }
+
+    func testCursorVerificationFailurePreservesCacheButExcludesItFromAll() throws {
+        let database = DatabaseManager(inMemory: true)
+        let identity = cursorAuthenticatedAccount(userId: 1).account.syncIdentity
+        try seedCursorCache(
+            database: database,
+            identity: identity,
+            model: "account-one",
+            inputTokens: 100
+        )
+        let store = AppStore(
+            database: database,
+            cursorAccountResolver: StaticCursorAccountResolver(
+                result: .failure(CursorUsageError.authenticationRejected)
+            ),
+            observeRefreshIntervalChanges: false
+        )
+        store.panelDidOpen()
+
+        let unavailable = expectation(description: "Cursor cache becomes unavailable")
+        waitUntil(attemptsRemaining: 100) {
+            store.cursorAccountPresentationState == .unavailable
+                && store.stats.totalRequests == 0
+        } completion: {
+            unavailable.fulfill()
+        }
+        wait(for: [unavailable], timeout: 1)
+        XCTAssertEqual(database.fetchStats(app: .cursor, range: .allTime).totalRequests, 1)
+        XCTAssertEqual(
+            database.getSyncState(for: CursorUsageService.syncStateKey)?.sessionId,
+            identity
+        )
+        store.panelDidClose()
+    }
+
+    func testCursorActivityLoadRejectsAccountReplacementBeforePublication() throws {
+        let database = DatabaseManager(inMemory: true)
+        let firstAccount = cursorAuthenticatedAccount(userId: 1)
+        let secondAccount = cursorAuthenticatedAccount(userId: 2)
+        try seedCursorCache(
+            database: database,
+            identity: firstAccount.account.syncIdentity,
+            model: "account-one",
+            inputTokens: 100
+        )
+        let loaderStarted = DispatchSemaphore(value: 0)
+        let releaseLoader = DispatchSemaphore(value: 0)
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
+            codexSessionsPath: "/missing-codex-\(UUID().uuidString)",
+            codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)",
+            cursorUsageSyncer: CountingCursorUsageSyncerProbe()
+        )
+        let store = AppStore(
+            database: database,
+            syncManager: syncManager,
+            cursorAccountResolver: StaticCursorAccountResolver(result: .success(firstAccount)),
+            observeRefreshIntervalChanges: false,
+            hourlyTokenUsageLoader: { _, _, enabledAgents, _ in
+                guard enabledAgents.contains(.cursor) else { return [] }
+                loaderStarted.signal()
+                _ = releaseLoader.wait(timeout: .now() + 2)
+                return [HourlyTokenUsage(
+                    hour: 12,
+                    requestCount: 1,
+                    inputTokens: 200,
+                    outputTokens: 0,
+                    cacheReadTokens: 0,
+                    cacheCreationTokens: 0
+                )]
+            }
+        )
+        store.appFilter = .cursor
+        store.panelDidOpen()
+
+        let verified = expectation(description: "Initial Cursor account is verified")
+        waitUntil(attemptsRemaining: 100) {
+            store.cursorAccountPresentationState == .verified(firstAccount.account.syncIdentity)
+        } completion: {
+            verified.fulfill()
+        }
+        wait(for: [verified], timeout: 1)
+        store.panelDidClose()
+
+        store.selectActivityDate("2026-08-11")
+        XCTAssertEqual(loaderStarted.wait(timeout: .now() + 1), .success)
+        try seedCursorCache(
+            database: database,
+            identity: secondAccount.account.syncIdentity,
+            model: "account-two",
+            inputTokens: 200
+        )
+        releaseLoader.signal()
+
+        let staleLoadRejected = expectation(description: "Replaced account load is rejected")
+        waitUntil(attemptsRemaining: 100) {
+            !store.isHourlyTokenUsageLoading && store.hourlyTokenUsage.isEmpty
+        } completion: {
+            staleLoadRejected.fulfill()
+        }
+        wait(for: [staleLoadRejected], timeout: 1)
+        XCTAssertFalse(store.isCursorDataPresentationAvailable)
+    }
+
+    func testCursorVerificationImmediatelyClearsPresentationAndPreservesHeatmapYear() throws {
+        let database = DatabaseManager(inMemory: true)
+        let account = cursorAuthenticatedAccount(userId: 1)
+        try seedCursorCache(
+            database: database,
+            identity: account.account.syncIdentity,
+            model: "account-one",
+            inputTokens: 100
+        )
+        let resolver = StaticCursorAccountResolver(result: .success(account))
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
+            codexSessionsPath: "/missing-codex-\(UUID().uuidString)",
+            codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)",
+            cursorUsageSyncer: CountingCursorUsageSyncerProbe()
+        )
+        let store = AppStore(
+            database: database,
+            syncManager: syncManager,
+            cursorAccountResolver: resolver,
+            observeRefreshIntervalChanges: false
+        )
+        let selectedYear = Calendar.current.component(.year, from: Date())
+        store.appFilter = .cursor
+        store.heatmapMode = .year(selectedYear)
+        store.panelDidOpen()
+
+        let verified = expectation(description: "Cached Cursor presentation becomes verified")
+        waitUntil(attemptsRemaining: 100) {
+            store.cursorAccountPresentationState == .verified(account.account.syncIdentity)
+                && store.stats.totalRequests == 1
+                && !store.heatmap.isEmpty
+                && !store.modelDistribution.isEmpty
+        } completion: {
+            verified.fulfill()
+        }
+        wait(for: [verified], timeout: 1)
+        store.panelDidClose()
+
+        resolver.setResult(.failure(CursorUsageError.authenticationRejected))
+        store.panelDidOpen()
+
+        XCTAssertEqual(store.cursorAccountPresentationState, .verifying(nil))
+        XCTAssertEqual(store.stats.totalRequests, 0)
+        XCTAssertEqual(store.stats.totalSessions, 0)
+        XCTAssertEqual(store.stats.totalTokens, 0)
+        XCTAssertTrue(store.heatmap.isEmpty)
+        XCTAssertTrue(store.modelDistribution.isEmpty)
+        XCTAssertTrue(store.availableYears.isEmpty)
+
+        let unavailable = expectation(description: "Cursor verification failure settles")
+        waitUntil(attemptsRemaining: 100) {
+            store.cursorAccountPresentationState == .unavailable
+        } completion: {
+            unavailable.fulfill()
+        }
+        wait(for: [unavailable], timeout: 1)
+        XCTAssertEqual(store.heatmapMode, .year(selectedYear))
+        store.panelDidClose()
+    }
+
+    func testPanelOpenVerifiesCursorEvenWhenUnifiedRefreshIsThrottled() {
+        let suiteName = "AppStoreTodayRolloverTests.cursorVerificationThrottle"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults.set(RefreshInterval.fiveMinutes.rawValue, forKey: "refreshInterval")
+        let resolver = StaticCursorAccountResolver(
+            result: .success(cursorAuthenticatedAccount(userId: 1))
+        )
+        let database = DatabaseManager(inMemory: true)
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
+            codexSessionsPath: "/missing-codex-\(UUID().uuidString)",
+            codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)"
+        )
+        let store = AppStore(
+            database: database,
+            syncManager: syncManager,
+            refreshSettings: RefreshSettings(defaults: defaults),
+            cursorAccountResolver: resolver,
+            observeRefreshIntervalChanges: false
+        )
+
+        store.panelDidOpen()
+        let firstVerification = expectation(description: "First Cursor verification finishes")
+        waitUntil(attemptsRemaining: 100) {
+            resolver.callCount > 0
+        } completion: {
+            firstVerification.fulfill()
+        }
+        wait(for: [firstVerification], timeout: 1)
+        store.panelDidClose()
+        let firstCallCount = resolver.callCount
+
+        store.panelDidOpen()
+        let throttledVerification = expectation(description: "Throttled open still verifies Cursor")
+        waitUntil(attemptsRemaining: 100) {
+            resolver.callCount > firstCallCount
+        } completion: {
+            throttledVerification.fulfill()
+        }
+        wait(for: [throttledVerification], timeout: 1)
+        store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testDisablingCursorCancelsAccountReplacementBeforeCommit() throws {
+        let suiteName = "AppStoreTodayRolloverTests.cancelCursorAccountReplacement"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        let database = DatabaseManager(inMemory: true)
+        let firstIdentity = cursorAuthenticatedAccount(userId: 1).account.syncIdentity
+        try seedCursorCache(
+            database: database,
+            identity: firstIdentity,
+            model: "account-one",
+            inputTokens: 100
+        )
+        let secondAccount = cursorAuthenticatedAccount(userId: 2)
+        let syncer = BlockingReplacementCursorUsageSyncer(
+            database: database,
+            account: secondAccount,
+            inputTokens: 200
+        )
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
+            codexSessionsPath: "/missing-codex-\(UUID().uuidString)",
+            codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)",
+            cursorUsageSyncer: syncer
+        )
+        let store = AppStore(
+            database: database,
+            syncManager: syncManager,
+            monitoringSettings: monitoringSettings,
+            cursorAccountResolver: StaticCursorAccountResolver(
+                result: .success(secondAccount)
+            ),
+            observeRefreshIntervalChanges: false
+        )
+
+        store.panelDidOpen()
+        wait(for: [syncer.started], timeout: 1)
+        monitoringSettings.enabledAgents = [.claude, .codex]
+        syncer.release.signal()
+
+        let cancellationFinished = expectation(description: "Cursor replacement cancellation finishes")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            cancellationFinished.fulfill()
+        }
+        wait(for: [cancellationFinished], timeout: 1)
+        XCTAssertEqual(
+            database.getSyncState(for: CursorUsageService.syncStateKey)?.sessionId,
+            firstIdentity
+        )
+        XCTAssertEqual(store.cursorAccountPresentationState, .unverified)
+        store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testCancelledSameAccountSyncCannotInvalidateNewerGeneration() throws {
+        let suiteName = "AppStoreTodayRolloverTests.sameAccountSyncGeneration"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults.set(RefreshInterval.fiveMinutes.rawValue, forKey: "refreshInterval")
+        let database = DatabaseManager(inMemory: true)
+        let oldAccount = cursorAuthenticatedAccount(userId: 1)
+        let currentAccount = cursorAuthenticatedAccount(userId: 2)
+        try seedCursorCache(
+            database: database,
+            identity: oldAccount.account.syncIdentity,
+            model: "old-account",
+            inputTokens: 100
+        )
+        let syncer = BlockingThenSuccessfulCursorUsageSyncer(
+            database: database,
+            account: currentAccount
+        )
+        let secondRequestSubmitted = expectation(description: "Second same-account sync is submitted")
+        let submissionLock = NSLock()
+        var submissionCount = 0
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
+            codexSessionsPath: "/missing-codex-\(UUID().uuidString)",
+            codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)",
+            cursorUsageSyncer: syncer,
+            beforeCursorDrainSubmission: {
+                submissionLock.lock()
+                submissionCount += 1
+                let isSecondSubmission = submissionCount == 2
+                submissionLock.unlock()
+                if isSecondSubmission {
+                    secondRequestSubmitted.fulfill()
+                }
+            }
+        )
+        let refreshCoordinator = PanelRefreshCoordinator()
+        let refreshCoordinatorSettled = expectation(description: "Refresh throttle is primed")
+        refreshCoordinator.start(interval: .fiveMinutes) { completion in
+            completion()
+            DispatchQueue.main.async {
+                refreshCoordinatorSettled.fulfill()
+            }
+        }
+        wait(for: [refreshCoordinatorSettled], timeout: 1)
+        let store = AppStore(
+            database: database,
+            syncManager: syncManager,
+            refreshSettings: RefreshSettings(defaults: defaults),
+            cursorAccountResolver: StaticCursorAccountResolver(result: .success(currentAccount)),
+            refreshCoordinator: refreshCoordinator,
+            observeRefreshIntervalChanges: false
+        )
+        store.appFilter = .cursor
+        store.panelDidOpen()
+
+        wait(for: [syncer.firstStarted], timeout: 1)
+
+        store.appFilter = .all
+        wait(for: [secondRequestSubmitted], timeout: 1)
+        syncer.releaseFirst.signal()
+
+        let verified = expectation(description: "Newer same-account sync remains authoritative")
+        waitUntil(attemptsRemaining: 100) {
+            store.cursorAccountPresentationState == .verified(currentAccount.account.syncIdentity)
+                && database.getSyncState(
+                    for: CursorUsageService.syncStateKey
+                )?.sessionId == currentAccount.account.syncIdentity
+        } completion: {
+            verified.fulfill()
+        }
+        wait(for: [verified], timeout: 1)
+        store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testDisablingCursorWhileAccountResolutionIsPendingDoesNotStartSync() {
+        let suiteName = "AppStoreTodayRolloverTests.cancelPendingCursorResolution"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        let resolver = BlockingCursorAccountResolver(
+            account: cursorAuthenticatedAccount(userId: 2)
+        )
+        let syncer = CountingCursorUsageSyncerProbe()
+        let database = DatabaseManager(inMemory: true)
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
+            codexSessionsPath: "/missing-codex-\(UUID().uuidString)",
+            codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)",
+            cursorUsageSyncer: syncer
+        )
+        let store = AppStore(
+            database: database,
+            syncManager: syncManager,
+            monitoringSettings: monitoringSettings,
+            cursorAccountResolver: resolver,
+            observeRefreshIntervalChanges: false
+        )
+
+        store.panelDidOpen()
+        let resolutionStarted = expectation(description: "Cursor resolution starts")
+        waitUntil(attemptsRemaining: 100) {
+            resolver.callCount > 0
+        } completion: {
+            resolutionStarted.fulfill()
+        }
+        wait(for: [resolutionStarted], timeout: 1)
+
+        monitoringSettings.enabledAgents = [.claude, .codex]
+        resolver.releasePendingCalls()
+
+        let callbacksSettled = expectation(description: "Rejected resolutions settle")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            callbacksSettled.fulfill()
+        }
+        wait(for: [callbacksSettled], timeout: 1)
+        XCTAssertEqual(syncer.syncCount, 0)
+        XCTAssertEqual(store.cursorAccountPresentationState, .unverified)
+        store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testAccountResolutionFinishingDuringRebuildDoesNotStartSync() {
+        let resolver = BlockingCursorAccountResolver(
+            account: cursorAuthenticatedAccount(userId: 2)
+        )
+        let syncer = CountingCursorUsageSyncerProbe()
+        let database = DatabaseManager(inMemory: true)
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
+            codexSessionsPath: "/missing-codex-\(UUID().uuidString)",
+            codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)",
+            cursorUsageSyncer: syncer
+        )
+        let store = AppStore(
+            database: database,
+            syncManager: syncManager,
+            cursorAccountResolver: resolver,
+            observeRefreshIntervalChanges: false
+        )
+
+        store.panelDidOpen()
+        let resolutionStarted = expectation(description: "Cursor resolution starts")
+        waitUntil(attemptsRemaining: 100) {
+            resolver.callCount > 0
+        } completion: {
+            resolutionStarted.fulfill()
+        }
+        wait(for: [resolutionStarted], timeout: 1)
+
+        store.isRebuildingUsageData = true
+        resolver.releasePendingCalls()
+        let callbackSettled = expectation(description: "Rebuild rejects Cursor resolution")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            callbackSettled.fulfill()
+        }
+        wait(for: [callbackSettled], timeout: 1)
+        XCTAssertEqual(syncer.syncCount, 0)
+        XCTAssertEqual(store.cursorAccountPresentationState, .verifying(nil))
+        store.isRebuildingUsageData = false
+        store.panelDidClose()
+    }
+
     private func waitUntil(
         attemptsRemaining: Int,
         condition: @escaping () -> Bool,
@@ -1062,6 +1714,47 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             outputTokens: 0,
             cacheReadTokens: 0,
             cacheCreationTokens: 0
+        )
+    }
+
+    private func cursorAuthenticatedAccount(userId: Int) -> CursorAuthenticatedAccount {
+        let account = try! JSONDecoder().decode(
+            CursorAccount.self,
+            from: Data(#"{"userId":\#(userId),"teamId":7}"#.utf8)
+        )
+        return CursorAuthenticatedAccount(token: "token-\(userId)", account: account)
+    }
+
+    private func seedCursorCache(
+        database: DatabaseManager,
+        identity: String,
+        model: String,
+        inputTokens: Int
+    ) throws {
+        let record = ParsedRecord(
+            requestId: "cursor:\(model)",
+            appType: AgentID.cursor.appType,
+            model: model,
+            inputTokens: inputTokens,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            sessionId: model,
+            createdAt: Int(Date().timeIntervalSince1970)
+        )
+        let state = SyncState(
+            filePath: CursorUsageService.syncStateKey,
+            byteOffset: 1,
+            recordCount: 1,
+            sessionId: identity,
+            model: nil,
+            lastModified: 1,
+            lastSyncedAt: 1
+        )
+        try database.replaceAppRecords(
+            appType: AgentID.cursor.appType,
+            records: [record],
+            state: state
         )
     }
 }
@@ -1110,6 +1803,7 @@ private final class RecordingCursorSpendRefresher: CursorSpendRefreshing {
 
     func refresh(
         range: CursorSpendRange,
+        expectedAccountIdentity: String?,
         force: Bool,
         cancellation: AgentSyncCancellation?,
         completion: @escaping (CursorSpendSnapshot?) -> Void
@@ -1117,6 +1811,242 @@ private final class RecordingCursorSpendRefresher: CursorSpendRefreshing {
         refreshCount += 1
         started.fulfill()
         completion(nil)
+    }
+}
+
+private final class ControllableCursorSpendRefresher: CursorSpendRefreshing {
+    let started = XCTestExpectation(description: "Cursor spend refresh started")
+    private let lock = NSLock()
+    private var completions: [(CursorSpendSnapshot?) -> Void] = []
+    private var storedRanges: [CursorSpendRange] = []
+    private var storedCancellations: [AgentSyncCancellation?] = []
+
+    var refreshCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedRanges.count
+    }
+
+    var ranges: [CursorSpendRange] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedRanges
+    }
+
+    var cancellations: [AgentSyncCancellation?] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedCancellations
+    }
+
+    func refresh(
+        range: CursorSpendRange,
+        expectedAccountIdentity: String?,
+        force: Bool,
+        cancellation: AgentSyncCancellation?,
+        completion: @escaping (CursorSpendSnapshot?) -> Void
+    ) {
+        lock.lock()
+        storedRanges.append(range)
+        storedCancellations.append(cancellation)
+        completions.append(completion)
+        lock.unlock()
+        started.fulfill()
+    }
+
+    func finishNext() {
+        lock.lock()
+        let completion = completions.isEmpty ? nil : completions.removeFirst()
+        lock.unlock()
+        completion?(nil)
+    }
+}
+
+private final class StaticCursorAccountResolver: CursorAccountResolving {
+    private let lock = NSLock()
+    private var result: Result<CursorAuthenticatedAccount, Error>
+    private var storedCallCount = 0
+
+    var callCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedCallCount
+    }
+
+    init(result: Result<CursorAuthenticatedAccount, Error>) {
+        self.result = result
+    }
+
+    func resolve(
+        force: Bool,
+        cancellation: AgentSyncCancellation?
+    ) throws -> CursorAuthenticatedAccount {
+        lock.lock()
+        storedCallCount += 1
+        let result = result
+        lock.unlock()
+        return try result.get()
+    }
+
+    func setResult(_ result: Result<CursorAuthenticatedAccount, Error>) {
+        lock.lock()
+        self.result = result
+        lock.unlock()
+    }
+}
+
+private final class BlockingCursorAccountResolver: CursorAccountResolving {
+    private let account: CursorAuthenticatedAccount
+    private let release = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var storedCallCount = 0
+
+    var callCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedCallCount
+    }
+
+    init(account: CursorAuthenticatedAccount) {
+        self.account = account
+    }
+
+    func resolve(
+        force: Bool,
+        cancellation: AgentSyncCancellation?
+    ) throws -> CursorAuthenticatedAccount {
+        lock.lock()
+        storedCallCount += 1
+        lock.unlock()
+        _ = release.wait(timeout: .now() + 2)
+        return account
+    }
+
+    func releasePendingCalls() {
+        for _ in 0..<4 {
+            release.signal()
+        }
+    }
+}
+
+private final class CountingCursorUsageSyncerProbe: CursorUsageSyncing {
+    private let lock = NSLock()
+    private var storedSyncCount = 0
+
+    var syncCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedSyncCount
+    }
+
+    func sync() throws -> SessionSyncResult {
+        lock.lock()
+        storedSyncCount += 1
+        lock.unlock()
+        return SessionSyncResult(filesSynced: 1, recordsSynced: 0)
+    }
+}
+
+private final class BlockingReplacementCursorUsageSyncer: CancellableCursorUsageSyncing {
+    let started = XCTestExpectation(description: "Cursor account replacement starts")
+    let release = DispatchSemaphore(value: 0)
+    private let database: DatabaseManager
+    private let account: CursorAuthenticatedAccount
+    private let inputTokens: Int
+
+    init(
+        database: DatabaseManager,
+        account: CursorAuthenticatedAccount,
+        inputTokens: Int
+    ) {
+        self.database = database
+        self.account = account
+        self.inputTokens = inputTokens
+    }
+
+    func sync() throws -> SessionSyncResult {
+        try sync(cancellation: nil)
+    }
+
+    func sync(cancellation: AgentSyncCancellation?) throws -> SessionSyncResult {
+        started.fulfill()
+        _ = release.wait(timeout: .now() + 2)
+        guard cancellation?.isEnabled(.cursor) != false else {
+            throw CursorUsageError.cancelled
+        }
+        let record = ParsedRecord(
+            requestId: "cursor:account-two",
+            appType: AgentID.cursor.appType,
+            model: "account-two",
+            inputTokens: inputTokens,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            sessionId: "account-two",
+            createdAt: Int(Date().timeIntervalSince1970)
+        )
+        let state = SyncState(
+            filePath: CursorUsageService.syncStateKey,
+            byteOffset: 2,
+            recordCount: 1,
+            sessionId: account.account.syncIdentity,
+            model: nil,
+            lastModified: 2,
+            lastSyncedAt: 2
+        )
+        try database.replaceAppRecords(
+            appType: AgentID.cursor.appType,
+            records: [record],
+            state: state
+        )
+        return SessionSyncResult(filesSynced: 1, recordsSynced: 1)
+    }
+}
+
+private final class BlockingThenSuccessfulCursorUsageSyncer: CancellableCursorUsageSyncing {
+    let firstStarted = XCTestExpectation(description: "First same-account sync starts")
+    let releaseFirst = DispatchSemaphore(value: 0)
+    private let database: DatabaseManager
+    private let account: CursorAuthenticatedAccount
+    private let lock = NSLock()
+    private var syncCount = 0
+
+    init(database: DatabaseManager, account: CursorAuthenticatedAccount) {
+        self.database = database
+        self.account = account
+    }
+
+    func sync() throws -> SessionSyncResult {
+        try sync(cancellation: nil)
+    }
+
+    func sync(cancellation: AgentSyncCancellation?) throws -> SessionSyncResult {
+        lock.lock()
+        let index = syncCount
+        syncCount += 1
+        lock.unlock()
+        if index == 0 {
+            firstStarted.fulfill()
+            _ = releaseFirst.wait(timeout: .now() + 2)
+            guard cancellation?.isEnabled(.cursor) != false else {
+                throw CursorUsageError.cancelled
+            }
+        }
+        let state = SyncState(
+            filePath: CursorUsageService.syncStateKey,
+            byteOffset: Int64(index + 1),
+            recordCount: 0,
+            sessionId: account.account.syncIdentity,
+            model: nil,
+            lastModified: index + 1,
+            lastSyncedAt: index + 1
+        )
+        try database.replaceAppRecords(
+            appType: AgentID.cursor.appType,
+            records: [],
+            state: state
+        )
+        return SessionSyncResult(filesSynced: 1, recordsSynced: 0)
     }
 }
 

@@ -17,21 +17,41 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
     private static let overlapMilliseconds: Int64 = 60_000
 
     private let database: DatabaseManager
+    private let accountSession: CursorAccountResolving
     private let client: CursorDashboardClient
     private let now: () -> Date
 
     init(
         database: DatabaseManager = .shared,
-        authenticationReader: CursorAuthenticationReading = CursorStateAuthenticationReader(),
-        transport: CursorHTTPTransport = CursorURLSessionTransport(),
+        accountSession: CursorAccountResolving = CursorAccountSession.shared,
+        client: CursorDashboardClient = CursorDashboardClient(),
         now: @escaping () -> Date = Date.init
     ) {
         self.database = database
-        self.client = CursorDashboardClient(
-            authenticationReader: authenticationReader,
-            transport: transport
-        )
+        self.accountSession = accountSession
+        self.client = client
         self.now = now
+    }
+
+    convenience init(
+        database: DatabaseManager = .shared,
+        authenticationReader: CursorAuthenticationReading,
+        transport: CursorHTTPTransport,
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.init(
+            database: database,
+            accountSession: CursorAccountSession(
+                authenticationReader: authenticationReader,
+                transport: transport,
+                normalReuseInterval: 0
+            ),
+            client: CursorDashboardClient(
+                authenticationReader: authenticationReader,
+                transport: transport
+            ),
+            now: now
+        )
     }
 
     func sync() throws -> SessionSyncResult {
@@ -43,7 +63,10 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
         let currentDate = now()
         let currentSeconds = Int(currentDate.timeIntervalSince1970)
         let existingState = database.getSyncState(for: Self.syncStateKey)
-        let authenticated = try client.authenticatedAccount(cancellation: cancellation)
+        let authenticated = try accountSession.resolve(
+            force: true,
+            cancellation: cancellation
+        )
         let token = authenticated.token
         let account = authenticated.account
         let accountIdentity = account.syncIdentity

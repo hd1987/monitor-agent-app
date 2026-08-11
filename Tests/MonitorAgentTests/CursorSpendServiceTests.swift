@@ -48,10 +48,67 @@ final class CursorSpendServiceTests: XCTestCase {
 
         _ = try service.refresh(range: range)
         _ = try service.refresh(range: range)
-        XCTAssertEqual(transport.requestCount, 3)
+        XCTAssertEqual(transport.requestCount, 4)
 
         _ = try service.refresh(range: range, force: true)
-        XCTAssertEqual(transport.requestCount, 6)
+        XCTAssertEqual(transport.requestCount, 7)
+    }
+
+    func testFreshSnapshotCannotBypassChangedAccountVerification() throws {
+        let database = DatabaseManager(inMemory: true)
+        let firstIdentity = try seedCursorIdentity(database: database, userId: 42)
+        let now = Date(timeIntervalSince1970: 1_785_470_400)
+        let range = spendRange(now: now)
+        _ = try database.mergeCursorSpendSnapshot(
+            accountIdentity: firstIdentity,
+            range: range,
+            totalCents: 500,
+            onDemandCents: 100,
+            updatedAt: now
+        )
+        let transport = CursorSpendTransportStub(
+            userId: 84,
+            totalCents: 900,
+            onDemandCents: 200
+        )
+        let service = CursorSpendService(
+            database: database,
+            authenticationReader: CursorSpendAuthenticationStub(),
+            transport: transport,
+            now: { now }
+        )
+
+        XCTAssertThrowsError(try service.refresh(range: range)) { error in
+            XCTAssertEqual(error as? CursorSpendError, .accountChanged)
+        }
+        XCTAssertEqual(transport.requestCount, 3)
+    }
+
+    func testMissingDailySpendDoesNotReplaceCachedValuesWithZeroes() throws {
+        let database = DatabaseManager(inMemory: true)
+        let identity = try seedCursorIdentity(database: database)
+        let now = Date(timeIntervalSince1970: 1_785_470_400)
+        let range = spendRange(now: now)
+        _ = try database.mergeCursorSpendSnapshot(
+            accountIdentity: identity,
+            range: range,
+            totalCents: 500,
+            onDemandCents: 100,
+            updatedAt: now.addingTimeInterval(-600)
+        )
+        let transport = CursorSpendTransportStub(totalCents: 0, onDemandCents: 0)
+        transport.omitsDailySpend = true
+        let service = CursorSpendService(
+            database: database,
+            authenticationReader: CursorSpendAuthenticationStub(),
+            transport: transport,
+            now: { now }
+        )
+
+        let snapshot = try XCTUnwrap(service.refresh(range: range, force: true))
+
+        XCTAssertEqual(snapshot.totalCents, 500)
+        XCTAssertEqual(snapshot.onDemandCents, 100)
     }
 
     func testInvalidOnDemandValueDoesNotReplaceValidTotal() throws {
@@ -169,8 +226,271 @@ final class CursorSpendServiceTests: XCTestCase {
             state: secondState
         )
 
-        XCTAssertNil(database.fetchCursorSpendSnapshot(range: range))
+        XCTAssertNil(database.fetchCursorSpendSnapshot(
+            accountIdentity: secondAccount.syncIdentity,
+            range: range
+        ))
         XCTAssertTrue(database.fetchCursorSpendSnapshots(accountIdentity: firstIdentity).isEmpty)
+    }
+
+    func testRefreshCoordinatorCoalescesMatchingActiveRequests() {
+        let service = BlockingCursorSpendServiceStub()
+        let coordinator = CursorSpendRefreshCoordinator(service: service)
+        let range = CursorSpendRange(
+            key: "today",
+            startMilliseconds: 1_000,
+            endMilliseconds: 2_000
+        )
+        let completed = expectation(description: "Matching refreshes complete")
+        completed.expectedFulfillmentCount = 2
+
+        coordinator.refresh(
+            range: range,
+            expectedAccountIdentity: "account-one",
+            force: false,
+            cancellation: nil
+        ) { _ in
+            completed.fulfill()
+        }
+        wait(for: [service.firstRequestStarted], timeout: 1)
+        coordinator.refresh(
+            range: range,
+            expectedAccountIdentity: "account-one",
+            force: false,
+            cancellation: nil
+        ) { _ in
+            completed.fulfill()
+        }
+        service.releaseFirstRequest.signal()
+
+        wait(for: [completed], timeout: 1)
+        XCTAssertEqual(service.ranges, [range])
+    }
+
+    func testRefreshCoordinatorKeepsOnlyLatestPendingRequest() {
+        let service = BlockingCursorSpendServiceStub()
+        let coordinator = CursorSpendRefreshCoordinator(service: service)
+        let firstRange = CursorSpendRange(
+            key: "today",
+            startMilliseconds: 1_000,
+            endMilliseconds: 2_000
+        )
+        let supersededRange = CursorSpendRange(
+            key: "last-7",
+            startMilliseconds: 3_000,
+            endMilliseconds: 4_000
+        )
+        let latestRange = CursorSpendRange(
+            key: "last-30",
+            startMilliseconds: 5_000,
+            endMilliseconds: 6_000
+        )
+        let completed = expectation(description: "All refresh waiters complete")
+        completed.expectedFulfillmentCount = 3
+
+        coordinator.refresh(
+            range: firstRange,
+            expectedAccountIdentity: "account-one",
+            force: false,
+            cancellation: nil
+        ) { _ in
+            completed.fulfill()
+        }
+        wait(for: [service.firstRequestStarted], timeout: 1)
+        coordinator.refresh(
+            range: supersededRange,
+            expectedAccountIdentity: "account-one",
+            force: false,
+            cancellation: nil
+        ) { _ in
+            completed.fulfill()
+        }
+        coordinator.refresh(
+            range: latestRange,
+            expectedAccountIdentity: "account-one",
+            force: false,
+            cancellation: nil
+        ) { _ in
+            completed.fulfill()
+        }
+        service.releaseFirstRequest.signal()
+
+        wait(for: [completed], timeout: 1)
+        XCTAssertEqual(service.ranges, [firstRange, latestRange])
+    }
+
+    func testRefreshCoordinatorPreservesPendingManualRefresh() {
+        let service = BlockingCursorSpendServiceStub()
+        let coordinator = CursorSpendRefreshCoordinator(service: service)
+        let range = CursorSpendRange(
+            key: "today",
+            startMilliseconds: 1_000,
+            endMilliseconds: 2_000
+        )
+        let completed = expectation(description: "Automatic and manual refreshes complete")
+        completed.expectedFulfillmentCount = 3
+
+        coordinator.refresh(
+            range: range,
+            expectedAccountIdentity: "account-one",
+            force: false,
+            cancellation: nil
+        ) { _ in
+            completed.fulfill()
+        }
+        wait(for: [service.firstRequestStarted], timeout: 1)
+        coordinator.refresh(
+            range: range,
+            expectedAccountIdentity: "account-one",
+            force: true,
+            cancellation: nil
+        ) { _ in
+            completed.fulfill()
+        }
+        coordinator.refresh(
+            range: range,
+            expectedAccountIdentity: "account-one",
+            force: false,
+            cancellation: nil
+        ) { _ in
+            completed.fulfill()
+        }
+        service.releaseFirstRequest.signal()
+
+        wait(for: [completed], timeout: 1)
+        XCTAssertEqual(service.forces, [false, true])
+    }
+
+    func testRefreshCoordinatorPreservesManualForceAcrossCancellationDomains() {
+        let service = BlockingCursorSpendServiceStub()
+        let coordinator = CursorSpendRefreshCoordinator(service: service)
+        let range = CursorSpendRange(
+            key: "today",
+            startMilliseconds: 1_000,
+            endMilliseconds: 2_000
+        )
+        let manualCancellation = AgentSyncCancellation(enabledAgents: [.cursor])
+        let automaticCancellation = AgentSyncCancellation(enabledAgents: [.cursor])
+        let completed = expectation(description: "Cross-domain refreshes complete")
+        completed.expectedFulfillmentCount = 3
+
+        coordinator.refresh(
+            range: range,
+            expectedAccountIdentity: "account-one",
+            force: false,
+            cancellation: nil
+        ) { _ in
+            completed.fulfill()
+        }
+        wait(for: [service.firstRequestStarted], timeout: 1)
+        coordinator.refresh(
+            range: range,
+            expectedAccountIdentity: "account-one",
+            force: true,
+            cancellation: manualCancellation
+        ) { _ in
+            completed.fulfill()
+        }
+        coordinator.refresh(
+            range: range,
+            expectedAccountIdentity: "account-one",
+            force: false,
+            cancellation: automaticCancellation
+        ) { _ in
+            completed.fulfill()
+        }
+        service.releaseFirstRequest.signal()
+
+        wait(for: [completed], timeout: 1)
+        XCTAssertEqual(service.forces, [false, true])
+    }
+
+    func testManualCompletionWaitsForOwnedForcedRequest() {
+        let service = TwoStageBlockingCursorSpendServiceStub()
+        let coordinator = CursorSpendRefreshCoordinator(service: service)
+        let range = CursorSpendRange(
+            key: "today",
+            startMilliseconds: 1_000,
+            endMilliseconds: 2_000
+        )
+        let manualCancellation = AgentSyncCancellation(enabledAgents: [.cursor])
+        let automaticCancellation = AgentSyncCancellation(enabledAgents: [.cursor])
+        let firstCompleted = expectation(description: "First request completes")
+        let manualCompleted = expectation(description: "Transferred manual request completes")
+        let automaticCompleted = expectation(description: "Replacement automatic request completes")
+        let manualProbe = CompletionProbe()
+
+        coordinator.refresh(
+            range: range,
+            expectedAccountIdentity: "account-one",
+            force: false,
+            cancellation: nil
+        ) { _ in
+            firstCompleted.fulfill()
+        }
+        wait(for: [service.firstRequestStarted], timeout: 1)
+        coordinator.refresh(
+            range: range,
+            expectedAccountIdentity: "account-one",
+            force: true,
+            cancellation: manualCancellation
+        ) { _ in
+            manualProbe.markCompleted()
+            manualCompleted.fulfill()
+        }
+        coordinator.refresh(
+            range: range,
+            expectedAccountIdentity: "account-one",
+            force: false,
+            cancellation: automaticCancellation
+        ) { _ in
+            automaticCompleted.fulfill()
+        }
+        automaticCancellation.disableAgents(notIn: [])
+
+        service.releaseFirstRequest.signal()
+        wait(for: [firstCompleted, service.secondRequestStarted], timeout: 1)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertFalse(manualProbe.isCompleted)
+
+        service.releaseSecondRequest.signal()
+        wait(for: [manualCompleted, automaticCompleted], timeout: 1)
+        XCTAssertEqual(service.forces, [false, true])
+        XCTAssertTrue(service.cancellations[1] === manualCancellation)
+    }
+
+    func testRefreshCoordinatorDoesNotCoalesceAcrossAccounts() {
+        let service = BlockingCursorSpendServiceStub()
+        let coordinator = CursorSpendRefreshCoordinator(service: service)
+        let range = CursorSpendRange(
+            key: "today",
+            startMilliseconds: 1_000,
+            endMilliseconds: 2_000
+        )
+        let completed = expectation(description: "Both account refreshes complete")
+        completed.expectedFulfillmentCount = 2
+
+        coordinator.refresh(
+            range: range,
+            expectedAccountIdentity: "account-one",
+            force: false,
+            cancellation: nil
+        ) { _ in
+            completed.fulfill()
+        }
+        wait(for: [service.firstRequestStarted], timeout: 1)
+        coordinator.refresh(
+            range: range,
+            expectedAccountIdentity: "account-two",
+            force: false,
+            cancellation: nil
+        ) { _ in
+            completed.fulfill()
+        }
+        service.releaseFirstRequest.signal()
+
+        wait(for: [completed], timeout: 1)
+        XCTAssertEqual(service.ranges, [range, range])
     }
 
     private func seedCursorIdentity(
@@ -214,15 +534,114 @@ private struct CursorSpendAuthenticationStub: CursorAuthenticationReading {
     }
 }
 
+private final class BlockingCursorSpendServiceStub: CursorSpendServicing {
+    let firstRequestStarted = XCTestExpectation(description: "First Cursor spend request started")
+    let releaseFirstRequest = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var storedRanges: [CursorSpendRange] = []
+    private var storedForces: [Bool] = []
+
+    var ranges: [CursorSpendRange] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedRanges
+    }
+
+    var forces: [Bool] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedForces
+    }
+
+    func refresh(
+        range: CursorSpendRange,
+        force: Bool,
+        cancellation: AgentSyncCancellation?
+    ) throws -> CursorSpendSnapshot? {
+        lock.lock()
+        storedRanges.append(range)
+        storedForces.append(force)
+        let isFirstRequest = storedRanges.count == 1
+        lock.unlock()
+        if isFirstRequest {
+            firstRequestStarted.fulfill()
+            _ = releaseFirstRequest.wait(timeout: .now() + 2)
+        }
+        return nil
+    }
+}
+
+private final class TwoStageBlockingCursorSpendServiceStub: CursorSpendServicing {
+    let firstRequestStarted = XCTestExpectation(description: "First request started")
+    let secondRequestStarted = XCTestExpectation(description: "Second request started")
+    let releaseFirstRequest = DispatchSemaphore(value: 0)
+    let releaseSecondRequest = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var storedForces: [Bool] = []
+    private var storedCancellations: [AgentSyncCancellation?] = []
+
+    var forces: [Bool] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedForces
+    }
+
+    var cancellations: [AgentSyncCancellation?] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedCancellations
+    }
+
+    func refresh(
+        range: CursorSpendRange,
+        force: Bool,
+        cancellation: AgentSyncCancellation?
+    ) throws -> CursorSpendSnapshot? {
+        lock.lock()
+        storedForces.append(force)
+        storedCancellations.append(cancellation)
+        let requestIndex = storedForces.count
+        lock.unlock()
+        if requestIndex == 1 {
+            firstRequestStarted.fulfill()
+            _ = releaseFirstRequest.wait(timeout: .now() + 2)
+        } else if requestIndex == 2 {
+            secondRequestStarted.fulfill()
+            _ = releaseSecondRequest.wait(timeout: .now() + 2)
+        }
+        return nil
+    }
+}
+
+private final class CompletionProbe {
+    private let lock = NSLock()
+    private var storedIsCompleted = false
+
+    var isCompleted: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedIsCompleted
+    }
+
+    func markCompleted() {
+        lock.lock()
+        storedIsCompleted = true
+        lock.unlock()
+    }
+}
+
 private final class CursorSpendTransportStub: CursorHTTPTransport {
     private let lock = NSLock()
+    let userId: Int
     var totalCents: Int
     var onDemandCents: Int
     var totalStatusCode = 200
     var onDemandStatusCode = 200
+    var omitsDailySpend = false
     private var requests: [URLRequest] = []
 
-    init(totalCents: Int, onDemandCents: Int) {
+    init(userId: Int = 42, totalCents: Int, onDemandCents: Int) {
+        self.userId = userId
         self.totalCents = totalCents
         self.onDemandCents = onDemandCents
     }
@@ -258,7 +677,7 @@ private final class CursorSpendTransportStub: CursorHTTPTransport {
             return response(
                 request: request,
                 statusCode: 200,
-                body: #"{"userId":42,"teamId":7,"createdAt":"1780000000000"}"#
+                body: #"{"userId":\#(userId),"teamId":7,"createdAt":"1780000000000"}"#
             )
         }
         let body = try XCTUnwrap(request.httpBody)
@@ -270,7 +689,9 @@ private final class CursorSpendTransportStub: CursorHTTPTransport {
         let cents = isOnDemand ? onDemandCents : totalCents
         let statusCode = isOnDemand ? onDemandStatusCode : totalStatusCode
         let responseBody = statusCode == 200
-            ? (cents == 0
+            ? (omitsDailySpend
+                ? #"{}"#
+                : cents == 0
                 ? #"{"dailySpend":[],"categories":[]}"#
                 : #"{"dailySpend":[{"day":"1785000000000","category":"model","spendCents":"\#(cents)"}]}"#)
             : "{}"

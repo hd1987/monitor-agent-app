@@ -12,9 +12,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 ### Changed
 - Distribute all visible main-panel stat cards evenly within the fixed panel width
 - Share Cursor authentication and bounded DashboardService transport between token and spend refreshes
+- Gate every Cursor-backed presentation on a freshly verified matching account identity while retaining unverified cache data on disk
 
 ### Fixed
 - Keep current and future stat-card tips above Activity and other later panel sections
+- Prevent a fresh Cursor spend cache from bypassing current-account verification and reject missing spend arrays instead of storing false zeroes
+- Keep Cursor spend inside its unified refresh lifecycle, preserve forced-request cancellation ownership, cancel stale selection-driven work before it can commit, collapse overlapping range requests to the latest pending selection, bound DashboardService transfers, and release temporary transport sessions
+- Prevent stale or canceled Cursor account verification from starting work, blocking its caller, exposing account-mismatched presentation, publishing a query across an account replacement, dropping a queued sync completion, rewriting the selected Heatmap year, sharing another account generation's sync result, or crossing an exclusive rebuild barrier
 
 ## [0.11.0] - 2026-08-09
 

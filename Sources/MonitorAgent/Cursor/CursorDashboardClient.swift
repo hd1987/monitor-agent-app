@@ -17,6 +17,10 @@ protocol CancellableCursorHTTPTransport: CursorHTTPTransport {
     ) throws -> (Data, HTTPURLResponse)
 }
 
+private enum CursorDashboardLimits {
+    static let maximumResponseBytes = 5 * 1_024 * 1_024
+}
+
 enum CursorUsageError: LocalizedError, Equatable {
     case authenticationUnavailable
     case authenticationRejected
@@ -87,16 +91,109 @@ final class CursorStateAuthenticationReader: CursorAuthenticationReading {
     }
 }
 
-final class CursorURLSessionTransport: NSObject, CancellableCursorHTTPTransport, URLSessionTaskDelegate {
+final class CursorURLSessionTransport: NSObject, CancellableCursorHTTPTransport {
+    private final class RequestState {
+        let semaphore = DispatchSemaphore(value: 0)
+        var data = Data()
+        var response: HTTPURLResponse?
+        var result: Result<(Data, HTTPURLResponse), Error>?
+    }
+
+    private final class SessionDelegate: NSObject, URLSessionDataDelegate {
+        weak var owner: CursorURLSessionTransport?
+
+        func urlSession(
+            _ session: URLSession,
+            dataTask: URLSessionDataTask,
+            didReceive response: URLResponse,
+            completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+        ) {
+            guard let owner else {
+                completionHandler(.cancel)
+                return
+            }
+            owner.receive(response, for: dataTask, completionHandler: completionHandler)
+        }
+
+        func urlSession(
+            _ session: URLSession,
+            dataTask: URLSessionDataTask,
+            didReceive data: Data
+        ) {
+            owner?.receive(data, for: dataTask)
+        }
+
+        func urlSession(
+            _ session: URLSession,
+            task: URLSessionTask,
+            didCompleteWithError error: Error?
+        ) {
+            owner?.complete(task, error: error)
+        }
+
+        func urlSession(
+            _ session: URLSession,
+            task: URLSessionTask,
+            willPerformHTTPRedirection response: HTTPURLResponse,
+            newRequest request: URLRequest,
+            completionHandler: @escaping (URLRequest?) -> Void
+        ) {
+            completionHandler(nil)
+        }
+    }
+
     private static let timeout: TimeInterval = 20
-    private lazy var session: URLSession = {
-        let configuration = URLSessionConfiguration.ephemeral
+    private let configuration: URLSessionConfiguration
+    private let maximumResponseBytes: Int
+    private let stateLock = NSLock()
+    private let sessionLock = NSLock()
+    private var requestStates: [Int: RequestState] = [:]
+    private var storedSession: URLSession?
+    private let delegateQueue: OperationQueue
+    private let sessionDelegate: SessionDelegate
+
+    init(
+        configuration: URLSessionConfiguration = .ephemeral,
+        maximumResponseBytes: Int = CursorDashboardLimits.maximumResponseBytes
+    ) {
+        self.configuration = configuration
+        self.maximumResponseBytes = max(0, maximumResponseBytes)
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        delegateQueue = queue
+        sessionDelegate = SessionDelegate()
+        super.init()
+        sessionDelegate.owner = self
+    }
+
+    deinit {
+        sessionDelegate.owner = nil
+        sessionLock.lock()
+        let session = storedSession
+        storedSession = nil
+        sessionLock.unlock()
+        session?.invalidateAndCancel()
+    }
+
+    private func session() -> URLSession {
+        sessionLock.lock()
+        defer { sessionLock.unlock() }
+        if let storedSession {
+            return storedSession
+        }
+        let configuration = configuration
         configuration.timeoutIntervalForRequest = Self.timeout
         configuration.timeoutIntervalForResource = Self.timeout
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
-    }()
+        let session = URLSession(
+            configuration: configuration,
+            delegate: sessionDelegate,
+            delegateQueue: delegateQueue
+        )
+        storedSession = session
+        return session
+    }
 
     func send(_ request: URLRequest) throws -> (Data, HTTPURLResponse) {
         try send(request, isCancelled: { false })
@@ -106,52 +203,94 @@ final class CursorURLSessionTransport: NSObject, CancellableCursorHTTPTransport,
         _ request: URLRequest,
         isCancelled: @escaping () -> Bool
     ) throws -> (Data, HTTPURLResponse) {
-        let semaphore = DispatchSemaphore(value: 0)
-        let lock = NSLock()
-        var result: Result<(Data, HTTPURLResponse), Error>?
-
-        let task = session.dataTask(with: request) { data, response, error in
-            lock.lock()
-            defer {
-                lock.unlock()
-                semaphore.signal()
-            }
-            if let error {
-                result = .failure(error)
-            } else if let data, let response = response as? HTTPURLResponse {
-                result = .success((data, response))
-            } else {
-                result = .failure(CursorUsageError.invalidResponse)
-            }
-        }
+        let state = RequestState()
+        let task = session().dataTask(with: request)
+        stateLock.lock()
+        requestStates[task.taskIdentifier] = state
+        stateLock.unlock()
         task.resume()
 
         let deadline = Date().addingTimeInterval(Self.timeout + 1)
-        while semaphore.wait(timeout: .now() + 0.1) != .success {
+        while state.semaphore.wait(timeout: .now() + 0.1) != .success {
             if isCancelled() {
                 task.cancel()
+                abandon(task)
                 throw CursorUsageError.cancelled
             }
             if Date() >= deadline {
                 task.cancel()
+                abandon(task)
                 throw CursorUsageError.requestFailed
             }
         }
 
-        lock.lock()
-        defer { lock.unlock() }
-        guard let result else { throw CursorUsageError.requestFailed }
+        guard let result = state.result else { throw CursorUsageError.requestFailed }
         return try result.get()
     }
 
-    func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
-        willPerformHTTPRedirection response: HTTPURLResponse,
-        newRequest request: URLRequest,
-        completionHandler: @escaping (URLRequest?) -> Void
+    private func receive(
+        _ response: URLResponse,
+        for dataTask: URLSessionDataTask,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
     ) {
-        completionHandler(nil)
+        guard let response = response as? HTTPURLResponse else {
+            complete(dataTask, with: .failure(CursorUsageError.invalidResponse))
+            completionHandler(.cancel)
+            return
+        }
+        guard response.expectedContentLength < 0
+                || response.expectedContentLength <= Int64(maximumResponseBytes) else {
+            complete(dataTask, with: .failure(CursorUsageError.responseTooLarge))
+            completionHandler(.cancel)
+            return
+        }
+        state(for: dataTask)?.response = response
+        completionHandler(.allow)
+    }
+
+    private func receive(_ data: Data, for dataTask: URLSessionDataTask) {
+        guard let state = state(for: dataTask) else { return }
+        guard data.count <= maximumResponseBytes - state.data.count else {
+            complete(dataTask, with: .failure(CursorUsageError.responseTooLarge))
+            dataTask.cancel()
+            return
+        }
+        state.data.append(data)
+    }
+
+    private func complete(_ task: URLSessionTask, error: Error?) {
+        guard let state = state(for: task) else { return }
+        if let error {
+            complete(task, with: .failure(error))
+        } else if let response = state.response {
+            complete(task, with: .success((state.data, response)))
+        } else {
+            complete(task, with: .failure(CursorUsageError.invalidResponse))
+        }
+    }
+
+    private func state(for task: URLSessionTask) -> RequestState? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return requestStates[task.taskIdentifier]
+    }
+
+    private func complete(
+        _ task: URLSessionTask,
+        with result: Result<(Data, HTTPURLResponse), Error>
+    ) {
+        stateLock.lock()
+        let state = requestStates.removeValue(forKey: task.taskIdentifier)
+        stateLock.unlock()
+        guard let state else { return }
+        state.result = result
+        state.semaphore.signal()
+    }
+
+    private func abandon(_ task: URLSessionTask) {
+        stateLock.lock()
+        requestStates.removeValue(forKey: task.taskIdentifier)
+        stateLock.unlock()
     }
 }
 
@@ -189,7 +328,6 @@ struct CursorAccount: Decodable {
 
 final class CursorDashboardClient {
     private static let apiOrigin = URL(string: "https://api2.cursor.sh")!
-    private static let maximumResponseBytes = 5 * 1_024 * 1_024
 
     private let authenticationReader: CursorAuthenticationReading
     private let transport: CursorHTTPTransport
@@ -254,7 +392,7 @@ final class CursorDashboardClient {
             throw CursorUsageError.requestFailed
         }
         try checkCancellation(cancellation)
-        guard data.count <= Self.maximumResponseBytes else {
+        guard data.count <= CursorDashboardLimits.maximumResponseBytes else {
             throw CursorUsageError.responseTooLarge
         }
         if response.statusCode == 401 || response.statusCode == 403 {

@@ -21,6 +21,13 @@ private enum ActivityDetailRequest: Equatable {
     case range(TimeRange)
 }
 
+enum CursorAccountPresentationState: Equatable {
+    case unverified
+    case verifying(String?)
+    case verified(String)
+    case unavailable
+}
+
 private final class RefreshCycleParticipant {
     private let lock = NSLock()
     private var isFinished = false
@@ -39,6 +46,35 @@ private final class RefreshCycleParticipant {
         isFinished = true
         lock.unlock()
         onFinish()
+    }
+}
+
+private final class DeferredRefreshCycleParticipant {
+    private let lock = NSLock()
+    private let participant: RefreshCycleParticipant
+    private var sourceDidSucceed = false
+
+    init(participant: RefreshCycleParticipant) {
+        self.participant = participant
+    }
+
+    func markSourceSucceeded() {
+        lock.lock()
+        sourceDidSucceed = true
+        lock.unlock()
+    }
+
+    func finishIfSourceFailed() {
+        lock.lock()
+        let shouldFinish = !sourceDidSucceed
+        lock.unlock()
+        if shouldFinish {
+            participant.finish()
+        }
+    }
+
+    func finish() {
+        participant.finish()
     }
 }
 
@@ -61,6 +97,7 @@ final class AppStore: ObservableObject {
     @Published var quotaSnapshots: [QuotaProviderID: QuotaSnapshot] = [:]
     @Published private(set) var quotaRefreshPhases: [QuotaProviderID: QuotaRefreshPhase] = [:]
     @Published private(set) var cursorSpendSnapshot: CursorSpendSnapshot?
+    @Published private(set) var cursorAccountPresentationState: CursorAccountPresentationState = .unverified
     @Published private(set) var manualRefreshAvailableAt: Date?
     @Published private(set) var isRefreshInProgress = false
     @Published private(set) var isManualRefreshInProgress = false
@@ -75,6 +112,7 @@ final class AppStore: ObservableObject {
     private let quotaSettings: QuotaSettings
     private let quotaCache: QuotaSnapshotCaching?
     private let cursorSpendRefresher: CursorSpendRefreshing?
+    private let cursorAccountResolver: CursorAccountResolving?
     private let activityPresentationSettings: ActivityPresentationPersisting?
     private let refreshCoordinator: PanelRefreshCoordinator
     private let hourlyTokenUsageLoader: HourlyTokenUsageLoader
@@ -83,11 +121,14 @@ final class AppStore: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var usageDataRebuildCancellation: UsageDataRebuildCancellation?
     private var activeAgentSyncCancellation: AgentSyncCancellation?
+    private var cursorAccountSyncCancellation: AgentSyncCancellation?
+    private var cursorSpendSelectionCancellation: AgentSyncCancellation?
     private var activeQuotaParticipants: [QuotaProviderID: RefreshCycleParticipant] = [:]
     private var quotaSnapshotIdentities: [QuotaProviderID: String] = [:]
     private var quotaRefreshGenerations: [QuotaProviderID: Int] = [:]
     private var quotaRestoreGenerations: [QuotaProviderID: Int] = [:]
     private var cursorSpendRefreshGeneration = 0
+    private var cursorAccountVerificationGeneration = 0
     private var reloadGeneration = 0
     private var activityLoadGeneration = 0
     private(set) var isPanelVisible = false
@@ -102,6 +143,7 @@ final class AppStore: ObservableObject {
         quotaSettings: QuotaSettings = .shared,
         quotaCache: QuotaSnapshotCaching? = nil,
         cursorSpendRefresher: CursorSpendRefreshing? = nil,
+        cursorAccountResolver: CursorAccountResolving? = nil,
         activityPresentationSettings: ActivityPresentationPersisting? = nil,
         refreshCoordinator: PanelRefreshCoordinator = PanelRefreshCoordinator(),
         observeRefreshIntervalChanges: Bool = true,
@@ -126,6 +168,7 @@ final class AppStore: ObservableObject {
         self.quotaSettings = quotaSettings
         self.quotaCache = quotaCache
         self.cursorSpendRefresher = cursorSpendRefresher
+        self.cursorAccountResolver = cursorAccountResolver
         self.activityPresentationSettings = activityPresentationSettings
         self.activityChartStyle = activityPresentationSettings?.chartStyle ?? .line
         self.refreshCoordinator = refreshCoordinator
@@ -161,9 +204,27 @@ final class AppStore: ObservableObject {
             .removeDuplicates { lhs, rhs in
                 lhs.0 == rhs.0 && lhs.1 == rhs.1
             }
+            .sink { [weak self] _ in
+                self?.cancelCursorSpendSelectionRefresh()
+            }
+            .store(in: &cancellables)
+
+        Publishers.CombineLatest($appFilter, $timeRange)
+            .removeDuplicates { lhs, rhs in
+                lhs.0 == rhs.0 && lhs.1 == rhs.1
+            }
             .debounce(for: .milliseconds(100), scheduler: DispatchQueue.main)
             .sink { [weak self] _, _ in
                 self?.cursorSpendSelectionDidChange()
+            }
+            .store(in: &cancellables)
+
+        $appFilter
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] filter in
+                guard filter == .all || filter == .cursor else { return }
+                self?.verifyCursorAccountForPresentation(force: true)
             }
             .store(in: &cancellables)
 
@@ -188,6 +249,15 @@ final class AppStore: ObservableObject {
 
     var availableAppFilters: [AppFilter] { AppFilter.available(for: enabledAgents) }
     var hasEnabledAgents: Bool { !enabledAgents.isEmpty }
+    var isCursorDataPresentationAvailable: Bool {
+        guard cursorAccountResolver != nil else { return true }
+        guard case .verified(let identity) = cursorAccountPresentationState else {
+            return false
+        }
+        return db.getSyncState(
+            for: CursorUsageService.syncStateKey
+        )?.sessionId == identity
+    }
     var isActivityDetailPresented: Bool {
         if case .closed = activityDetailState { return false }
         return true
@@ -296,14 +366,81 @@ final class AppStore: ObservableObject {
             return
         }
 
+        guard cursorAccountResolver != nil,
+              enabledAgents.contains(.cursor) else {
+            performRefreshCycleAfterCursorVerification(
+                enabledAgents: enabledAgents,
+                expectedCursorIdentity: nil,
+                cursorVerificationGeneration: nil,
+                completion: completion
+            )
+            return
+        }
+
+        resolveCursorAccount(force: true) { [weak self] identity, isAccepted, verificationGeneration in
+            guard let self else {
+                completion()
+                return
+            }
+            guard isAccepted, self.isPanelVisible else {
+                completion()
+                return
+            }
+            let currentEnabledAgents = enabledAgents.intersection(self.enabledAgents)
+            let refreshAgents = identity == nil
+                ? currentEnabledAgents.subtracting([.cursor])
+                : currentEnabledAgents
+            self.performRefreshCycleAfterCursorVerification(
+                enabledAgents: refreshAgents,
+                expectedCursorIdentity: identity,
+                cursorVerificationGeneration: verificationGeneration,
+                completion: completion
+            )
+        }
+    }
+
+    private func performRefreshCycleAfterCursorVerification(
+        enabledAgents: Set<AgentID>,
+        expectedCursorIdentity: String?,
+        cursorVerificationGeneration: Int?,
+        completion: @escaping () -> Void
+    ) {
+        guard !enabledAgents.isEmpty else {
+            completion()
+            return
+        }
+
         let group = DispatchGroup()
         let syncCancellation = AgentSyncCancellation(enabledAgents: enabledAgents)
         activeAgentSyncCancellation = syncCancellation
+        let shouldRefreshCursorSpend = enabledAgents.contains(.cursor)
+            && appFilter == .cursor
+        let cursorSpendRange = CursorSpendRange(
+            timeRange: timeRange,
+            now: currentDateProvider()
+        )
+        let forceCursorSpendRefresh = isManualRefreshInProgress
+        let cursorSpendParticipant: RefreshCycleParticipant?
+        let deferredCursorSpendParticipant: DeferredRefreshCycleParticipant?
+        if shouldRefreshCursorSpend {
+            group.enter()
+            let participant = RefreshCycleParticipant {
+                group.leave()
+            }
+            cursorSpendParticipant = participant
+            deferredCursorSpendParticipant = isCursorDataPresentationAvailable
+                ? nil
+                : DeferredRefreshCycleParticipant(participant: participant)
+        } else {
+            cursorSpendParticipant = nil
+            deferredCursorSpendParticipant = nil
+        }
 
         group.enter()
         syncManager.syncOnce(
             enabledAgents: enabledAgents,
             cancellation: syncCancellation,
+            expectedCursorIdentity: expectedCursorIdentity,
             onLocalComplete: { [weak self] in
                 DispatchQueue.main.async {
                     guard let self, self.isPanelVisible else { return }
@@ -311,44 +448,69 @@ final class AppStore: ObservableObject {
                 }
             },
             onCursorComplete: { [weak self] in
+                deferredCursorSpendParticipant?.markSourceSucceeded()
                 DispatchQueue.main.async {
-                    guard let self, self.isPanelVisible else { return }
+                    guard let self, self.isPanelVisible else {
+                        deferredCursorSpendParticipant?.finish()
+                        return
+                    }
+                    if let cursorVerificationGeneration,
+                       self.cursorAccountVerificationGeneration != cursorVerificationGeneration {
+                        deferredCursorSpendParticipant?.finish()
+                        return
+                    }
+                    let currentIdentity = self.db.getSyncState(
+                        for: CursorUsageService.syncStateKey
+                    )?.sessionId
+                    guard expectedCursorIdentity == nil
+                            || currentIdentity == expectedCursorIdentity else {
+                        deferredCursorSpendParticipant?.finish()
+                        return
+                    }
+                    if let expectedCursorIdentity {
+                        guard self.cursorAccountPresentationState == .verifying(expectedCursorIdentity)
+                                || self.cursorAccountPresentationState == .verified(expectedCursorIdentity) else {
+                            deferredCursorSpendParticipant?.finish()
+                            return
+                        }
+                    }
+                    if let currentIdentity {
+                        self.cursorAccountPresentationState = .verified(currentIdentity)
+                    }
                     self.reload()
-                    if self.appFilter == .cursor,
-                       self.enabledAgents.contains(.cursor) {
-                        let currentIdentity = self.db.getSyncState(
-                            for: CursorUsageService.syncStateKey
-                        )?.sessionId
+                    if deferredCursorSpendParticipant != nil {
                         if self.cursorSpendSnapshot?.accountIdentity != currentIdentity {
                             self.cursorSpendSnapshot = nil
                         }
+                        let currentCursorSpendRange = CursorSpendRange(
+                            timeRange: self.timeRange,
+                            now: self.currentDateProvider()
+                        )
                         self.refreshCursorSpend(
-                            range: CursorSpendRange(
-                                timeRange: self.timeRange,
-                                now: self.currentDateProvider()
-                            ),
-                            force: false,
-                            cancellation: syncCancellation
+                            range: currentCursorSpendRange,
+                            force: forceCursorSpendRefresh,
+                            cancellation: syncCancellation,
+                            completion: {
+                                cursorSpendParticipant?.finish()
+                            }
                         )
                     }
                 }
             },
             completion: {
                 group.leave()
+                deferredCursorSpendParticipant?.finishIfSourceFailed()
             }
         )
 
-        if enabledAgents.contains(.cursor), appFilter == .cursor {
-            group.enter()
+        if let cursorSpendParticipant,
+           deferredCursorSpendParticipant == nil {
             refreshCursorSpend(
-                range: CursorSpendRange(
-                    timeRange: timeRange,
-                    now: currentDateProvider()
-                ),
-                force: isManualRefreshInProgress,
+                range: cursorSpendRange,
+                force: forceCursorSpendRefresh,
                 cancellation: syncCancellation
             ) {
-                group.leave()
+                cursorSpendParticipant.finish()
             }
         }
 
@@ -382,8 +544,31 @@ final class AppStore: ObservableObject {
         }
 
         group.notify(queue: .main) { [weak self] in
-            if self?.activeAgentSyncCancellation === syncCancellation {
-                self?.activeAgentSyncCancellation = nil
+            if let self {
+                if self.activeAgentSyncCancellation === syncCancellation {
+                    self.activeAgentSyncCancellation = nil
+                }
+                let isCurrentVerification = cursorVerificationGeneration.map {
+                    self.cursorAccountVerificationGeneration == $0
+                } ?? true
+                if isCurrentVerification,
+                   let expectedCursorIdentity {
+                    let currentIdentity = self.db.getSyncState(
+                        for: CursorUsageService.syncStateKey
+                    )?.sessionId
+                    let isPendingIdentity: Bool
+                    if case .verifying(let pendingIdentity) = self.cursorAccountPresentationState {
+                        isPendingIdentity = pendingIdentity == expectedCursorIdentity
+                    } else {
+                        isPendingIdentity = false
+                    }
+                    if currentIdentity != expectedCursorIdentity || isPendingIdentity {
+                        self.cursorAccountPresentationState = .unavailable
+                        self.cursorSpendSnapshot = nil
+                        self.clearCursorDependentPresentation()
+                        self.reload()
+                    }
+                }
             }
             completion()
         }
@@ -393,6 +578,7 @@ final class AppStore: ObservableObject {
     func panelDidOpen() {
         isPanelVisible = true
         normalizeCodexResetCredits(at: currentDateProvider())
+        verifyCursorAccountForPresentation(force: true)
         cursorSpendSelectionDidChange()
         applyRefreshInterval(refreshSettings.interval, throttleInitialRefresh: true)
     }
@@ -400,7 +586,8 @@ final class AppStore: ObservableObject {
     /// Stop periodic refreshing when the panel is hidden.
     func panelDidClose() {
         isPanelVisible = false
-        cursorSpendRefreshGeneration += 1
+        cursorAccountVerificationGeneration += 1
+        cancelCursorSpendSelectionRefresh()
         refreshCoordinator.stop()
     }
 
@@ -454,6 +641,7 @@ final class AppStore: ObservableObject {
     private func monitoringSettingsDidChange(_ enabledAgents: Set<AgentID>) {
         self.enabledAgents = enabledAgents
         activeAgentSyncCancellation?.disableAgents(notIn: enabledAgents)
+        cursorAccountSyncCancellation?.disableAgents(notIn: enabledAgents)
         cancelQuotaParticipants(disabledBy: enabledAgents)
         let filters = AppFilter.available(for: enabledAgents)
         if enabledAgents.isEmpty {
@@ -467,7 +655,9 @@ final class AppStore: ObservableObject {
             reload(enabledAgents: enabledAgents)
         }
         if !enabledAgents.contains(.cursor) {
-            cursorSpendRefreshGeneration += 1
+            cursorAccountVerificationGeneration += 1
+            cursorAccountPresentationState = .unverified
+            cancelCursorSpendSelectionRefresh()
             cursorSpendSnapshot = nil
         }
         quotaSnapshots = quotaSnapshots.filter {
@@ -502,6 +692,12 @@ final class AppStore: ObservableObject {
         guard !isRebuildingUsageData else { return }
 
         isRebuildingUsageData = true
+        cursorAccountVerificationGeneration += 1
+        cursorAccountPresentationState = .unverified
+        cancelCursorSpendSelectionRefresh()
+        cursorSpendSnapshot = nil
+        clearCursorDependentPresentation()
+        reload()
         usageDataRebuildProgress = nil
         usageDataRebuildSummary = nil
         usageDataRebuildErrorMessage = nil
@@ -531,6 +727,7 @@ final class AppStore: ObservableObject {
                     self.isRebuildingUsageData = false
                     self.usageDataRebuildCancellation = nil
                     self.reload()
+                    self.verifyCursorAccountForPresentation(force: true)
                     self.applyRefreshInterval(self.refreshSettings.interval)
                 }
             } catch {
@@ -575,6 +772,12 @@ final class AppStore: ObservableObject {
 
         let appFilter = appFilter
         let enabledAgents = requestedEnabledAgents ?? self.enabledAgents
+        let cursorQueryContext = cursorBoundQueryContext(from: enabledAgents)
+        let queryEnabledAgents = cursorQueryContext.enabledAgents
+        let cursorDataPresentationToken = cursorQueryContext.token
+        let isCursorTemporarilyExcluded = enabledAgents.contains(.cursor)
+            && !queryEnabledAgents.contains(.cursor)
+        let cursorAccountPresentationState = cursorAccountPresentationState
         let timeRange = timeRange
         let heatmapMode = heatmapMode
         let activityDetailRequest = activityDetailRequest
@@ -589,7 +792,7 @@ final class AppStore: ObservableObject {
             let s = db.fetchStats(
                 app: appFilter,
                 range: timeRange,
-                enabledAgents: enabledAgents
+                enabledAgents: queryEnabledAgents
             )
             let cal = Calendar.current
             let h: [DayActivity]
@@ -602,7 +805,7 @@ final class AppStore: ObservableObject {
                     app: appFilter,
                     from: start,
                     to: end,
-                    enabledAgents: enabledAgents
+                    enabledAgents: queryEnabledAgents
                 )
             case .year(let year):
                 let start = cal.date(from: DateComponents(year: year, month: 1, day: 1))!
@@ -611,18 +814,18 @@ final class AppStore: ObservableObject {
                     app: appFilter,
                     from: start,
                     to: end,
-                    enabledAgents: enabledAgents
+                    enabledAgents: queryEnabledAgents
                 )
             }
             let hourly: [HourlyTokenUsage]
             let ranged: ActivityRangeTokenSeries
             switch activityDetailRequest {
             case .hourly(let date):
-                hourly = hourlyTokenUsageLoader(db, appFilter, enabledAgents, date)
+                hourly = hourlyTokenUsageLoader(db, appFilter, queryEnabledAgents, date)
                 ranged = .empty
             case .range(let range):
                 hourly = []
-                ranged = activityRangeTokenUsageLoader(db, appFilter, enabledAgents, range)
+                ranged = activityRangeTokenUsageLoader(db, appFilter, queryEnabledAgents, range)
             case nil:
                 hourly = []
                 ranged = .empty
@@ -630,71 +833,267 @@ final class AppStore: ObservableObject {
             let m = db.fetchModelDistribution(
                 app: appFilter,
                 range: timeRange,
-                enabledAgents: enabledAgents
+                enabledAgents: queryEnabledAgents
             )
-            let years = db.availableYears(enabledAgents: enabledAgents)
+            let years = db.availableYears(enabledAgents: queryEnabledAgents)
+            let isCursorDataPresentationTokenCurrent = cursorDataPresentationToken.map {
+                db.isCursorDataPresentationTokenCurrent($0)
+            } ?? true
 
             DispatchQueue.main.async {
                 guard
                     self.appFilter == appFilter,
                     self.enabledAgents == enabledAgents,
+                    self.cursorAccountPresentationState == cursorAccountPresentationState,
                     self.timeRange == timeRange,
                     self.heatmapMode == heatmapMode,
                     self.activityDetailRequest == activityDetailRequest,
                     self.reloadGeneration == reloadGeneration,
-                    self.activityLoadGeneration == activityLoadGeneration
+                    self.activityLoadGeneration == activityLoadGeneration,
+                    isCursorDataPresentationTokenCurrent
                 else {
                     return
                 }
 
-                self.stats = s
-                self.heatmap = h
-                switch activityDetailRequest {
-                case .hourly(let date):
-                    self.activityDetailState = .hourly(
-                        date: date,
-                        usage: hourly,
-                        isLoading: false
-                    )
-                case .range(let range):
-                    self.activityDetailState = .range(
-                        range: range,
-                        series: ranged,
-                        isLoading: false
-                    )
-                case nil:
-                    break
-                }
-                self.modelDistribution = m
-                self.availableYears = years
-                if case .year(let selectedYear) = self.heatmapMode,
-                   !years.contains(selectedYear) {
-                    self.heatmapMode = .trailing
+                self.performCursorBoundPublication(
+                    token: cursorDataPresentationToken
+                ) {
+                    self.stats = s
+                    self.heatmap = h
+                    switch activityDetailRequest {
+                    case .hourly(let date):
+                        self.activityDetailState = .hourly(
+                            date: date,
+                            usage: hourly,
+                            isLoading: false
+                        )
+                    case .range(let range):
+                        self.activityDetailState = .range(
+                            range: range,
+                            series: ranged,
+                            isLoading: false
+                        )
+                    case nil:
+                        break
+                    }
+                    self.modelDistribution = m
+                    self.availableYears = years
+                    if !isCursorTemporarilyExcluded,
+                       case .year(let selectedYear) = self.heatmapMode,
+                       !years.contains(selectedYear) {
+                        self.heatmapMode = .trailing
+                    }
                 }
             }
         }
     }
 
+    private func cursorQueryEnabledAgents(from enabledAgents: Set<AgentID>) -> Set<AgentID> {
+        guard cursorAccountResolver != nil,
+              !isCursorDataPresentationAvailable else {
+            return enabledAgents
+        }
+        return enabledAgents.subtracting([.cursor])
+    }
+
+    private func cursorBoundQueryContext(
+        from enabledAgents: Set<AgentID>
+    ) -> (enabledAgents: Set<AgentID>, token: CursorDataPresentationToken?) {
+        var queryEnabledAgents = cursorQueryEnabledAgents(from: enabledAgents)
+        guard cursorAccountResolver != nil,
+              queryEnabledAgents.contains(.cursor),
+              case .verified(let identity) = cursorAccountPresentationState,
+              let token = db.cursorDataPresentationToken(matching: identity) else {
+            if cursorAccountResolver != nil {
+                queryEnabledAgents.remove(.cursor)
+            }
+            return (queryEnabledAgents, nil)
+        }
+        return (queryEnabledAgents, token)
+    }
+
+    private func performCursorBoundPublication(
+        token: CursorDataPresentationToken?,
+        operation: () -> Void
+    ) {
+        guard let token else {
+            operation()
+            return
+        }
+        db.performIfCursorDataPresentationTokenCurrent(token, operation: operation)
+    }
+
+    private func verifyCursorAccountForPresentation(force: Bool) {
+        guard cursorAccountResolver != nil,
+              isPanelVisible,
+              enabledAgents.contains(.cursor) else {
+            return
+        }
+        cancelCursorSpendSelectionRefresh()
+        cursorAccountPresentationState = .verifying(nil)
+        cursorSpendSnapshot = nil
+        clearCursorDependentPresentation()
+        reload()
+        resolveCursorAccount(force: force) { [weak self] identity, isAccepted, verificationGeneration in
+            guard let self, isAccepted, let identity else { return }
+            if self.cursorAccountPresentationState == .verified(identity) {
+                self.cursorSpendSelectionDidChange()
+                return
+            }
+            guard self.cursorAccountPresentationState == .verifying(identity) else { return }
+            self.syncCursorForVerifiedAccount(
+                identity,
+                verificationGeneration: verificationGeneration
+            )
+        }
+    }
+
+    private func resolveCursorAccount(
+        force: Bool,
+        completion: @escaping (String?, Bool, Int) -> Void
+    ) {
+        guard let cursorAccountResolver else {
+            completion(nil, false, cursorAccountVerificationGeneration)
+            return
+        }
+        cursorAccountVerificationGeneration += 1
+        let generation = cursorAccountVerificationGeneration
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = Result {
+                try cursorAccountResolver.resolve(force: force, cancellation: nil)
+            }
+            DispatchQueue.main.async {
+                guard let self else {
+                    completion(nil, false, generation)
+                    return
+                }
+                let identity = try? result.get().account.syncIdentity
+                let isAccepted = self.cursorAccountVerificationGeneration == generation
+                    && self.enabledAgents.contains(.cursor)
+                    && self.isPanelVisible
+                    && !self.isRebuildingUsageData
+                if isAccepted {
+                    if let identity {
+                        let cachedIdentity = self.db.getSyncState(
+                            for: CursorUsageService.syncStateKey
+                        )?.sessionId
+                        self.cursorAccountPresentationState = cachedIdentity == identity
+                            ? .verified(identity)
+                            : .verifying(identity)
+                        if cachedIdentity != identity {
+                            self.cancelCursorSpendSelectionRefresh()
+                            self.clearCursorDependentPresentation()
+                        }
+                    } else {
+                        self.cancelCursorSpendSelectionRefresh()
+                        self.cursorAccountPresentationState = .unavailable
+                        self.clearCursorDependentPresentation()
+                    }
+                    self.cursorSpendSnapshot = nil
+                    self.reload()
+                }
+                completion(isAccepted ? identity : nil, isAccepted, generation)
+            }
+        }
+    }
+
+    private func syncCursorForVerifiedAccount(
+        _ identity: String,
+        verificationGeneration: Int
+    ) {
+        cursorAccountSyncCancellation?.disableAgents(notIn: [])
+        let cancellation = AgentSyncCancellation(enabledAgents: [.cursor])
+        cursorAccountSyncCancellation = cancellation
+        syncManager.syncCursorOnce(
+            expectedIdentity: identity,
+            cancellation: cancellation,
+            onSuccess: { [weak self] in
+                DispatchQueue.main.async {
+                    guard let self,
+                          self.cursorAccountSyncCancellation === cancellation,
+                          self.cursorAccountVerificationGeneration == verificationGeneration,
+                          self.cursorAccountPresentationState == .verifying(identity),
+                          self.db.getSyncState(
+                            for: CursorUsageService.syncStateKey
+                          )?.sessionId == identity else {
+                        return
+                    }
+                    self.cursorAccountSyncCancellation = nil
+                    self.cursorAccountPresentationState = .verified(identity)
+                    self.reload()
+                    self.cursorSpendSelectionDidChange()
+                }
+            },
+            completion: { [weak self] in
+                DispatchQueue.main.async {
+                    guard let self,
+                          self.cursorAccountSyncCancellation === cancellation,
+                          self.cursorAccountVerificationGeneration == verificationGeneration,
+                          self.cursorAccountPresentationState == .verifying(identity) else {
+                        return
+                    }
+                    self.cursorAccountSyncCancellation = nil
+                    self.cursorAccountPresentationState = .unavailable
+                    self.cursorSpendSnapshot = nil
+                    self.clearCursorDependentPresentation()
+                    self.reload()
+                }
+            }
+        )
+    }
+
+    private func clearCursorDependentPresentation() {
+        availableYears = []
+        guard appFilter == .all || appFilter == .cursor else { return }
+        stats = UsageStats()
+        heatmap = []
+        modelDistribution = []
+        switch activityDetailState {
+        case .closed:
+            break
+        case .hourly(let date, _, _):
+            activityDetailState = .hourly(date: date, usage: [], isLoading: true)
+        case .range(let range, _, _):
+            activityDetailState = .range(range: range, series: .empty, isLoading: true)
+        }
+    }
+
     private func cursorSpendSelectionDidChange() {
-        cursorSpendRefreshGeneration += 1
+        cancelCursorSpendSelectionRefresh()
         let generation = cursorSpendRefreshGeneration
         guard appFilter == .cursor,
-              enabledAgents.contains(.cursor) else {
+              enabledAgents.contains(.cursor),
+              isCursorDataPresentationAvailable else {
             cursorSpendSnapshot = nil
             return
+        }
+
+        let accountIdentity: String?
+        if case .verified(let identity) = cursorAccountPresentationState {
+            accountIdentity = identity
+        } else {
+            accountIdentity = db.getSyncState(
+                for: CursorUsageService.syncStateKey
+            )?.sessionId
         }
 
         let range = CursorSpendRange(
             timeRange: timeRange,
             now: currentDateProvider()
         )
+        let cancellation = AgentSyncCancellation(enabledAgents: [.cursor])
+        cursorSpendSelectionCancellation = cancellation
         let db = db
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let cached = db.fetchCursorSpendSnapshot(range: range)
+            let cached = accountIdentity.flatMap {
+                db.fetchCursorSpendSnapshot(accountIdentity: $0, range: range)
+            }
             DispatchQueue.main.async {
                 guard let self,
+                      self.cursorSpendSelectionCancellation === cancellation,
                       self.cursorSpendRefreshGeneration == generation,
                       self.appFilter == .cursor,
+                      self.isCursorDataPresentationAvailable,
                       CursorSpendRange(
                           timeRange: self.timeRange,
                           now: self.currentDateProvider()
@@ -703,9 +1102,22 @@ final class AppStore: ObservableObject {
                 }
                 self.cursorSpendSnapshot = cached
                 guard self.isPanelVisible else { return }
-                self.refreshCursorSpend(range: range, force: false, cancellation: nil)
+                self.refreshCursorSpend(
+                    range: range,
+                    force: false,
+                    cancellation: cancellation
+                ) { [weak self] in
+                    guard self?.cursorSpendSelectionCancellation === cancellation else { return }
+                    self?.cursorSpendSelectionCancellation = nil
+                }
             }
         }
+    }
+
+    private func cancelCursorSpendSelectionRefresh() {
+        cursorSpendSelectionCancellation?.disableAgents(notIn: [])
+        cursorSpendSelectionCancellation = nil
+        cursorSpendRefreshGeneration += 1
     }
 
     private func refreshCursorSpend(
@@ -716,7 +1128,8 @@ final class AppStore: ObservableObject {
     ) {
         guard let cursorSpendRefresher,
               appFilter == .cursor,
-              enabledAgents.contains(.cursor) else {
+              enabledAgents.contains(.cursor),
+              isCursorDataPresentationAvailable else {
             completion()
             return
         }
@@ -725,8 +1138,17 @@ final class AppStore: ObservableObject {
         if cursorSpendSnapshot?.range != range {
             cursorSpendSnapshot = nil
         }
+        let expectedAccountIdentity: String?
+        if case .verified(let identity) = cursorAccountPresentationState {
+            expectedAccountIdentity = identity
+        } else {
+            expectedAccountIdentity = db.getSyncState(
+                for: CursorUsageService.syncStateKey
+            )?.sessionId
+        }
         cursorSpendRefresher.refresh(
             range: range,
+            expectedAccountIdentity: expectedAccountIdentity,
             force: force,
             cancellation: cancellation
         ) { [weak self] snapshot in
@@ -734,13 +1156,19 @@ final class AppStore: ObservableObject {
             guard let self,
                   self.cursorSpendRefreshGeneration == generation,
                   self.appFilter == .cursor,
+                  self.isCursorDataPresentationAvailable,
                   CursorSpendRange(
                       timeRange: self.timeRange,
                       now: self.currentDateProvider()
                   ) == range else {
                 return
             }
-            self.cursorSpendSnapshot = snapshot
+            if let snapshot {
+                if case .verified(let identity) = self.cursorAccountPresentationState {
+                    guard snapshot.accountIdentity == identity else { return }
+                }
+                self.cursorSpendSnapshot = snapshot
+            }
         }
     }
 
@@ -959,26 +1387,39 @@ final class AppStore: ObservableObject {
     private func loadHourlyTokenUsage(for date: String) {
         let app = appFilter
         let enabledAgents = enabledAgents
+        let cursorQueryContext = cursorBoundQueryContext(from: enabledAgents)
+        let queryEnabledAgents = cursorQueryContext.enabledAgents
+        let cursorDataPresentationToken = cursorQueryContext.token
+        let cursorAccountPresentationState = cursorAccountPresentationState
         activityLoadGeneration += 1
         let generation = activityLoadGeneration
         let loader = hourlyTokenUsageLoader
         DispatchQueue.global(qos: .userInitiated).async { [db] in
-            let usage = loader(db, app, enabledAgents, date)
+            let usage = loader(db, app, queryEnabledAgents, date)
+            let isCursorDataPresentationTokenCurrent = cursorDataPresentationToken.map {
+                db.isCursorDataPresentationTokenCurrent($0)
+            } ?? true
             DispatchQueue.main.async { [weak self] in
                 guard
                     let self,
                     self.selectedActivityDate == date,
                     self.appFilter == app,
                     self.enabledAgents == enabledAgents,
-                    self.activityLoadGeneration == generation
+                    self.cursorAccountPresentationState == cursorAccountPresentationState,
+                    self.activityLoadGeneration == generation,
+                    isCursorDataPresentationTokenCurrent
                 else {
                     return
                 }
-                self.activityDetailState = .hourly(
-                    date: date,
-                    usage: usage,
-                    isLoading: false
-                )
+                self.performCursorBoundPublication(
+                    token: cursorDataPresentationToken
+                ) {
+                    self.activityDetailState = .hourly(
+                        date: date,
+                        usage: usage,
+                        isLoading: false
+                    )
+                }
             }
         }
     }
@@ -986,26 +1427,39 @@ final class AppStore: ObservableObject {
     private func loadActivityRangeTokenUsage(for range: TimeRange) {
         let app = appFilter
         let enabledAgents = enabledAgents
+        let cursorQueryContext = cursorBoundQueryContext(from: enabledAgents)
+        let queryEnabledAgents = cursorQueryContext.enabledAgents
+        let cursorDataPresentationToken = cursorQueryContext.token
+        let cursorAccountPresentationState = cursorAccountPresentationState
         activityLoadGeneration += 1
         let generation = activityLoadGeneration
         let loader = activityRangeTokenUsageLoader
         DispatchQueue.global(qos: .userInitiated).async { [db] in
-            let series = loader(db, app, enabledAgents, range)
+            let series = loader(db, app, queryEnabledAgents, range)
+            let isCursorDataPresentationTokenCurrent = cursorDataPresentationToken.map {
+                db.isCursorDataPresentationTokenCurrent($0)
+            } ?? true
             DispatchQueue.main.async { [weak self] in
                 guard
                     let self,
                     self.activityDetailRequest == .range(range),
                     self.appFilter == app,
                     self.enabledAgents == enabledAgents,
-                    self.activityLoadGeneration == generation
+                    self.cursorAccountPresentationState == cursorAccountPresentationState,
+                    self.activityLoadGeneration == generation,
+                    isCursorDataPresentationTokenCurrent
                 else {
                     return
                 }
-                self.activityDetailState = .range(
-                    range: range,
-                    series: series,
-                    isLoading: false
-                )
+                self.performCursorBoundPublication(
+                    token: cursorDataPresentationToken
+                ) {
+                    self.activityDetailState = .range(
+                        range: range,
+                        series: series,
+                        isLoading: false
+                    )
+                }
             }
         }
     }

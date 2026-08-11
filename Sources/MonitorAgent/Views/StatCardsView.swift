@@ -6,13 +6,23 @@ struct StatCardsView: View {
 
     var body: some View {
         HStack(spacing: StatCardLayout.spacing) {
-            StatCard(title: "Requests", value: formatCount(store.stats.totalRequests))
+            StatCard(
+                title: "Requests",
+                value: isCursorUnavailable ? "—" : formatCount(store.stats.totalRequests)
+            )
                 .frame(width: cardWidth)
-            StatCard(title: "Sessions", value: formatCount(store.stats.totalSessions))
+            StatCard(
+                title: "Sessions",
+                value: isCursorUnavailable ? "—" : formatCount(store.stats.totalSessions)
+            )
                 .frame(width: cardWidth)
-            TokenSummaryCard(stats: store.stats, activeTip: $activeTip)
+            TokenSummaryCard(
+                stats: store.stats,
+                isAvailable: !isCursorUnavailable,
+                activeTip: $activeTip
+            )
                 .frame(width: cardWidth)
-            CacheHitCard(stats: store.stats)
+            CacheHitCard(stats: store.stats, isAvailable: !isCursorUnavailable)
                 .frame(width: cardWidth)
             if store.appFilter == .cursor {
                 CursorSpendSummaryCard(snapshot: store.cursorSpendSnapshot)
@@ -25,6 +35,10 @@ struct StatCardsView: View {
 
     private var cardWidth: CGFloat {
         StatCardLayout.equalCardWidth(cardCount: store.appFilter == .cursor ? 5 : 4)
+    }
+
+    private var isCursorUnavailable: Bool {
+        store.appFilter == .cursor && !store.isCursorDataPresentationAvailable
     }
 }
 
@@ -77,10 +91,11 @@ private struct TokenSummaryCard: View {
     @EnvironmentObject private var theme: ThemeManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let stats: UsageStats
+    let isAvailable: Bool
     @Binding var activeTip: StatCardTip?
 
     private var isDetailPresented: Bool {
-        activeTip == .tokenBreakdown
+        isAvailable && activeTip == .tokenBreakdown
     }
 
     var body: some View {
@@ -89,7 +104,7 @@ private struct TokenSummaryCard: View {
                 ZStack(alignment: .topTrailing) {
                     VStack(spacing: 4) {
                         statCardTitle("Tokens", color: theme.panelSecondaryForeground)
-                        Text(formatTokenDetail(stats.totalTokens))
+                        Text(isAvailable ? formatTokenDetail(stats.totalTokens) : "—")
                             .font(.system(size: 17, weight: .semibold, design: .rounded))
                             .lineLimit(1)
                             .minimumScaleFactor(0.82)
@@ -97,10 +112,12 @@ private struct TokenSummaryCard: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
 
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(theme.panelTertiaryForeground)
-                        .padding(.top, 2)
+                    if isAvailable {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(theme.panelTertiaryForeground)
+                            .padding(.top, 2)
+                    }
                 }
             }
         }
@@ -117,6 +134,10 @@ private struct TokenSummaryCard: View {
             }
         }
         .onHover { isHovering in
+            guard isAvailable else {
+                activeTip = nil
+                return
+            }
             withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
                 if isHovering {
                     activeTip = .tokenBreakdown
@@ -125,15 +146,24 @@ private struct TokenSummaryCard: View {
                 }
             }
         }
+        .onChange(of: isAvailable) { _, isAvailable in
+            if !isAvailable, activeTip == .tokenBreakdown {
+                activeTip = nil
+            }
+        }
         .zIndex(isDetailPresented ? 1 : 0)
     }
 }
 
 private struct CacheHitCard: View {
     let stats: UsageStats
+    let isAvailable: Bool
 
     var body: some View {
-        StatCard(title: "Cache Hit", value: formatPercent(stats.cacheHitRate))
+        StatCard(
+            title: "Cache Hit",
+            value: isAvailable ? formatPercent(stats.cacheHitRate) : "—"
+        )
             .help(cacheHitHelp())
     }
 }

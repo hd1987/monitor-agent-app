@@ -250,6 +250,141 @@ final class CursorUsageServiceTests: XCTestCase {
         XCTAssertNil(database.getSyncState(for: CursorUsageService.syncStateKey))
     }
 
+    func testAccountSessionCancellationDoesNotFailAnotherWaiter() {
+        let transport = BlockingCursorAccountTransport()
+        let waiterStarted = DispatchSemaphore(value: 0)
+        let session = CursorAccountSession(
+            authenticationReader: CursorAuthenticationStub(token: "token"),
+            transport: transport,
+            onWaitForInFlight: { waiterStarted.signal() }
+        )
+        let firstCancellation = AgentSyncCancellation(enabledAgents: [.cursor])
+        let secondCancellation = AgentSyncCancellation(enabledAgents: [.cursor])
+        let firstCompleted = expectation(description: "Cancelled account waiter completes")
+        let secondCompleted = expectation(description: "Independent account waiter completes")
+        let resultLock = NSLock()
+        var firstError: CursorUsageError?
+        var secondIdentity: String?
+
+        DispatchQueue.global().async {
+            do {
+                _ = try session.resolve(force: true, cancellation: firstCancellation)
+            } catch {
+                resultLock.lock()
+                firstError = error as? CursorUsageError
+                resultLock.unlock()
+            }
+            firstCompleted.fulfill()
+        }
+        XCTAssertEqual(transport.started.wait(timeout: .now() + 1), .success)
+
+        DispatchQueue.global().async {
+            let account = try? session.resolve(force: true, cancellation: secondCancellation)
+            resultLock.lock()
+            secondIdentity = account?.account.syncIdentity
+            resultLock.unlock()
+            secondCompleted.fulfill()
+        }
+        XCTAssertEqual(waiterStarted.wait(timeout: .now() + 1), .success)
+        firstCancellation.disableAgents(notIn: [])
+        transport.release.signal()
+
+        wait(for: [firstCompleted, secondCompleted], timeout: 1)
+        resultLock.lock()
+        let capturedFirstError = firstError
+        let capturedSecondIdentity = secondIdentity
+        resultLock.unlock()
+        XCTAssertEqual(capturedFirstError, .cancelled)
+        XCTAssertNotNil(capturedSecondIdentity)
+        XCTAssertEqual(transport.requestCount, 1)
+    }
+
+    func testAccountSessionStarterCanCancelWithoutStoppingSharedRequest() {
+        let transport = BlockingCursorAccountTransport()
+        let session = CursorAccountSession(
+            authenticationReader: CursorAuthenticationStub(token: "token"),
+            transport: transport
+        )
+        let cancellation = AgentSyncCancellation(enabledAgents: [.cursor])
+        let starterCompleted = expectation(description: "Account request starter cancels promptly")
+        let resultLock = NSLock()
+        var starterError: CursorUsageError?
+
+        DispatchQueue.global().async {
+            do {
+                _ = try session.resolve(force: true, cancellation: cancellation)
+            } catch {
+                resultLock.lock()
+                starterError = error as? CursorUsageError
+                resultLock.unlock()
+            }
+            starterCompleted.fulfill()
+        }
+        XCTAssertEqual(transport.started.wait(timeout: .now() + 1), .success)
+
+        cancellation.disableAgents(notIn: [])
+        wait(for: [starterCompleted], timeout: 0.5)
+        resultLock.lock()
+        let capturedError = starterError
+        resultLock.unlock()
+        XCTAssertEqual(capturedError, .cancelled)
+
+        transport.release.signal()
+    }
+
+    func testForcedAccountResolutionDoesNotReuseCompletedResult() throws {
+        let transport = CursorTransportStub(responses: [
+            response(body: #"{"userId":1}"#),
+            response(body: #"{"userId":2}"#),
+        ])
+        let session = CursorAccountSession(
+            authenticationReader: CursorAuthenticationStub(token: "token"),
+            transport: transport
+        )
+
+        let first = try session.resolve(force: true, cancellation: nil)
+        let second = try session.resolve(force: true, cancellation: nil)
+
+        XCTAssertNotEqual(first.account.syncIdentity, second.account.syncIdentity)
+        XCTAssertEqual(transport.requests.count, 2)
+    }
+
+    func testURLSessionTransportRejectsResponseWhileStreamingPastLimit() {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ChunkedCursorURLProtocol.self]
+        ChunkedCursorURLProtocol.configure(chunks: [
+            Data("123".utf8),
+            Data("456".utf8),
+        ])
+        let transport = CursorURLSessionTransport(
+            configuration: configuration,
+            maximumResponseBytes: 5
+        )
+        let request = URLRequest(url: URL(string: "https://api2.cursor.sh/test")!)
+
+        XCTAssertThrowsError(try transport.send(request)) { error in
+            XCTAssertEqual(error as? CursorUsageError, .responseTooLarge)
+        }
+    }
+
+    func testURLSessionTransportReleasesAfterRequestCompletes() throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ChunkedCursorURLProtocol.self]
+        ChunkedCursorURLProtocol.configure(chunks: [Data("ok".utf8)])
+        var transport: CursorURLSessionTransport? = CursorURLSessionTransport(
+            configuration: configuration,
+            maximumResponseBytes: 5
+        )
+        weak let weakTransport = transport
+        let request = URLRequest(url: URL(string: "https://api2.cursor.sh/test")!)
+
+        let (data, _) = try XCTUnwrap(transport).send(request)
+        XCTAssertEqual(data, Data("ok".utf8))
+        transport = nil
+
+        XCTAssertNil(weakTransport)
+    }
+
     private func response(statusCode: Int = 200, body: String) -> CursorHTTPResponseStub {
         CursorHTTPResponseStub(statusCode: statusCode, data: Data(body.utf8))
     }
@@ -290,6 +425,42 @@ private struct CursorAuthenticationStub: CursorAuthenticationReading {
     func readAccessToken() throws -> String {
         token
     }
+}
+
+private final class ChunkedCursorURLProtocol: URLProtocol {
+    private static let lock = NSLock()
+    private static var configuredChunks: [Data] = []
+
+    static func configure(chunks: [Data]) {
+        lock.lock()
+        configuredChunks = chunks
+        lock.unlock()
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        Self.lock.lock()
+        let chunks = Self.configuredChunks
+        Self.lock.unlock()
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        chunks.forEach { client?.urlProtocol(self, didLoad: $0) }
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }
 
 private struct CursorHTTPResponseStub {
@@ -355,5 +526,33 @@ private final class BlockingCancellableCursorTransport: CancellableCursorHTTPTra
             headerFields: nil
         )!
         return (Data(body.utf8), response)
+    }
+}
+
+private final class BlockingCursorAccountTransport: CursorHTTPTransport {
+    let started = DispatchSemaphore(value: 0)
+    let release = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var storedRequestCount = 0
+
+    var requestCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedRequestCount
+    }
+
+    func send(_ request: URLRequest) throws -> (Data, HTTPURLResponse) {
+        lock.lock()
+        storedRequestCount += 1
+        lock.unlock()
+        started.signal()
+        _ = release.wait(timeout: .now() + 2)
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        return (Data(#"{"userId":42}"#.utf8), response)
     }
 }
