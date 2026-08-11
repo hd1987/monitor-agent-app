@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-11
+
 ### Added
 - Show Cursor Total Usage and On-Demand spend directly in an account-scoped selected-range card
 
