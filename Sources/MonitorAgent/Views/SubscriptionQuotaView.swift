@@ -277,11 +277,10 @@ struct SubscriptionQuotaCard: View {
         guard let snapshot, snapshot.status == .available else {
             return provider.displayName
         }
-        let updated = "Quota updated \(QuotaDateFormat.updateDateTime(snapshot.fetchedAt))"
-        if case .failed(_, let attemptedAt) = refreshPhase {
-            return "\(updated). Last refresh failed \(QuotaDateFormat.updateDateTime(attemptedAt))"
+        guard let failure = QuotaRefreshPresentation.failure(for: refreshPhase) else {
+            return provider.displayName
         }
-        return updated
+        return "\(failure.label) \(QuotaDateFormat.updateDateTime(failure.attemptedAt))"
     }
 
     @ViewBuilder
@@ -541,21 +540,19 @@ private struct SubscriptionExpirationTip: View {
                 Text(SubscriptionExpiration.dateText(expirationDate))
                     .font(.system(size: 10))
             }
-            if let quotaSnapshot {
+            if quotaSnapshot != nil,
+               let failure = QuotaRefreshPresentation.failure(for: refreshPhase) {
                 Divider()
                     .overlay(theme.tooltipForeground.opacity(0.12))
                 HStack(spacing: 8) {
                     Circle()
-                        .fill(QuotaStatusPalette.color(
-                            for: QuotaRefreshPresentation.updateStatus(for: refreshPhase),
-                            unknown: .clear
-                        ))
+                        .fill(QuotaStatusPalette.critical)
                         .frame(width: 6, height: 6)
-                    Text(QuotaRefreshPresentation.updateLabel(for: refreshPhase))
+                    Text(failure.label)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(theme.tooltipForeground.opacity(0.72))
                     Spacer(minLength: 8)
-                    Text(QuotaDateFormat.updateDateTime(quotaSnapshot.fetchedAt))
+                    Text(QuotaDateFormat.updateDateTime(failure.attemptedAt))
                         .font(.system(size: 10))
                 }
             }
@@ -748,6 +745,11 @@ enum QuotaStatusPalette {
 }
 
 enum QuotaRefreshPresentation {
+    struct Failure: Equatable {
+        let label: String
+        let attemptedAt: Date
+    }
+
     static func headerStatus(
         snapshotStatus: QuotaSnapshotStatus?,
         phase: QuotaRefreshPhase
@@ -757,16 +759,12 @@ enum QuotaRefreshPresentation {
         return nil
     }
 
-    static func updateLabel(for phase: QuotaRefreshPhase) -> String {
-        if case .failed(let status, _) = phase {
-            return status == .authenticationExpired ? "Sign-in expired" : "Refresh failed"
-        }
-        return "Quota updated"
-    }
-
-    static func updateStatus(for phase: QuotaRefreshPhase) -> QuotaStatus {
-        if case .failed = phase { return .critical }
-        return .healthy
+    static func failure(for phase: QuotaRefreshPhase) -> Failure? {
+        guard case .failed(let status, let attemptedAt) = phase else { return nil }
+        return Failure(
+            label: status == .authenticationExpired ? "Sign-in expired" : "Refresh failed",
+            attemptedAt: attemptedAt
+        )
     }
 }
 

@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ### Changed
 - Keep the last successful Cursor account's local history and selected-range spend visible while Cursor is signed out, unavailable, or being verified, without changing account-replacement behavior
+- Show subscription quota status and its failed-attempt time only after a refresh failure or sign-in expiration
 
 ## [0.12.0] - 2026-08-11
 
