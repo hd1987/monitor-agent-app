@@ -18,4 +18,9 @@ final class StatCardsLayoutTests: XCTestCase {
         )
         XCTAssertEqual(TokenBreakdownTipLayout.itemSpacing, 8)
     }
+
+    func testAnyActiveStatCardTipRaisesTheWholeCardRow() {
+        XCTAssertEqual(StatCardTipLayer.zIndex(for: nil), 0)
+        XCTAssertEqual(StatCardTipLayer.zIndex(for: .tokenBreakdown), 1)
+    }
 }

@@ -13,6 +13,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 - Distribute all visible main-panel stat cards evenly within the fixed panel width
 - Share Cursor authentication and bounded DashboardService transport between token and spend refreshes
 
+### Fixed
+- Keep current and future stat-card tips above Activity and other later panel sections
+
 ## [0.11.0] - 2026-08-09
 
 ### Added

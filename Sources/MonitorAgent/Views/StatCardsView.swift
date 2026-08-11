@@ -2,7 +2,7 @@ import SwiftUI
 
 struct StatCardsView: View {
     @EnvironmentObject var store: AppStore
-    @Binding var isTokenBreakdownPresented: Bool
+    @Binding var activeTip: StatCardTip?
 
     var body: some View {
         HStack(spacing: StatCardLayout.spacing) {
@@ -10,7 +10,7 @@ struct StatCardsView: View {
                 .frame(width: cardWidth)
             StatCard(title: "Sessions", value: formatCount(store.stats.totalSessions))
                 .frame(width: cardWidth)
-            TokenSummaryCard(stats: store.stats, isDetailPresented: $isTokenBreakdownPresented)
+            TokenSummaryCard(stats: store.stats, activeTip: $activeTip)
                 .frame(width: cardWidth)
             CacheHitCard(stats: store.stats)
                 .frame(width: cardWidth)
@@ -25,6 +25,16 @@ struct StatCardsView: View {
 
     private var cardWidth: CGFloat {
         StatCardLayout.equalCardWidth(cardCount: store.appFilter == .cursor ? 5 : 4)
+    }
+}
+
+enum StatCardTip: Hashable {
+    case tokenBreakdown
+}
+
+enum StatCardTipLayer {
+    static func zIndex(for activeTip: StatCardTip?) -> Double {
+        activeTip == nil ? 0 : 1
     }
 }
 
@@ -67,7 +77,11 @@ private struct TokenSummaryCard: View {
     @EnvironmentObject private var theme: ThemeManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let stats: UsageStats
-    @Binding var isDetailPresented: Bool
+    @Binding var activeTip: StatCardTip?
+
+    private var isDetailPresented: Bool {
+        activeTip == .tokenBreakdown
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -104,7 +118,11 @@ private struct TokenSummaryCard: View {
         }
         .onHover { isHovering in
             withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
-                isDetailPresented = isHovering
+                if isHovering {
+                    activeTip = .tokenBreakdown
+                } else if activeTip == .tokenBreakdown {
+                    activeTip = nil
+                }
             }
         }
         .zIndex(isDetailPresented ? 1 : 0)
