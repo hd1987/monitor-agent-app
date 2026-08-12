@@ -88,22 +88,21 @@ final class QuotaFeatureTests: XCTestCase {
             phase: failed
         ))
 
-        XCTAssertEqual(QuotaRefreshPresentation.updateLabel(for: .idle), "Quota updated")
+        XCTAssertNil(QuotaRefreshPresentation.failure(for: .idle))
+        XCTAssertNil(QuotaRefreshPresentation.failure(for: .refreshing))
         XCTAssertEqual(
-            QuotaRefreshPresentation.updateLabel(for: .refreshing),
-            "Quota updated"
+            QuotaRefreshPresentation.failure(for: failed),
+            QuotaRefreshPresentation.Failure(
+                label: "Refresh failed",
+                attemptedAt: Date(timeIntervalSince1970: 1_800_000_100)
+            )
         )
-        XCTAssertEqual(QuotaRefreshPresentation.updateLabel(for: failed), "Refresh failed")
         XCTAssertEqual(
-            QuotaRefreshPresentation.updateLabel(for: authenticationExpired),
-            "Sign-in expired"
-        )
-        XCTAssertEqual(QuotaRefreshPresentation.updateStatus(for: .idle), .healthy)
-        XCTAssertEqual(QuotaRefreshPresentation.updateStatus(for: .refreshing), .healthy)
-        XCTAssertEqual(QuotaRefreshPresentation.updateStatus(for: failed), .critical)
-        XCTAssertEqual(
-            QuotaRefreshPresentation.updateStatus(for: authenticationExpired),
-            .critical
+            QuotaRefreshPresentation.failure(for: authenticationExpired),
+            QuotaRefreshPresentation.Failure(
+                label: "Sign-in expired",
+                attemptedAt: Date(timeIntervalSince1970: 1_800_000_200)
+            )
         )
     }
 

@@ -21,6 +21,26 @@ private enum CursorDashboardLimits {
     static let maximumResponseBytes = 5 * 1_024 * 1_024
 }
 
+struct CursorResponseCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int?
+
+    init?(stringValue: String) {
+        self.stringValue = stringValue
+        intValue = nil
+    }
+
+    init?(intValue: Int) {
+        stringValue = String(intValue)
+        self.intValue = intValue
+    }
+}
+
+enum CursorRefreshFailureReason: Equatable {
+    case authentication
+    case request
+}
+
 enum CursorUsageError: LocalizedError, Equatable {
     case authenticationUnavailable
     case authenticationRejected
@@ -58,6 +78,17 @@ enum CursorUsageError: LocalizedError, Equatable {
             return true
         case .invalidEndpoint, .invalidResponse, .responseTooLarge, .paginationLimitExceeded:
             return false
+        }
+    }
+}
+
+extension Error {
+    var cursorRefreshFailureReason: CursorRefreshFailureReason {
+        switch self as? CursorUsageError {
+        case .authenticationUnavailable, .authenticationRejected:
+            return .authentication
+        default:
+            return .request
         }
     }
 }

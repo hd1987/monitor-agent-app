@@ -44,6 +44,15 @@ struct FilterBar: View {
                     } label: {
                         HStack(spacing: 5) {
                             AppIconView(icon: filter.appIcon)
+                                .overlay(alignment: .topTrailing) {
+                                    if filter == .cursor, store.hasCursorRefreshFailure {
+                                        Circle()
+                                            .fill(StatusPalette.error)
+                                            .frame(width: 4, height: 4)
+                                            .offset(x: 2, y: -2)
+                                            .accessibilityHidden(true)
+                                    }
+                                }
 
                             if store.appFilter == filter {
                                 Text(filter.rawValue)
@@ -64,8 +73,8 @@ struct FilterBar: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                     .buttonStyle(MainPanelPressButtonStyle())
-                    .help(filter.rawValue)
-                    .accessibilityLabel(filter.rawValue)
+                    .help(filterHelp(for: filter))
+                    .accessibilityLabel(filterHelp(for: filter))
                 }
             }
             .padding(2)
@@ -195,6 +204,11 @@ struct FilterBar: View {
                     }
             }
         }
+    }
+
+    private func filterHelp(for filter: AppFilter) -> String {
+        guard filter == .cursor else { return filter.rawValue }
+        return store.cursorRefreshFailureHelp ?? filter.rawValue
     }
 
     private var timeRangePopover: some View {

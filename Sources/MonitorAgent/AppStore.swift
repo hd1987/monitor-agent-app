@@ -25,7 +25,33 @@ enum CursorAccountPresentationState: Equatable {
     case unverified
     case verifying(String?)
     case verified(String)
+    case mismatched(String)
     case unavailable
+}
+
+enum CursorRefreshComponent: Int, CaseIterable, Hashable {
+    case account
+    case usage
+    case spend
+
+    var displayName: String {
+        switch self {
+        case .account: return "account"
+        case .usage: return "usage"
+        case .spend: return "spend"
+        }
+    }
+}
+
+enum CursorRefreshFailureKind: Equatable {
+    case signInUnavailable
+    case refreshFailed
+}
+
+struct CursorRefreshFailure: Equatable {
+    let component: CursorRefreshComponent
+    let kind: CursorRefreshFailureKind
+    let attemptedAt: Date
 }
 
 private final class RefreshCycleParticipant {
@@ -98,6 +124,7 @@ final class AppStore: ObservableObject {
     @Published private(set) var quotaRefreshPhases: [QuotaProviderID: QuotaRefreshPhase] = [:]
     @Published private(set) var cursorSpendSnapshot: CursorSpendSnapshot?
     @Published private(set) var cursorAccountPresentationState: CursorAccountPresentationState = .unverified
+    @Published private(set) var cursorRefreshFailures: [CursorRefreshComponent: CursorRefreshFailure] = [:]
     @Published private(set) var manualRefreshAvailableAt: Date?
     @Published private(set) var isRefreshInProgress = false
     @Published private(set) var isManualRefreshInProgress = false
@@ -128,6 +155,7 @@ final class AppStore: ObservableObject {
     private var quotaRefreshGenerations: [QuotaProviderID: Int] = [:]
     private var quotaRestoreGenerations: [QuotaProviderID: Int] = [:]
     private var cursorSpendRefreshGeneration = 0
+    private var cursorUsageRefreshGeneration = 0
     private var cursorAccountVerificationGeneration = 0
     private var reloadGeneration = 0
     private var activityLoadGeneration = 0
@@ -249,14 +277,49 @@ final class AppStore: ObservableObject {
 
     var availableAppFilters: [AppFilter] { AppFilter.available(for: enabledAgents) }
     var hasEnabledAgents: Bool { !enabledAgents.isEmpty }
+    var hasCursorRefreshFailure: Bool { !cursorRefreshFailures.isEmpty }
+    var cursorRefreshFailureHelp: String? {
+        let failures = CursorRefreshComponent.allCases.compactMap { cursorRefreshFailures[$0] }
+        guard !failures.isEmpty else { return nil }
+        let authenticationFailures = failures.filter { $0.kind == .signInUnavailable }
+        if let latestAuthenticationFailure = authenticationFailures.max(
+            by: { $0.attemptedAt < $1.attemptedAt }
+        ) {
+            return "Cursor sign-in unavailable · \(QuotaDateFormat.updateDateTime(latestAuthenticationFailure.attemptedAt))"
+        }
+        let latestAttempt = failures.map(\.attemptedAt).max() ?? currentDateProvider()
+        if failures.count == 1, let failure = failures.first {
+            return "Cursor \(failure.component.displayName) refresh failed · \(QuotaDateFormat.updateDateTime(latestAttempt))"
+        }
+        let components = cursorFailureComponentList(
+            failures.map { $0.component.displayName }
+        )
+        return "Cursor \(components) refresh failed · Last failure \(QuotaDateFormat.updateDateTime(latestAttempt))"
+    }
     var isCursorDataPresentationAvailable: Bool {
         guard cursorAccountResolver != nil else { return true }
-        guard case .verified(let identity) = cursorAccountPresentationState else {
-            return false
+        return cursorPresentationIdentity != nil
+    }
+    private var isCursorRefreshAvailable: Bool {
+        guard cursorAccountResolver != nil else { return true }
+        guard case .verified(let identity) = cursorAccountPresentationState else { return false }
+        return cachedCursorIdentity == identity
+    }
+    private var cachedCursorIdentity: String? {
+        db.getSyncState(for: CursorUsageService.syncStateKey)?.sessionId
+    }
+    private var cursorPresentationIdentity: String? {
+        guard !isRebuildingUsageData, let cachedIdentity = cachedCursorIdentity else { return nil }
+        switch cursorAccountPresentationState {
+        case .verified(let identity):
+            return identity == cachedIdentity ? cachedIdentity : nil
+        case .verifying(let identity):
+            return identity == nil || identity == cachedIdentity ? cachedIdentity : nil
+        case .mismatched:
+            return nil
+        case .unverified, .unavailable:
+            return cachedIdentity
         }
-        return db.getSyncState(
-            for: CursorUsageService.syncStateKey
-        )?.sessionId == identity
     }
     var isActivityDetailPresented: Bool {
         if case .closed = activityDetailState { return false }
@@ -428,12 +491,20 @@ final class AppStore: ObservableObject {
                 group.leave()
             }
             cursorSpendParticipant = participant
-            deferredCursorSpendParticipant = isCursorDataPresentationAvailable
+            deferredCursorSpendParticipant = isCursorRefreshAvailable
                 ? nil
                 : DeferredRefreshCycleParticipant(participant: participant)
         } else {
             cursorSpendParticipant = nil
             deferredCursorSpendParticipant = nil
+        }
+
+        let cursorUsageGeneration: Int?
+        if enabledAgents.contains(.cursor) {
+            cursorUsageRefreshGeneration += 1
+            cursorUsageGeneration = cursorUsageRefreshGeneration
+        } else {
+            cursorUsageGeneration = nil
         }
 
         group.enter()
@@ -495,6 +566,19 @@ final class AppStore: ObservableObject {
                             }
                         )
                     }
+                }
+            },
+            onCursorOutcome: { [weak self] outcome in
+                DispatchQueue.main.async {
+                    guard let self,
+                          let cursorUsageGeneration,
+                          self.cursorUsageRefreshGeneration == cursorUsageGeneration,
+                          self.isPanelVisible,
+                          self.enabledAgents.contains(.cursor),
+                          syncCancellation.isEnabled(.cursor) else {
+                        return
+                    }
+                    self.applyCursorUsageSyncOutcome(outcome)
                 }
             },
             completion: {
@@ -656,9 +740,11 @@ final class AppStore: ObservableObject {
         }
         if !enabledAgents.contains(.cursor) {
             cursorAccountVerificationGeneration += 1
+            cursorUsageRefreshGeneration += 1
             cursorAccountPresentationState = .unverified
             cancelCursorSpendSelectionRefresh()
             cursorSpendSnapshot = nil
+            cursorRefreshFailures = [:]
         }
         quotaSnapshots = quotaSnapshots.filter {
             isAgentEnabled(for: $0.key, in: enabledAgents)
@@ -902,7 +988,7 @@ final class AppStore: ObservableObject {
         var queryEnabledAgents = cursorQueryEnabledAgents(from: enabledAgents)
         guard cursorAccountResolver != nil,
               queryEnabledAgents.contains(.cursor),
-              case .verified(let identity) = cursorAccountPresentationState,
+              let identity = cursorPresentationIdentity,
               let token = db.cursorDataPresentationToken(matching: identity) else {
             if cursorAccountResolver != nil {
                 queryEnabledAgents.remove(.cursor)
@@ -931,8 +1017,6 @@ final class AppStore: ObservableObject {
         }
         cancelCursorSpendSelectionRefresh()
         cursorAccountPresentationState = .verifying(nil)
-        cursorSpendSnapshot = nil
-        clearCursorDependentPresentation()
         reload()
         resolveCursorAccount(force: force) { [weak self] identity, isAccepted, verificationGeneration in
             guard let self, isAccepted, let identity else { return }
@@ -974,6 +1058,7 @@ final class AppStore: ObservableObject {
                     && !self.isRebuildingUsageData
                 if isAccepted {
                     if let identity {
+                        self.clearCursorRefreshFailure(.account)
                         let cachedIdentity = self.db.getSyncState(
                             for: CursorUsageService.syncStateKey
                         )?.sessionId
@@ -981,15 +1066,25 @@ final class AppStore: ObservableObject {
                             ? .verified(identity)
                             : .verifying(identity)
                         if cachedIdentity != identity {
+                            self.cursorRefreshFailures = [:]
                             self.cancelCursorSpendSelectionRefresh()
+                            self.cursorSpendSnapshot = nil
                             self.clearCursorDependentPresentation()
                         }
                     } else {
-                        self.cancelCursorSpendSelectionRefresh()
                         self.cursorAccountPresentationState = .unavailable
-                        self.clearCursorDependentPresentation()
+                        if case .failure(let error) = result,
+                           (error as? CursorUsageError) != .cancelled {
+                            let kind: CursorRefreshFailureKind
+                            switch error as? CursorUsageError {
+                            case .authenticationUnavailable, .authenticationRejected:
+                                kind = .signInUnavailable
+                            default:
+                                kind = .refreshFailed
+                            }
+                            self.recordCursorRefreshFailure(.account, kind: kind)
+                        }
                     }
-                    self.cursorSpendSnapshot = nil
                     self.reload()
                 }
                 completion(isAccepted ? identity : nil, isAccepted, generation)
@@ -1004,6 +1099,8 @@ final class AppStore: ObservableObject {
         cursorAccountSyncCancellation?.disableAgents(notIn: [])
         let cancellation = AgentSyncCancellation(enabledAgents: [.cursor])
         cursorAccountSyncCancellation = cancellation
+        cursorUsageRefreshGeneration += 1
+        let usageGeneration = cursorUsageRefreshGeneration
         syncManager.syncCursorOnce(
             expectedIdentity: identity,
             cancellation: cancellation,
@@ -1024,6 +1121,19 @@ final class AppStore: ObservableObject {
                     self.cursorSpendSelectionDidChange()
                 }
             },
+            onOutcome: { [weak self] outcome in
+                DispatchQueue.main.async {
+                    guard let self,
+                          self.cursorUsageRefreshGeneration == usageGeneration,
+                          self.cursorAccountVerificationGeneration == verificationGeneration,
+                          self.isPanelVisible,
+                          self.enabledAgents.contains(.cursor),
+                          cancellation.isEnabled(.cursor) else {
+                        return
+                    }
+                    self.applyCursorUsageSyncOutcome(outcome)
+                }
+            },
             completion: { [weak self] in
                 DispatchQueue.main.async {
                     guard let self,
@@ -1033,7 +1143,7 @@ final class AppStore: ObservableObject {
                         return
                     }
                     self.cursorAccountSyncCancellation = nil
-                    self.cursorAccountPresentationState = .unavailable
+                    self.cursorAccountPresentationState = .mismatched(identity)
                     self.cursorSpendSnapshot = nil
                     self.clearCursorDependentPresentation()
                     self.reload()
@@ -1067,15 +1177,7 @@ final class AppStore: ObservableObject {
             cursorSpendSnapshot = nil
             return
         }
-
-        let accountIdentity: String?
-        if case .verified(let identity) = cursorAccountPresentationState {
-            accountIdentity = identity
-        } else {
-            accountIdentity = db.getSyncState(
-                for: CursorUsageService.syncStateKey
-            )?.sessionId
-        }
+        let accountIdentity = cursorPresentationIdentity ?? cachedCursorIdentity
 
         let range = CursorSpendRange(
             timeRange: timeRange,
@@ -1094,6 +1196,7 @@ final class AppStore: ObservableObject {
                       self.cursorSpendRefreshGeneration == generation,
                       self.appFilter == .cursor,
                       self.isCursorDataPresentationAvailable,
+                      (self.cursorPresentationIdentity ?? self.cachedCursorIdentity) == accountIdentity,
                       CursorSpendRange(
                           timeRange: self.timeRange,
                           now: self.currentDateProvider()
@@ -1101,7 +1204,10 @@ final class AppStore: ObservableObject {
                     return
                 }
                 self.cursorSpendSnapshot = cached
-                guard self.isPanelVisible else { return }
+                guard self.isPanelVisible, self.isCursorRefreshAvailable else {
+                    self.cursorSpendSelectionCancellation = nil
+                    return
+                }
                 self.refreshCursorSpend(
                     range: range,
                     force: false,
@@ -1129,7 +1235,7 @@ final class AppStore: ObservableObject {
         guard let cursorSpendRefresher,
               appFilter == .cursor,
               enabledAgents.contains(.cursor),
-              isCursorDataPresentationAvailable else {
+              isCursorRefreshAvailable else {
             completion()
             return
         }
@@ -1138,38 +1244,84 @@ final class AppStore: ObservableObject {
         if cursorSpendSnapshot?.range != range {
             cursorSpendSnapshot = nil
         }
-        let expectedAccountIdentity: String?
-        if case .verified(let identity) = cursorAccountPresentationState {
-            expectedAccountIdentity = identity
-        } else {
-            expectedAccountIdentity = db.getSyncState(
-                for: CursorUsageService.syncStateKey
-            )?.sessionId
-        }
+        let expectedAccountIdentity = cachedCursorIdentity
         cursorSpendRefresher.refresh(
             range: range,
             expectedAccountIdentity: expectedAccountIdentity,
             force: force,
             cancellation: cancellation
-        ) { [weak self] snapshot in
+        ) { [weak self] outcome in
             defer { completion() }
             guard let self,
                   self.cursorSpendRefreshGeneration == generation,
                   self.appFilter == .cursor,
-                  self.isCursorDataPresentationAvailable,
+                  self.isCursorRefreshAvailable,
                   CursorSpendRange(
                       timeRange: self.timeRange,
                       now: self.currentDateProvider()
                   ) == range else {
                 return
             }
-            if let snapshot {
+            if let snapshot = outcome.snapshot {
                 if case .verified(let identity) = self.cursorAccountPresentationState {
                     guard snapshot.accountIdentity == identity else { return }
                 }
                 self.cursorSpendSnapshot = snapshot
             }
+            self.applyCursorSpendRefreshOutcome(outcome)
         }
+    }
+
+    private func applyCursorUsageSyncOutcome(_ outcome: CursorUsageSyncOutcome) {
+        switch outcome {
+        case .success:
+            clearCursorRefreshFailure(.usage)
+        case .failure(let reason):
+            recordCursorRefreshFailure(.usage, kind: failureKind(for: reason))
+        case .cancelled, .skipped:
+            break
+        }
+    }
+
+    private func applyCursorSpendRefreshOutcome(_ outcome: CursorSpendRefreshOutcome) {
+        switch outcome {
+        case .success:
+            clearCursorRefreshFailure(.spend)
+        case .failure(_, let reason):
+            recordCursorRefreshFailure(.spend, kind: failureKind(for: reason))
+        case .cacheHit, .cancelled, .superseded:
+            break
+        }
+    }
+
+    private func recordCursorRefreshFailure(
+        _ component: CursorRefreshComponent,
+        kind: CursorRefreshFailureKind
+    ) {
+        cursorRefreshFailures[component] = CursorRefreshFailure(
+            component: component,
+            kind: kind,
+            attemptedAt: currentDateProvider()
+        )
+    }
+
+    private func clearCursorRefreshFailure(_ component: CursorRefreshComponent) {
+        cursorRefreshFailures.removeValue(forKey: component)
+    }
+
+    private func failureKind(
+        for reason: CursorRefreshFailureReason
+    ) -> CursorRefreshFailureKind {
+        reason == .authentication ? .signInUnavailable : .refreshFailed
+    }
+
+    private func cursorFailureComponentList(_ components: [String]) -> String {
+        guard let last = components.last else { return "" }
+        guard components.count > 1 else { return last }
+        if components.count == 2 {
+            return components.joined(separator: " and ")
+        }
+        return "\(components.dropLast().joined(separator: ", ")), and \(last)"
     }
 
     func selectActivityDate(_ date: String) {

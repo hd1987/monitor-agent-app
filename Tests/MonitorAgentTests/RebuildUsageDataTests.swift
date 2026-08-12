@@ -133,6 +133,90 @@ final class RebuildUsageDataTests: XCTestCase {
         XCTAssertEqual(cursorSyncer.syncCount, 0)
     }
 
+    func testCursorSyncPublishesTypedAuthenticationFailureOutcome() {
+        let syncManager = SessionSyncManager(
+            database: DatabaseManager(inMemory: true),
+            cursorUsageSyncer: FailingCursorUsageSyncer()
+        )
+        let completed = expectation(description: "Cursor failure outcome is published")
+        var outcome: CursorUsageSyncOutcome?
+
+        syncManager.syncCursorOnce(
+            expectedIdentity: "cursor-account:test",
+            onSuccess: {},
+            onOutcome: {
+                outcome = $0
+                completed.fulfill()
+            },
+            completion: {}
+        )
+
+        wait(for: [completed], timeout: 1)
+        XCTAssertEqual(outcome, .failure(.authentication))
+    }
+
+    func testCursorSyncPublishesTypedRequestFailureOutcome() {
+        let syncManager = SessionSyncManager(
+            database: DatabaseManager(inMemory: true),
+            cursorUsageSyncer: RequestFailingCursorUsageSyncer()
+        )
+        let completed = expectation(description: "Cursor request failure is published")
+        var outcome: CursorUsageSyncOutcome?
+
+        syncManager.syncCursorOnce(
+            expectedIdentity: "cursor-account:test",
+            onSuccess: {},
+            onOutcome: {
+                outcome = $0
+                completed.fulfill()
+            },
+            completion: {}
+        )
+
+        wait(for: [completed], timeout: 1)
+        XCTAssertEqual(outcome, .failure(.request))
+    }
+
+    func testCursorSyncPublishesSuccessAndCancellationOutcomes() {
+        let database = DatabaseManager(inMemory: true)
+        let identity = "cursor-account:test"
+        let syncManager = SessionSyncManager(
+            database: database,
+            cursorUsageSyncer: SuccessfulCursorUsageSyncer(
+                database: database,
+                identity: identity
+            )
+        )
+        let completed = expectation(description: "Cursor outcomes are published")
+        completed.expectedFulfillmentCount = 2
+        var outcomes: [CursorUsageSyncOutcome] = []
+
+        syncManager.syncCursorOnce(
+            expectedIdentity: identity,
+            onSuccess: {},
+            onOutcome: {
+                outcomes.append($0)
+                completed.fulfill()
+            },
+            completion: {}
+        )
+        syncManager.syncCursorOnce(
+            expectedIdentity: identity,
+            cancellation: AgentSyncCancellation(enabledAgents: []),
+            onSuccess: {},
+            onOutcome: {
+                outcomes.append($0)
+                completed.fulfill()
+            },
+            completion: {}
+        )
+
+        wait(for: [completed], timeout: 1)
+        XCTAssertEqual(outcomes.count, 2)
+        XCTAssertTrue(outcomes.contains(.success))
+        XCTAssertTrue(outcomes.contains(.cancelled))
+    }
+
     func testRoutineSyncStreamsLineAcrossReadChunkBoundary() throws {
         let directory = try makeTemporaryDirectory()
         let claudeRoot = directory.appendingPathComponent("claude-projects")
@@ -1166,7 +1250,6 @@ final class RebuildUsageDataTests: XCTestCase {
             accountIdentity: identity,
             range: range,
             totalCents: 500,
-            onDemandCents: 100,
             updatedAt: Date(timeIntervalSince1970: 10)
         )
         let rebuilder = UsageDataRebuilder(
@@ -1187,7 +1270,6 @@ final class RebuildUsageDataTests: XCTestCase {
         ))
 
         XCTAssertEqual(restored.totalCents, 500)
-        XCTAssertEqual(restored.onDemandCents, 100)
     }
 
     private func makeTemporaryDirectory() throws -> URL {
@@ -1228,6 +1310,12 @@ final class RebuildUsageDataTests: XCTestCase {
 private struct FailingCursorUsageSyncer: CursorUsageSyncing {
     func sync() throws -> SessionSyncResult {
         throw CursorUsageError.authenticationRejected
+    }
+}
+
+private struct RequestFailingCursorUsageSyncer: CursorUsageSyncing {
+    func sync() throws -> SessionSyncResult {
+        throw CursorUsageError.requestFailed
     }
 }
 
