@@ -3,7 +3,6 @@ import Foundation
 enum CursorSpendRefreshOutcome: Equatable {
     case cacheHit(CursorSpendSnapshot)
     case success(CursorSpendSnapshot)
-    case partialFailure(CursorSpendSnapshot, CursorRefreshFailureReason)
     case failure(CursorSpendSnapshot?, CursorRefreshFailureReason)
     case cancelled
     case superseded
@@ -11,8 +10,7 @@ enum CursorSpendRefreshOutcome: Equatable {
     var snapshot: CursorSpendSnapshot? {
         switch self {
         case .cacheHit(let snapshot),
-             .success(let snapshot),
-             .partialFailure(let snapshot, _):
+             .success(let snapshot):
             return snapshot
         case .failure(let snapshot, _):
             return snapshot
@@ -72,7 +70,6 @@ extension CursorSpendServicing {
 enum CursorSpendError: LocalizedError, Equatable {
     case accountChanged
     case invalidRange
-    case invalidBreakdown
 
     var errorDescription: String? {
         switch self {
@@ -80,8 +77,6 @@ enum CursorSpendError: LocalizedError, Equatable {
             return "Cursor changed accounts before spend could be saved."
         case .invalidRange:
             return "The selected Cursor spend range is invalid."
-        case .invalidBreakdown:
-            return "Cursor returned an invalid spend breakdown."
         }
     }
 }
@@ -89,29 +84,15 @@ enum CursorSpendError: LocalizedError, Equatable {
 final class CursorSpendService: CursorSpendServicing {
     static let automaticCacheLifetime: TimeInterval = 5 * 60
 
-    private enum Scope: CaseIterable {
-        case total
-        case onDemand
-
-        var apiValue: String {
-            switch self {
-            case .total: return "SPEND_TYPE_ALL"
-            case .onDemand: return "SPEND_TYPE_ON_DEMAND"
-            }
-        }
-    }
-
     private enum RefreshResult {
         case cacheHit(CursorSpendSnapshot)
         case success(CursorSpendSnapshot)
-        case partialFailure(CursorSpendSnapshot, CursorRefreshFailureReason)
         case failure(CursorSpendSnapshot, CursorRefreshFailureReason)
 
         var snapshot: CursorSpendSnapshot {
             switch self {
             case .cacheHit(let snapshot),
                  .success(let snapshot),
-                 .partialFailure(let snapshot, _),
                  .failure(let snapshot, _):
                 return snapshot
             }
@@ -190,8 +171,6 @@ final class CursorSpendService: CursorSpendServicing {
             ) {
             case .cacheHit(let snapshot): return .cacheHit(snapshot)
             case .success(let snapshot): return .success(snapshot)
-            case .partialFailure(let snapshot, let reason):
-                return .partialFailure(snapshot, reason)
             case .failure(let snapshot, let reason):
                 return .failure(snapshot, reason)
             }
@@ -234,26 +213,19 @@ final class CursorSpendService: CursorSpendServicing {
             throw CursorSpendError.invalidRange
         }
 
-        let results = fetchScopes(
-            token: authenticated.token,
-            account: account,
-            startMilliseconds: startMilliseconds,
-            endMilliseconds: endMilliseconds,
-            cancellation: cancellation
-        )
-        let totalCents = results[.total]?.successValue
-        var onDemandCents = results[.onDemand]?.successValue
-        let failureReason = results.values
-            .compactMap(\.failureValue)
-            .map(\.cursorRefreshFailureReason)
-            .contains(.authentication) ? CursorRefreshFailureReason.authentication : .request
-
-        if let total = totalCents,
-           let onDemand = onDemandCents,
-           onDemand > total {
-            onDemandCents = nil
-        }
-        if totalCents == nil, onDemandCents == nil {
+        let totalCents: Int
+        do {
+            totalCents = try fetchSpend(
+                token: authenticated.token,
+                account: account,
+                startMilliseconds: startMilliseconds,
+                endMilliseconds: endMilliseconds,
+                cancellation: cancellation
+            )
+        } catch CursorUsageError.cancelled {
+            throw CursorUsageError.cancelled
+        } catch {
+            let failureReason = error.cursorRefreshFailureReason
             if let cached = database.fetchCursorSpendSnapshot(
                 accountIdentity: account.syncIdentity,
                 range: range
@@ -262,8 +234,7 @@ final class CursorSpendService: CursorSpendServicing {
             }
             throw TypedRefreshError(
                 reason: failureReason,
-                underlyingError: results.values.compactMap(\.failureValue).first
-                    ?? CursorUsageError.invalidResponse
+                underlyingError: error
             )
         }
 
@@ -272,7 +243,6 @@ final class CursorSpendService: CursorSpendServicing {
                 accountIdentity: account.syncIdentity,
                 range: range,
                 totalCents: totalCents,
-                onDemandCents: onDemandCents,
                 updatedAt: currentDate
             )
         }
@@ -291,53 +261,10 @@ final class CursorSpendService: CursorSpendServicing {
         guard let snapshot else {
             throw CursorSpendError.accountChanged
         }
-        let hasPartialFailure = totalCents == nil || onDemandCents == nil
-        return hasPartialFailure
-            ? .partialFailure(snapshot, failureReason)
-            : .success(snapshot)
-    }
-
-    private func fetchScopes(
-        token: String,
-        account: CursorAccount,
-        startMilliseconds: Int64,
-        endMilliseconds: Int64,
-        cancellation: AgentSyncCancellation?
-    ) -> [Scope: Result<Int, Error>] {
-        let group = DispatchGroup()
-        let lock = NSLock()
-        let queue = DispatchQueue(
-            label: "com.monitoragent.cursor-spend-scopes",
-            qos: .utility,
-            attributes: .concurrent
-        )
-        var results: [Scope: Result<Int, Error>] = [:]
-
-        for scope in Scope.allCases {
-            group.enter()
-            queue.async {
-                let result = Result {
-                    try self.fetchSpend(
-                        scope: scope,
-                        token: token,
-                        account: account,
-                        startMilliseconds: startMilliseconds,
-                        endMilliseconds: endMilliseconds,
-                        cancellation: cancellation
-                    )
-                }
-                lock.lock()
-                results[scope] = result
-                lock.unlock()
-                group.leave()
-            }
-        }
-        group.wait()
-        return results
+        return .success(snapshot)
     }
 
     private func fetchSpend(
-        scope: Scope,
         token: String,
         account: CursorAccount,
         startMilliseconds: Int64,
@@ -349,7 +276,7 @@ final class CursorSpendService: CursorSpendServicing {
             "periodStartMs": String(startMilliseconds),
             "periodEndMs": String(endMilliseconds),
             "groupBy": "SPEND_GROUP_BY_CATEGORY_MODEL",
-            "spendType": scope.apiValue,
+            "spendType": "SPEND_TYPE_ALL",
         ]
         if let teamId = account.teamId {
             body["teamId"] = teamId
@@ -574,17 +501,5 @@ private struct CursorDailySpendItem: Decodable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         spendCents = try container.decodeFlexibleInt(forKey: .spendCents)
-    }
-}
-
-private extension Result {
-    var successValue: Success? {
-        guard case .success(let value) = self else { return nil }
-        return value
-    }
-
-    var failureValue: Failure? {
-        guard case .failure(let error) = self else { return nil }
-        return error
     }
 }

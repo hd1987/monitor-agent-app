@@ -278,18 +278,14 @@ struct CursorSpendSnapshot: Equatable {
     let accountIdentity: String
     let range: CursorSpendRange
     let totalCents: Int?
-    let onDemandCents: Int?
     let totalUpdatedAt: Date?
-    let onDemandUpdatedAt: Date?
 
     func isFresh(at date: Date, maximumAge: TimeInterval) -> Bool {
-        guard let totalUpdatedAt,
-              let onDemandUpdatedAt else {
+        guard let totalUpdatedAt else {
             return false
         }
-        let oldestUpdate = min(totalUpdatedAt, onDemandUpdatedAt)
-        return oldestUpdate <= date
-            && date.timeIntervalSince(oldestUpdate) < maximumAge
+        return totalUpdatedAt <= date
+            && date.timeIntervalSince(totalUpdatedAt) < maximumAge
     }
 }
 

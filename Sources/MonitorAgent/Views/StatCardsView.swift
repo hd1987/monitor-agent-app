@@ -25,7 +25,10 @@ struct StatCardsView: View {
             CacheHitCard(stats: store.stats, isAvailable: !isCursorUnavailable)
                 .frame(width: cardWidth)
             if store.appFilter == .cursor {
-                CursorSpendSummaryCard(snapshot: store.cursorSpendSnapshot)
+                StatCard(
+                    title: "Total Usage",
+                    value: formatCursorSpend(store.cursorSpendSnapshot?.totalCents)
+                )
                     .frame(width: cardWidth)
             }
         }
@@ -165,41 +168,6 @@ private struct CacheHitCard: View {
             value: isAvailable ? formatPercent(stats.cacheHitRate) : "—"
         )
             .help(cacheHitHelp())
-    }
-}
-
-private struct CursorSpendSummaryCard: View {
-    @EnvironmentObject private var theme: ThemeManager
-    let snapshot: CursorSpendSnapshot?
-
-    var body: some View {
-        StatCardContainer {
-            VStack(spacing: 4) {
-                spendRow(label: "Total", cents: snapshot?.totalCents, emphasized: true)
-                spendRow(label: "On-Demand", cents: snapshot?.onDemandCents, emphasized: false)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        }
-    }
-
-    private func spendRow(label: String, cents: Int?, emphasized: Bool) -> some View {
-        HStack(spacing: 3) {
-            Text(label)
-                .font(.system(size: 8, weight: .medium))
-                .foregroundStyle(theme.panelSecondaryForeground)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-            Spacer(minLength: 2)
-            Text(formatCursorSpend(cents))
-                .font(.system(
-                    size: emphasized ? 12 : 10,
-                    weight: emphasized ? .semibold : .medium,
-                    design: .rounded
-                ))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .foregroundStyle(.primary)
-        }
     }
 }
 

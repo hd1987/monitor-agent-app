@@ -1250,7 +1250,6 @@ final class RebuildUsageDataTests: XCTestCase {
             accountIdentity: identity,
             range: range,
             totalCents: 500,
-            onDemandCents: 100,
             updatedAt: Date(timeIntervalSince1970: 10)
         )
         let rebuilder = UsageDataRebuilder(
@@ -1271,7 +1270,6 @@ final class RebuildUsageDataTests: XCTestCase {
         ))
 
         XCTAssertEqual(restored.totalCents, 500)
-        XCTAssertEqual(restored.onDemandCents, 100)
     }
 
     private func makeTemporaryDirectory() throws -> URL {

@@ -120,13 +120,12 @@ final class DatabaseManager {
                     range_start_ms INTEGER,
                     range_end_ms INTEGER,
                     total_cents INTEGER,
-                    on_demand_cents INTEGER,
                     total_updated_at INTEGER,
-                    on_demand_updated_at INTEGER,
                     last_accessed_at INTEGER NOT NULL,
                     PRIMARY KEY (account_identity, range_key)
                 );
                 """)
+            try migrateCursorSpendSnapshotsSchemaIfNeeded(db)
             try addColumnIfMissing(
                 db,
                 table: "sync_state",
@@ -146,6 +145,38 @@ final class DatabaseManager {
         let columns = try Row.fetchAll(db, sql: "PRAGMA table_info(\(table))").map { $0["name"] as String }
         guard !columns.contains(column) else { return }
         try db.execute(sql: "ALTER TABLE \(table) ADD COLUMN \(column) \(definition)")
+    }
+
+    private func migrateCursorSpendSnapshotsSchemaIfNeeded(_ db: Database) throws {
+        let columns = try Row.fetchAll(
+            db,
+            sql: "PRAGMA table_info(cursor_spend_snapshots)"
+        ).map { $0["name"] as String }
+        guard columns.contains("on_demand_cents")
+                || columns.contains("on_demand_updated_at") else {
+            return
+        }
+        try db.execute(sql: """
+            ALTER TABLE cursor_spend_snapshots RENAME TO cursor_spend_snapshots_legacy;
+            CREATE TABLE cursor_spend_snapshots (
+                account_identity TEXT NOT NULL,
+                range_key TEXT NOT NULL,
+                range_start_ms INTEGER,
+                range_end_ms INTEGER,
+                total_cents INTEGER,
+                total_updated_at INTEGER,
+                last_accessed_at INTEGER NOT NULL,
+                PRIMARY KEY (account_identity, range_key)
+            );
+            INSERT INTO cursor_spend_snapshots (
+                account_identity, range_key, range_start_ms, range_end_ms,
+                total_cents, total_updated_at, last_accessed_at
+            )
+            SELECT account_identity, range_key, range_start_ms, range_end_ms,
+                   total_cents, total_updated_at, last_accessed_at
+            FROM cursor_spend_snapshots_legacy;
+            DROP TABLE cursor_spend_snapshots_legacy;
+            """)
     }
 
     func integrityCheck() -> Bool {
@@ -329,8 +360,7 @@ final class DatabaseManager {
             guard let row = try Row.fetchOne(
                 db,
                 sql: """
-                    SELECT total_cents, on_demand_cents,
-                           total_updated_at, on_demand_updated_at
+                    SELECT total_cents, total_updated_at
                     FROM cursor_spend_snapshots
                     WHERE account_identity = ?
                       AND range_key = ?
@@ -369,13 +399,12 @@ final class DatabaseManager {
         accountIdentity: String,
         range: CursorSpendRange,
         totalCents: Int?,
-        onDemandCents: Int?,
         updatedAt: Date
     ) throws -> CursorSpendSnapshot? {
         lifecycleLock.lock()
         defer { lifecycleLock.unlock() }
         guard let db = dbQueue else { throw DatabaseManagerError.unavailable }
-        guard totalCents != nil || onDemandCents != nil else {
+        guard totalCents != nil else {
             return fetchCursorSpendSnapshot(
                 accountIdentity: accountIdentity,
                 range: range
@@ -394,9 +423,8 @@ final class DatabaseManager {
                 sql: """
                     INSERT INTO cursor_spend_snapshots (
                         account_identity, range_key, range_start_ms, range_end_ms,
-                        total_cents, on_demand_cents,
-                        total_updated_at, on_demand_updated_at, last_accessed_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        total_cents, total_updated_at, last_accessed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(account_identity, range_key) DO UPDATE SET
                         range_start_ms = excluded.range_start_ms,
                         range_end_ms = excluded.range_end_ms,
@@ -406,23 +434,11 @@ final class DatabaseManager {
                             THEN COALESCE(excluded.total_cents, cursor_spend_snapshots.total_cents)
                             ELSE excluded.total_cents
                         END,
-                        on_demand_cents = CASE
-                            WHEN cursor_spend_snapshots.range_start_ms IS excluded.range_start_ms
-                             AND cursor_spend_snapshots.range_end_ms IS excluded.range_end_ms
-                            THEN COALESCE(excluded.on_demand_cents, cursor_spend_snapshots.on_demand_cents)
-                            ELSE excluded.on_demand_cents
-                        END,
                         total_updated_at = CASE
                             WHEN cursor_spend_snapshots.range_start_ms IS excluded.range_start_ms
                              AND cursor_spend_snapshots.range_end_ms IS excluded.range_end_ms
                             THEN COALESCE(excluded.total_updated_at, cursor_spend_snapshots.total_updated_at)
                             ELSE excluded.total_updated_at
-                        END,
-                        on_demand_updated_at = CASE
-                            WHEN cursor_spend_snapshots.range_start_ms IS excluded.range_start_ms
-                             AND cursor_spend_snapshots.range_end_ms IS excluded.range_end_ms
-                            THEN COALESCE(excluded.on_demand_updated_at, cursor_spend_snapshots.on_demand_updated_at)
-                            ELSE excluded.on_demand_updated_at
                         END,
                         last_accessed_at = excluded.last_accessed_at
                     """,
@@ -432,9 +448,7 @@ final class DatabaseManager {
                     range.startMilliseconds,
                     range.endMilliseconds,
                     totalCents,
-                    onDemandCents,
-                    totalCents == nil ? nil : timestamp,
-                    onDemandCents == nil ? nil : timestamp,
+                    timestamp,
                     timestamp,
                 ]
             )
@@ -454,8 +468,7 @@ final class DatabaseManager {
             guard let row = try Row.fetchOne(
                 db,
                 sql: """
-                    SELECT total_cents, on_demand_cents,
-                           total_updated_at, on_demand_updated_at
+                    SELECT total_cents, total_updated_at
                     FROM cursor_spend_snapshots
                     WHERE account_identity = ? AND range_key = ?
                     LIMIT 1
@@ -481,8 +494,7 @@ final class DatabaseManager {
                 db,
                 sql: """
                     SELECT range_key, range_start_ms, range_end_ms,
-                           total_cents, on_demand_cents,
-                           total_updated_at, on_demand_updated_at
+                           total_cents, total_updated_at
                     FROM cursor_spend_snapshots
                     WHERE account_identity = ?
                     ORDER BY last_accessed_at DESC
@@ -520,17 +532,13 @@ final class DatabaseManager {
                 let totalUpdatedAt = snapshot.totalUpdatedAt.map {
                     Int($0.timeIntervalSince1970)
                 }
-                let onDemandUpdatedAt = snapshot.onDemandUpdatedAt.map {
-                    Int($0.timeIntervalSince1970)
-                }
-                let lastAccessedAt = max(totalUpdatedAt ?? 0, onDemandUpdatedAt ?? 0)
+                let lastAccessedAt = totalUpdatedAt ?? 0
                 try db.execute(
                     sql: """
                         INSERT OR REPLACE INTO cursor_spend_snapshots (
                             account_identity, range_key, range_start_ms, range_end_ms,
-                            total_cents, on_demand_cents,
-                            total_updated_at, on_demand_updated_at, last_accessed_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            total_cents, total_updated_at, last_accessed_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
                         """,
                     arguments: [
                         snapshot.accountIdentity,
@@ -538,9 +546,7 @@ final class DatabaseManager {
                         snapshot.range.startMilliseconds,
                         snapshot.range.endMilliseconds,
                         snapshot.totalCents,
-                        snapshot.onDemandCents,
                         totalUpdatedAt,
-                        onDemandUpdatedAt,
                         lastAccessedAt,
                     ]
                 )
@@ -591,25 +597,12 @@ final class DatabaseManager {
     ) -> CursorSpendSnapshot {
         let storedTotalCents: Int? = row["total_cents"]
         let totalCents: Int? = storedTotalCents.flatMap { $0 >= 0 ? $0 : nil }
-        let storedOnDemandCents: Int? = row["on_demand_cents"]
-        let onDemandCents: Int? = storedOnDemandCents.flatMap { value in
-            guard value >= 0,
-                  totalCents.map({ value <= $0 }) != false else {
-                return nil
-            }
-            return value
-        }
         let storedTotalUpdatedAt: Int? = row["total_updated_at"]
-        let storedOnDemandUpdatedAt: Int? = row["on_demand_updated_at"]
         return CursorSpendSnapshot(
             accountIdentity: accountIdentity,
             range: range,
             totalCents: totalCents,
-            onDemandCents: onDemandCents,
             totalUpdatedAt: totalCents == nil ? nil : storedTotalUpdatedAt.map {
-                Date(timeIntervalSince1970: TimeInterval($0))
-            },
-            onDemandUpdatedAt: onDemandCents == nil ? nil : storedOnDemandUpdatedAt.map {
                 Date(timeIntervalSince1970: TimeInterval($0))
             }
         )

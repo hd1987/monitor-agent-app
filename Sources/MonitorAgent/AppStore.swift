@@ -1287,7 +1287,7 @@ final class AppStore: ObservableObject {
         switch outcome {
         case .success:
             clearCursorRefreshFailure(.spend)
-        case .partialFailure(_, let reason), .failure(_, let reason):
+        case .failure(_, let reason):
             recordCursorRefreshFailure(.spend, kind: failureKind(for: reason))
         case .cacheHit, .cancelled, .superseded:
             break

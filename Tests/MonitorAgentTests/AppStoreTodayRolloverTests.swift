@@ -1559,7 +1559,6 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             accountIdentity: account.account.syncIdentity,
             range: spendRange,
             totalCents: 500,
-            onDemandCents: 100,
             updatedAt: now
         )
         let resolver = StaticCursorAccountResolver(result: .success(account))
@@ -1617,7 +1616,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         XCTAssertEqual(store.heatmapMode, .year(selectedYear))
         XCTAssertTrue(store.isCursorDataPresentationAvailable)
         XCTAssertEqual(store.stats.totalRequests, 1)
-        XCTAssertEqual(store.cursorSpendSnapshot?.onDemandCents, 100)
+        XCTAssertEqual(store.cursorSpendSnapshot?.totalCents, 500)
 
         XCTAssertEqual(
             store.cursorRefreshFailures[.account]?.kind,
