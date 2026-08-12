@@ -212,6 +212,12 @@ private struct CursorUsagePage: Decodable {
     }
 
     init(from decoder: Decoder) throws {
+        let responseContainer = try decoder.container(keyedBy: CursorResponseCodingKey.self)
+        if responseContainer.allKeys.isEmpty {
+            totalUsageEventsCount = 0
+            usageEventsDisplay = []
+            return
+        }
         let container = try decoder.container(keyedBy: CodingKeys.self)
         totalUsageEventsCount = try container.decodeFlexibleInt(forKey: .totalUsageEventsCount)
         usageEventsDisplay = try container.decode([CursorUsageEvent].self, forKey: .usageEventsDisplay)

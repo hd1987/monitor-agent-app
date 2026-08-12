@@ -1,12 +1,34 @@
 import Foundation
 
+enum CursorSpendRefreshOutcome: Equatable {
+    case cacheHit(CursorSpendSnapshot)
+    case success(CursorSpendSnapshot)
+    case partialFailure(CursorSpendSnapshot, CursorRefreshFailureReason)
+    case failure(CursorSpendSnapshot?, CursorRefreshFailureReason)
+    case cancelled
+    case superseded
+
+    var snapshot: CursorSpendSnapshot? {
+        switch self {
+        case .cacheHit(let snapshot),
+             .success(let snapshot),
+             .partialFailure(let snapshot, _):
+            return snapshot
+        case .failure(let snapshot, _):
+            return snapshot
+        case .cancelled, .superseded:
+            return nil
+        }
+    }
+}
+
 protocol CursorSpendRefreshing: AnyObject {
     func refresh(
         range: CursorSpendRange,
         expectedAccountIdentity: String?,
         force: Bool,
         cancellation: AgentSyncCancellation?,
-        completion: @escaping (CursorSpendSnapshot?) -> Void
+        completion: @escaping (CursorSpendRefreshOutcome) -> Void
     )
 }
 
@@ -16,6 +38,35 @@ protocol CursorSpendServicing: AnyObject {
         force: Bool,
         cancellation: AgentSyncCancellation?
     ) throws -> CursorSpendSnapshot?
+
+    func refreshOutcome(
+        range: CursorSpendRange,
+        force: Bool,
+        cancellation: AgentSyncCancellation?
+    ) -> CursorSpendRefreshOutcome
+}
+
+extension CursorSpendServicing {
+    func refreshOutcome(
+        range: CursorSpendRange,
+        force: Bool,
+        cancellation: AgentSyncCancellation?
+    ) -> CursorSpendRefreshOutcome {
+        do {
+            guard let snapshot = try refresh(
+                range: range,
+                force: force,
+                cancellation: cancellation
+            ) else {
+                return .failure(nil, .request)
+            }
+            return .success(snapshot)
+        } catch CursorUsageError.cancelled {
+            return .cancelled
+        } catch {
+            return .failure(nil, error.cursorRefreshFailureReason)
+        }
+    }
 }
 
 enum CursorSpendError: LocalizedError, Equatable {
@@ -48,6 +99,28 @@ final class CursorSpendService: CursorSpendServicing {
             case .onDemand: return "SPEND_TYPE_ON_DEMAND"
             }
         }
+    }
+
+    private enum RefreshResult {
+        case cacheHit(CursorSpendSnapshot)
+        case success(CursorSpendSnapshot)
+        case partialFailure(CursorSpendSnapshot, CursorRefreshFailureReason)
+        case failure(CursorSpendSnapshot, CursorRefreshFailureReason)
+
+        var snapshot: CursorSpendSnapshot {
+            switch self {
+            case .cacheHit(let snapshot),
+                 .success(let snapshot),
+                 .partialFailure(let snapshot, _),
+                 .failure(let snapshot, _):
+                return snapshot
+            }
+        }
+    }
+
+    private struct TypedRefreshError: Error {
+        let reason: CursorRefreshFailureReason
+        let underlyingError: Error
     }
 
     private let database: DatabaseManager
@@ -93,6 +166,49 @@ final class CursorSpendService: CursorSpendServicing {
         force: Bool = false,
         cancellation: AgentSyncCancellation? = nil
     ) throws -> CursorSpendSnapshot? {
+        do {
+            return try refreshResult(
+                range: range,
+                force: force,
+                cancellation: cancellation
+            ).snapshot
+        } catch let error as TypedRefreshError {
+            throw error.underlyingError
+        }
+    }
+
+    func refreshOutcome(
+        range: CursorSpendRange,
+        force: Bool,
+        cancellation: AgentSyncCancellation?
+    ) -> CursorSpendRefreshOutcome {
+        do {
+            switch try refreshResult(
+                range: range,
+                force: force,
+                cancellation: cancellation
+            ) {
+            case .cacheHit(let snapshot): return .cacheHit(snapshot)
+            case .success(let snapshot): return .success(snapshot)
+            case .partialFailure(let snapshot, let reason):
+                return .partialFailure(snapshot, reason)
+            case .failure(let snapshot, let reason):
+                return .failure(snapshot, reason)
+            }
+        } catch CursorUsageError.cancelled {
+            return .cancelled
+        } catch let error as TypedRefreshError {
+            return .failure(nil, error.reason)
+        } catch {
+            return .failure(nil, error.cursorRefreshFailureReason)
+        }
+    }
+
+    private func refreshResult(
+        range: CursorSpendRange,
+        force: Bool,
+        cancellation: AgentSyncCancellation?
+    ) throws -> RefreshResult {
         let currentDate = now()
         let authenticated = try accountSession.resolve(
             force: true,
@@ -105,7 +221,7 @@ final class CursorSpendService: CursorSpendServicing {
                range: range
            ),
            cached.isFresh(at: currentDate, maximumAge: Self.automaticCacheLifetime) {
-            return cached
+            return .cacheHit(cached)
         }
 
         let startMilliseconds = range.startMilliseconds
@@ -127,6 +243,10 @@ final class CursorSpendService: CursorSpendServicing {
         )
         let totalCents = results[.total]?.successValue
         var onDemandCents = results[.onDemand]?.successValue
+        let failureReason = results.values
+            .compactMap(\.failureValue)
+            .map(\.cursorRefreshFailureReason)
+            .contains(.authentication) ? CursorRefreshFailureReason.authentication : .request
 
         if let total = totalCents,
            let onDemand = onDemandCents,
@@ -138,10 +258,13 @@ final class CursorSpendService: CursorSpendServicing {
                 accountIdentity: account.syncIdentity,
                 range: range
             ) {
-                return cached
+                return .failure(cached, failureReason)
             }
-            throw results.values.compactMap(\.failureValue).first
-                ?? CursorUsageError.invalidResponse
+            throw TypedRefreshError(
+                reason: failureReason,
+                underlyingError: results.values.compactMap(\.failureValue).first
+                    ?? CursorUsageError.invalidResponse
+            )
         }
 
         let commit = {
@@ -168,7 +291,10 @@ final class CursorSpendService: CursorSpendServicing {
         guard let snapshot else {
             throw CursorSpendError.accountChanged
         }
-        return snapshot
+        let hasPartialFailure = totalCents == nil || onDemandCents == nil
+        return hasPartialFailure
+            ? .partialFailure(snapshot, failureReason)
+            : .success(snapshot)
     }
 
     private func fetchScopes(
@@ -261,14 +387,14 @@ final class CursorSpendRefreshCoordinator: CursorSpendRefreshing {
         let expectedAccountIdentity: String?
         var force: Bool
         let cancellation: AgentSyncCancellation?
-        var completions: [(CursorSpendSnapshot?) -> Void]
+        var completions: [(CursorSpendRefreshOutcome) -> Void]
 
         init(
             range: CursorSpendRange,
             expectedAccountIdentity: String?,
             force: Bool,
             cancellation: AgentSyncCancellation?,
-            completion: @escaping (CursorSpendSnapshot?) -> Void
+            completion: @escaping (CursorSpendRefreshOutcome) -> Void
         ) {
             self.range = range
             self.expectedAccountIdentity = expectedAccountIdentity
@@ -325,7 +451,7 @@ final class CursorSpendRefreshCoordinator: CursorSpendRefreshing {
         expectedAccountIdentity: String?,
         force: Bool,
         cancellation: AgentSyncCancellation?,
-        completion: @escaping (CursorSpendSnapshot?) -> Void
+        completion: @escaping (CursorSpendRefreshOutcome) -> Void
     ) {
         let request = Request(
             range: range,
@@ -335,7 +461,7 @@ final class CursorSpendRefreshCoordinator: CursorSpendRefreshing {
             completion: completion
         )
         var requestToStart: Request?
-        var supersededCompletions: [(CursorSpendSnapshot?) -> Void] = []
+        var supersededCompletions: [(CursorSpendRefreshOutcome) -> Void] = []
 
         stateLock.lock()
         if let activeRequest {
@@ -377,7 +503,7 @@ final class CursorSpendRefreshCoordinator: CursorSpendRefreshing {
         let completionsToSupersede = supersededCompletions
         if !completionsToSupersede.isEmpty {
             DispatchQueue.main.async {
-                completionsToSupersede.forEach { $0(nil) }
+                completionsToSupersede.forEach { $0(.superseded) }
             }
         }
         if let requestToStart {
@@ -387,16 +513,16 @@ final class CursorSpendRefreshCoordinator: CursorSpendRefreshing {
 
     private func execute(_ request: Request) {
         queue.async {
-            let snapshot = try? self.service.refresh(
+            let outcome = self.service.refreshOutcome(
                 range: request.range,
                 force: request.force,
                 cancellation: request.cancellation
             )
-            self.finish(request, snapshot: snapshot)
+            self.finish(request, outcome: outcome)
         }
     }
 
-    private func finish(_ request: Request, snapshot: CursorSpendSnapshot?) {
+    private func finish(_ request: Request, outcome: CursorSpendRefreshOutcome) {
         stateLock.lock()
         guard activeRequest === request else {
             stateLock.unlock()
@@ -409,7 +535,7 @@ final class CursorSpendRefreshCoordinator: CursorSpendRefreshing {
         stateLock.unlock()
 
         DispatchQueue.main.async {
-            completions.forEach { $0(snapshot) }
+            completions.forEach { $0(outcome) }
         }
         if let nextRequest {
             execute(nextRequest)
@@ -425,6 +551,11 @@ private struct CursorDailySpendResponse: Decodable {
     }
 
     init(from decoder: Decoder) throws {
+        let responseContainer = try decoder.container(keyedBy: CursorResponseCodingKey.self)
+        if responseContainer.allKeys.isEmpty {
+            dailySpend = []
+            return
+        }
         let container = try decoder.container(keyedBy: CodingKeys.self)
         dailySpend = try container.decode(
             [CursorDailySpendItem].self,

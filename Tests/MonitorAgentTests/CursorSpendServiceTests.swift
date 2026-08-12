@@ -46,8 +46,13 @@ final class CursorSpendServiceTests: XCTestCase {
             now: { now }
         )
 
-        _ = try service.refresh(range: range)
-        _ = try service.refresh(range: range)
+        let initialSnapshot = try XCTUnwrap(service.refresh(range: range))
+        let outcome = service.refreshOutcome(
+            range: range,
+            force: false,
+            cancellation: nil
+        )
+        XCTAssertEqual(outcome, .cacheHit(initialSnapshot))
         XCTAssertEqual(transport.requestCount, 4)
 
         _ = try service.refresh(range: range, force: true)
@@ -84,7 +89,7 @@ final class CursorSpendServiceTests: XCTestCase {
         XCTAssertEqual(transport.requestCount, 3)
     }
 
-    func testMissingDailySpendDoesNotReplaceCachedValuesWithZeroes() throws {
+    func testNonemptyResponseMissingDailySpendDoesNotReplaceCachedValuesWithZeroes() throws {
         let database = DatabaseManager(inMemory: true)
         let identity = try seedCursorIdentity(database: database)
         let now = Date(timeIntervalSince1970: 1_785_470_400)
@@ -97,7 +102,7 @@ final class CursorSpendServiceTests: XCTestCase {
             updatedAt: now.addingTimeInterval(-600)
         )
         let transport = CursorSpendTransportStub(totalCents: 0, onDemandCents: 0)
-        transport.omitsDailySpend = true
+        transport.returnsMalformedMissingDailySpend = true
         let service = CursorSpendService(
             database: database,
             authenticationReader: CursorSpendAuthenticationStub(),
@@ -105,10 +110,89 @@ final class CursorSpendServiceTests: XCTestCase {
             now: { now }
         )
 
-        let snapshot = try XCTUnwrap(service.refresh(range: range, force: true))
+        let outcome = service.refreshOutcome(
+            range: range,
+            force: true,
+            cancellation: nil
+        )
+        guard case .failure(let retainedSnapshot, let reason) = outcome else {
+            return XCTFail("Expected retained-cache failure outcome")
+        }
+        let snapshot = try XCTUnwrap(retainedSnapshot)
 
+        XCTAssertEqual(reason, .request)
         XCTAssertEqual(snapshot.totalCents, 500)
         XCTAssertEqual(snapshot.onDemandCents, 100)
+    }
+
+    func testStrictEmptyOnDemandResponseIsAuthoritativeZero() throws {
+        let database = DatabaseManager(inMemory: true)
+        _ = try seedCursorIdentity(database: database)
+        let transport = CursorSpendTransportStub(totalCents: 500, onDemandCents: 100)
+        transport.onDemandReturnsStrictEmptyObject = true
+        let now = Date(timeIntervalSince1970: 1_785_470_400)
+        let range = spendRange(now: now)
+        let service = CursorSpendService(
+            database: database,
+            authenticationReader: CursorSpendAuthenticationStub(),
+            transport: transport,
+            now: { now }
+        )
+
+        let outcome = service.refreshOutcome(
+            range: range,
+            force: true,
+            cancellation: nil
+        )
+        guard case .success(let snapshot) = outcome else {
+            return XCTFail("Expected strict empty object to be a successful zero")
+        }
+        XCTAssertEqual(snapshot.totalCents, 500)
+        XCTAssertEqual(snapshot.onDemandCents, 0)
+    }
+
+    func testAuthenticationFailuresRemainTypedInSpendOutcome() throws {
+        let database = DatabaseManager(inMemory: true)
+        _ = try seedCursorIdentity(database: database)
+        let transport = CursorSpendTransportStub(totalCents: 500, onDemandCents: 100)
+        transport.totalStatusCode = 401
+        transport.onDemandStatusCode = 403
+        let now = Date(timeIntervalSince1970: 1_785_470_400)
+        let service = CursorSpendService(
+            database: database,
+            authenticationReader: CursorSpendAuthenticationStub(),
+            transport: transport,
+            now: { now }
+        )
+
+        let outcome = service.refreshOutcome(
+            range: spendRange(now: now),
+            force: true,
+            cancellation: nil
+        )
+        XCTAssertEqual(outcome, .failure(nil, .authentication))
+    }
+
+    func testAuthenticationFailureTakesPrecedenceAcrossSpendScopes() throws {
+        let database = DatabaseManager(inMemory: true)
+        _ = try seedCursorIdentity(database: database)
+        let transport = CursorSpendTransportStub(totalCents: 500, onDemandCents: 100)
+        transport.totalStatusCode = 500
+        transport.onDemandStatusCode = 401
+        let now = Date(timeIntervalSince1970: 1_785_470_400)
+        let service = CursorSpendService(
+            database: database,
+            authenticationReader: CursorSpendAuthenticationStub(),
+            transport: transport,
+            now: { now }
+        )
+
+        let outcome = service.refreshOutcome(
+            range: spendRange(now: now),
+            force: true,
+            cancellation: nil
+        )
+        XCTAssertEqual(outcome, .failure(nil, .authentication))
     }
 
     func testInvalidOnDemandValueDoesNotReplaceValidTotal() throws {
@@ -163,8 +247,16 @@ final class CursorSpendServiceTests: XCTestCase {
         transport.totalCents = 600
         transport.onDemandStatusCode = 500
 
-        let snapshot = try XCTUnwrap(service.refresh(range: range, force: true))
+        let outcome = service.refreshOutcome(
+            range: range,
+            force: true,
+            cancellation: nil
+        )
+        guard case .partialFailure(let snapshot, let reason) = outcome else {
+            return XCTFail("Expected partial failure outcome")
+        }
 
+        XCTAssertEqual(reason, .request)
         XCTAssertEqual(snapshot.totalCents, 600)
         XCTAssertEqual(snapshot.onDemandCents, 100)
     }
@@ -637,7 +729,8 @@ private final class CursorSpendTransportStub: CursorHTTPTransport {
     var onDemandCents: Int
     var totalStatusCode = 200
     var onDemandStatusCode = 200
-    var omitsDailySpend = false
+    var returnsMalformedMissingDailySpend = false
+    var onDemandReturnsStrictEmptyObject = false
     private var requests: [URLRequest] = []
 
     init(userId: Int = 42, totalCents: Int, onDemandCents: Int) {
@@ -689,7 +782,9 @@ private final class CursorSpendTransportStub: CursorHTTPTransport {
         let cents = isOnDemand ? onDemandCents : totalCents
         let statusCode = isOnDemand ? onDemandStatusCode : totalStatusCode
         let responseBody = statusCode == 200
-            ? (omitsDailySpend
+            ? (returnsMalformedMissingDailySpend
+                ? #"{"categories":[]}"#
+                : isOnDemand && onDemandReturnsStrictEmptyObject
                 ? #"{}"#
                 : cents == 0
                 ? #"{"dailySpend":[],"categories":[]}"#

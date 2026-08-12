@@ -6,9 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Added
+- Mark the Cursor tab when account verification, usage sync, or selected-range spend refresh fails while keeping cached history visible
+
 ### Changed
 - Keep the last successful Cursor account's local history and selected-range spend visible while Cursor is signed out, unavailable, or being verified, without changing account-replacement behavior
 - Show subscription quota status and its failed-attempt time only after a refresh failure or sign-in expiration
+
+### Fixed
+- Treat Cursor DashboardService's strict empty-object Usage and Spend responses as successful empty results without accepting malformed nonempty responses
+- Keep Cursor failure indicators account-scoped and preserve authentication failures through Usage, Spend, and multi-component Help text
 
 ## [0.12.0] - 2026-08-11
 

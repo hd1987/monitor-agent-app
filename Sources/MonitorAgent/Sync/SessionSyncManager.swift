@@ -51,6 +51,13 @@ enum StrictSessionSyncError: LocalizedError, Equatable {
     }
 }
 
+enum CursorUsageSyncOutcome: Equatable {
+    case success
+    case failure(CursorRefreshFailureReason)
+    case cancelled
+    case skipped
+}
+
 enum SessionLogLineFilter {
     private static let assistantMarker = Data("assistant".utf8)
     private static let usageMarker = Data("usage".utf8)
@@ -92,6 +99,7 @@ final class SessionSyncManager {
     private struct CursorSyncWaiter {
         let cancellation: AgentSyncCancellation?
         let onSuccess: () -> Void
+        let onOutcome: (CursorUsageSyncOutcome) -> Void
         let completion: () -> Void
     }
 
@@ -178,6 +186,7 @@ final class SessionSyncManager {
         expectedCursorIdentity: String? = nil,
         onLocalComplete: @escaping () -> Void,
         onCursorComplete: @escaping () -> Void,
+        onCursorOutcome: @escaping (CursorUsageSyncOutcome) -> Void = { _ in },
         completion: @escaping () -> Void
     ) {
         queue.async { [weak self] in
@@ -199,6 +208,7 @@ final class SessionSyncManager {
                 expectedIdentity: expectedCursorIdentity,
                 cancellation: cancellation,
                 onSuccess: onCursorComplete,
+                onOutcome: onCursorOutcome,
                 completion: completion
             )
         }
@@ -223,12 +233,14 @@ final class SessionSyncManager {
         expectedIdentity: String,
         cancellation: AgentSyncCancellation? = nil,
         onSuccess: @escaping () -> Void,
+        onOutcome: @escaping (CursorUsageSyncOutcome) -> Void = { _ in },
         completion: @escaping () -> Void
     ) {
         scheduleCursorSync(
             expectedIdentity: expectedIdentity,
             cancellation: cancellation,
             onSuccess: onSuccess,
+            onOutcome: onOutcome,
             completion: completion
         )
     }
@@ -411,9 +423,11 @@ final class SessionSyncManager {
         expectedIdentity: String?,
         cancellation: AgentSyncCancellation?,
         onSuccess: @escaping () -> Void,
+        onOutcome: @escaping (CursorUsageSyncOutcome) -> Void,
         completion: @escaping () -> Void
     ) {
         guard let cursorUsageSyncer else {
+            onOutcome(.skipped)
             completion()
             return
         }
@@ -421,6 +435,7 @@ final class SessionSyncManager {
         let waiter = CursorSyncWaiter(
             cancellation: cancellation,
             onSuccess: onSuccess,
+            onOutcome: onOutcome,
             completion: completion
         )
         cursorSubmissionLock.lock()
@@ -453,40 +468,45 @@ final class SessionSyncManager {
         using cursorUsageSyncer: CursorUsageSyncing
     ) {
         cursorQueue.async { [self] in
-            let didSucceed = self.runCursorSync(
+            let outcome = self.runCursorSync(
                 initialRequest,
                 using: cursorUsageSyncer
             )
-            self.finishCursorSync(initialRequest, didSucceed: didSucceed)
+            self.finishCursorSync(initialRequest, outcome: outcome)
         }
     }
 
     private func runCursorSync(
         _ request: CursorSyncRequest,
         using cursorUsageSyncer: CursorUsageSyncing
-    ) -> Bool {
-        guard request.cancellation?.isEnabled(.cursor) != false else { return false }
-        let cursorResult: SessionSyncResult?
-        if let cursorUsageSyncer = cursorUsageSyncer as? CancellableCursorUsageSyncing {
-            cursorResult = try? cursorUsageSyncer.sync(cancellation: request.cancellation)
-        } else {
-            cursorResult = try? cursorUsageSyncer.sync()
+    ) -> CursorUsageSyncOutcome {
+        guard request.cancellation?.isEnabled(.cursor) != false else { return .cancelled }
+        let cursorResult: SessionSyncResult
+        do {
+            if let cursorUsageSyncer = cursorUsageSyncer as? CancellableCursorUsageSyncing {
+                cursorResult = try cursorUsageSyncer.sync(cancellation: request.cancellation)
+            } else {
+                cursorResult = try cursorUsageSyncer.sync()
+            }
+        } catch CursorUsageError.cancelled {
+            return .cancelled
+        } catch {
+            return .failure(error.cursorRefreshFailureReason)
         }
-        guard request.cancellation?.isEnabled(.cursor) != false,
-              let result = cursorResult,
-              result.filesSynced > 0,
-              request.expectedIdentity == nil
+        guard request.cancellation?.isEnabled(.cursor) != false else { return .cancelled }
+        guard cursorResult.filesSynced > 0 else { return .failure(.request) }
+        guard request.expectedIdentity == nil
                 || db.getSyncState(
                     for: CursorUsageService.syncStateKey
                 )?.sessionId == request.expectedIdentity else {
-            return false
+            return .cancelled
         }
-        return true
+        return .success
     }
 
     private func finishCursorSync(
         _ request: CursorSyncRequest,
-        didSucceed: Bool
+        outcome: CursorUsageSyncOutcome
     ) {
         cursorScheduleLock.lock()
         request.acceptsWaiters = false
@@ -496,11 +516,15 @@ final class SessionSyncManager {
         }
         cursorScheduleLock.unlock()
 
-        if didSucceed {
-            waiters.forEach {
-                guard $0.cancellation?.isEnabled(.cursor) != false else { return }
+        waiters.forEach {
+            guard $0.cancellation?.isEnabled(.cursor) != false else {
+                $0.onOutcome(.cancelled)
+                return
+            }
+            if outcome == .success {
                 $0.onSuccess()
             }
+            $0.onOutcome(outcome)
         }
         waiters.forEach { $0.completion() }
     }
