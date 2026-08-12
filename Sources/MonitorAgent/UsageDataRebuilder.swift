@@ -15,7 +15,7 @@ enum UsageDataRebuildError: LocalizedError, Equatable {
         case .suspiciousEmptyResult:
             return "The rebuilt database contained no usage requests. The existing database was not changed."
         case .cursorRefreshFailed:
-            return "Cursor usage could not be refreshed, so the existing Cursor cache was preserved."
+            return "Cursor usage or spend could not be refreshed, so the existing Cursor cache was preserved."
         }
     }
 }
@@ -28,6 +28,7 @@ final class UsageDataRebuilder {
     private let codexArchivedSessionsPath: String
     private let validateTemporaryDatabase: (DatabaseManager) -> Bool
     private let cursorUsageServiceFactory: ((DatabaseManager) -> CursorUsageSyncing)?
+    private let cursorSpendServiceFactory: ((DatabaseManager) -> CursorSpendHistorySyncing)?
 
     init(
         activeDatabase: DatabaseManager = .shared,
@@ -36,7 +37,8 @@ final class UsageDataRebuilder {
         codexSessionsPath: String = NSHomeDirectory() + "/.codex/sessions",
         codexArchivedSessionsPath: String = NSHomeDirectory() + "/.codex/archived_sessions",
         validateTemporaryDatabase: @escaping (DatabaseManager) -> Bool = { $0.integrityCheck() },
-        cursorUsageServiceFactory: ((DatabaseManager) -> CursorUsageSyncing)? = nil
+        cursorUsageServiceFactory: ((DatabaseManager) -> CursorUsageSyncing)? = nil,
+        cursorSpendServiceFactory: ((DatabaseManager) -> CursorSpendHistorySyncing)? = nil
     ) {
         self.activeDatabase = activeDatabase
         self.temporaryDatabasePath = temporaryDatabasePath
@@ -45,6 +47,7 @@ final class UsageDataRebuilder {
         self.codexArchivedSessionsPath = codexArchivedSessionsPath
         self.validateTemporaryDatabase = validateTemporaryDatabase
         self.cursorUsageServiceFactory = cursorUsageServiceFactory
+        self.cursorSpendServiceFactory = cursorSpendServiceFactory
     }
 
     func rebuild(
@@ -120,10 +123,17 @@ final class UsageDataRebuilder {
                             || rebuiltCursorStats.totalRequests > 0 else {
                         throw UsageDataRebuildError.cursorRefreshFailed
                     }
-                    if let rebuiltIdentity = rebuildDatabase.getSyncState(
+                    let rebuiltIdentity = rebuildDatabase.getSyncState(
                         for: CursorUsageService.syncStateKey
-                    )?.sessionId,
-                       rebuiltIdentity == activeCursorIdentity {
+                    )?.sessionId
+                    if let cursorSpendServiceFactory {
+                        do {
+                            _ = try cursorSpendServiceFactory(rebuildDatabase)
+                                .refreshFullHistory(cancellation: nil)
+                        } catch {
+                            throw UsageDataRebuildError.cursorRefreshFailed
+                        }
+                    } else if rebuiltIdentity == activeCursorIdentity {
                         if let activeCursorDailySpendArchive {
                             try rebuildDatabase.restoreCursorDailySpendArchive(
                                 activeCursorDailySpendArchive

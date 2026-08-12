@@ -36,7 +36,7 @@ final class CursorSpendServiceTests: XCTestCase {
             return (start, end)
         }
         XCTAssertEqual(requestBounds.count, 3)
-        XCTAssertEqual(requestBounds.first?.0, 1_780_000_000_000)
+        XCTAssertEqual(requestBounds.first?.0, 1_779_926_400_000)
         XCTAssertEqual(requestBounds.last?.1, 1_785_470_400_000)
         XCTAssertTrue(zip(requestBounds, requestBounds.dropFirst()).allSatisfy {
             $0.0.1 == $0.1.0
@@ -67,11 +67,112 @@ final class CursorSpendServiceTests: XCTestCase {
         }
         XCTAssertEqual(transport.requestCount, 6)
         let incrementalBody = try XCTUnwrap(transport.spendRequestBodies.last)
-        XCTAssertEqual(incrementalBody["periodStartMs"] as? String, "1780272000000")
+        XCTAssertEqual(incrementalBody["periodStartMs"] as? String, "1784851200000")
         XCTAssertEqual(incrementalBody["periodEndMs"] as? String, "1785470400000")
 
         _ = try service.refresh(range: range)
         XCTAssertEqual(transport.requestCount, 8)
+    }
+
+    func testIncrementalRefreshUsesWatermarkOverlapAndMonthChunksAfterLongGap() throws {
+        let database = DatabaseManager(inMemory: true)
+        _ = try seedCursorIdentity(database: database)
+        let transport = CursorSpendTransportStub(totalCents: 500)
+        var now = Date(timeIntervalSince1970: 1_785_470_400)
+        let service = CursorSpendService(
+            database: database,
+            authenticationReader: CursorSpendAuthenticationStub(),
+            transport: transport,
+            now: { now }
+        )
+        _ = try XCTUnwrap(service.refresh(range: spendRange(now: now)))
+        let initialSpendRequestCount = transport.spendRequestBodies.count
+        now = Date(timeIntervalSince1970: 1_794_700_800)
+
+        _ = try XCTUnwrap(service.refresh(range: spendRange(now: now)))
+
+        let catchUpBodies = Array(transport.spendRequestBodies.dropFirst(initialSpendRequestCount))
+        let bounds = catchUpBodies.compactMap { body -> (Int64, Int64)? in
+            guard let start = (body["periodStartMs"] as? String).flatMap(Int64.init),
+                  let end = (body["periodEndMs"] as? String).flatMap(Int64.init) else {
+                return nil
+            }
+            return (start, end)
+        }
+        XCTAssertGreaterThan(bounds.count, 1)
+        XCTAssertEqual(bounds.first?.0, 1_784_851_200_000)
+        XCTAssertEqual(bounds.last?.1, 1_794_700_800_000)
+        XCTAssertTrue(zip(bounds, bounds.dropFirst()).allSatisfy {
+            $0.0.1 == $0.1.0
+        })
+    }
+
+    func testFullHistoryRefreshIgnoresIncrementalWatermark() throws {
+        let database = DatabaseManager(inMemory: true)
+        let identity = try seedCursorIdentity(database: database)
+        let transport = CursorSpendTransportStub(totalCents: 500)
+        let now = Date(timeIntervalSince1970: 1_785_470_400)
+        try database.replaceCursorDailySpend(
+            accountIdentity: identity,
+            days: [],
+            replacementStartMilliseconds: nil,
+            replacementEndMilliseconds: nil,
+            syncedThroughMilliseconds: 1_785_000_000_000,
+            updatedAt: now.addingTimeInterval(-600)
+        )
+        let service = CursorSpendService(
+            database: database,
+            authenticationReader: CursorSpendAuthenticationStub(),
+            transport: transport,
+            now: { now }
+        )
+
+        _ = try XCTUnwrap(service.refreshFullHistory())
+
+        XCTAssertEqual(
+            transport.spendRequestBodies.first?["periodStartMs"] as? String,
+            "1779926400000"
+        )
+        XCTAssertEqual(transport.spendRequestBodies.count, 3)
+    }
+
+    func testFailedCatchUpSegmentPreservesDailyHistoryAndWatermark() throws {
+        let database = DatabaseManager(inMemory: true)
+        let identity = try seedCursorIdentity(database: database)
+        let previousArchive = CursorDailySpendArchive(
+            accountIdentity: identity,
+            days: [CursorDailySpend(dayMilliseconds: 1_785_456_000_000, totalCents: 500)],
+            syncedThroughMilliseconds: 1_785_470_400_000,
+            lastSyncedAt: Date(timeIntervalSince1970: 1_785_470_400)
+        )
+        try database.restoreCursorDailySpendArchive(previousArchive)
+        let transport = CursorSpendTransportStub(totalCents: 900)
+        transport.failingSpendRequestNumber = 2
+        let now = Date(timeIntervalSince1970: 1_794_700_800)
+        let service = CursorSpendService(
+            database: database,
+            authenticationReader: CursorSpendAuthenticationStub(),
+            transport: transport,
+            now: { now }
+        )
+
+        let outcome = service.refreshOutcome(
+            range: CursorSpendRange(
+                key: TimeRange.allTime.id,
+                startMilliseconds: nil,
+                endMilliseconds: nil
+            ),
+            cancellation: nil
+        )
+
+        guard case .failure(let snapshot, .request) = outcome else {
+            return XCTFail("Expected failed catch-up to retain local history")
+        }
+        XCTAssertEqual(snapshot?.totalCents, 500)
+        XCTAssertEqual(
+            database.fetchCursorDailySpendArchive(accountIdentity: identity),
+            previousArchive
+        )
     }
 
     func testRefreshValidatesAccountEvenWithExistingSnapshot() throws {
@@ -797,6 +898,7 @@ private final class CursorSpendTransportStub: CursorHTTPTransport {
     var returnsMalformedMissingDailySpend = false
     var returnsStrictEmptyObject = false
     var cancelsSpendRequest = false
+    var failingSpendRequestNumber: Int?
     private var requests: [URLRequest] = []
 
     init(userId: Int = 42, totalCents: Int) {
@@ -825,8 +927,12 @@ private final class CursorSpendTransportStub: CursorHTTPTransport {
     func send(_ request: URLRequest) throws -> (Data, HTTPURLResponse) {
         lock.lock()
         requests.append(request)
+        let spendRequestNumber = requests.filter {
+            $0.url?.path.hasSuffix("GetDailySpendByCategory") == true
+        }.count
         let totalCents = totalCents
         let totalStatusCode = totalStatusCode
+        let shouldFailSpendRequest = failingSpendRequestNumber == spendRequestNumber
         lock.unlock()
 
         if request.url?.path.hasSuffix("GetMe") == true {
@@ -838,6 +944,9 @@ private final class CursorSpendTransportStub: CursorHTTPTransport {
         }
         if cancelsSpendRequest {
             throw CursorUsageError.cancelled
+        }
+        if shouldFailSpendRequest {
+            throw CursorUsageError.requestFailed
         }
         let body = try XCTUnwrap(request.httpBody)
         let object = try XCTUnwrap(

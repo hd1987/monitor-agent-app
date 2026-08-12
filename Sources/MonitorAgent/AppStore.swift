@@ -801,7 +801,8 @@ final class AppStore: ObservableObject {
                 let summary = try syncManager.performExclusive {
                     try UsageDataRebuilder(
                         activeDatabase: self.db,
-                        cursorUsageServiceFactory: { CursorUsageService(database: $0) }
+                        cursorUsageServiceFactory: { CursorUsageService(database: $0) },
+                        cursorSpendServiceFactory: { CursorSpendService(database: $0) }
                     ).rebuild(
                         cancellation: cancellation
                     ) { [weak self] progress in

@@ -620,17 +620,17 @@ final class DatabaseManager {
         }
     }
 
-    func hasCursorDailySpendHistory(accountIdentity: String) -> Bool {
+    func fetchCursorSpendSyncedThrough(accountIdentity: String) -> Int64? {
         lifecycleLock.lock()
         defer { lifecycleLock.unlock() }
-        guard let db = dbQueue else { return false }
-        return (try? db.read { db in
-            try Bool.fetchOne(
+        guard let db = dbQueue else { return nil }
+        return try? db.read { db in
+            try Int64.fetchOne(
                 db,
-                sql: "SELECT EXISTS(SELECT 1 FROM cursor_spend_sync_state WHERE account_identity = ?)",
+                sql: "SELECT synced_through_ms FROM cursor_spend_sync_state WHERE account_identity = ?",
                 arguments: [accountIdentity]
-            ) ?? false
-        }) ?? false
+            )
+        }
     }
 
     func replaceCursorDailySpend(

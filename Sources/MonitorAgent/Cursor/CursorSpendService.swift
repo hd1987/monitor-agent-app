@@ -40,6 +40,12 @@ protocol CursorSpendServicing: AnyObject {
     ) -> CursorSpendRefreshOutcome
 }
 
+protocol CursorSpendHistorySyncing: AnyObject {
+    func refreshFullHistory(
+        cancellation: AgentSyncCancellation?
+    ) throws -> CursorSpendSnapshot?
+}
+
 extension CursorSpendServicing {
     func refreshOutcome(
         range: CursorSpendRange,
@@ -75,7 +81,9 @@ enum CursorSpendError: LocalizedError, Equatable {
     }
 }
 
-final class CursorSpendService: CursorSpendServicing {
+final class CursorSpendService: CursorSpendServicing, CursorSpendHistorySyncing {
+    private static let incrementalOverlapMilliseconds: Int64 = 7 * 86_400_000
+
     private enum RefreshResult {
         case success(CursorSpendSnapshot)
         case failure(CursorSpendSnapshot, CursorRefreshFailureReason)
@@ -168,8 +176,27 @@ final class CursorSpendService: CursorSpendServicing {
         }
     }
 
+    func refreshFullHistory(
+        cancellation: AgentSyncCancellation? = nil
+    ) throws -> CursorSpendSnapshot? {
+        do {
+            return try refreshResult(
+                range: CursorSpendRange(
+                    key: TimeRange.allTime.id,
+                    startMilliseconds: nil,
+                    endMilliseconds: nil
+                ),
+                forceFullHistory: true,
+                cancellation: cancellation
+            ).snapshot
+        } catch let error as TypedRefreshError {
+            throw error.underlyingError
+        }
+    }
+
     private func refreshResult(
         range: CursorSpendRange,
+        forceFullHistory: Bool = false,
         cancellation: AgentSyncCancellation?
     ) throws -> RefreshResult {
         let currentDate = now()
@@ -179,18 +206,32 @@ final class CursorSpendService: CursorSpendServicing {
         )
         let account = authenticated.account
         let endMilliseconds = Int64(currentDate.timeIntervalSince1970 * 1_000)
-        let hasDailyHistory = database.hasCursorDailySpendHistory(
+        let syncedThroughMilliseconds = database.fetchCursorSpendSyncedThrough(
             accountIdentity: account.syncIdentity
         )
         let replacementStart: Int64?
         let requestRanges: [(start: Int64, end: Int64)]
-        if hasDailyHistory {
-            replacementStart = previousUTCMonthStart(milliseconds: endMilliseconds)
-            requestRanges = [(replacementStart!, endMilliseconds)]
-        } else {
+        if forceFullHistory || syncedThroughMilliseconds == nil {
             replacementStart = nil
             requestRanges = utcMonthRanges(
-                startMilliseconds: account.createdAtMilliseconds ?? 0,
+                startMilliseconds: utcDayStart(
+                    milliseconds: account.createdAtMilliseconds ?? 0
+                ),
+                endMilliseconds: endMilliseconds
+            )
+        } else {
+            let boundedWatermark = min(syncedThroughMilliseconds!, endMilliseconds)
+            let overlapStart = max(
+                0,
+                utcDayStart(milliseconds: boundedWatermark)
+                    - Self.incrementalOverlapMilliseconds
+            )
+            replacementStart = max(
+                utcDayStart(milliseconds: account.createdAtMilliseconds ?? 0),
+                overlapStart
+            )
+            requestRanges = utcMonthRanges(
+                startMilliseconds: replacementStart!,
                 endMilliseconds: endMilliseconds
             )
         }
@@ -314,15 +355,8 @@ final class CursorSpendService: CursorSpendServicing {
         }
     }
 
-    private func previousUTCMonthStart(milliseconds: Int64) -> Int64 {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        let date = Date(timeIntervalSince1970: TimeInterval(milliseconds) / 1_000)
-        let currentMonth = calendar.date(
-            from: calendar.dateComponents([.year, .month], from: date)
-        )!
-        let previousMonth = calendar.date(byAdding: .month, value: -1, to: currentMonth)!
-        return Int64(previousMonth.timeIntervalSince1970 * 1_000)
+    private func utcDayStart(milliseconds: Int64) -> Int64 {
+        milliseconds - (milliseconds % 86_400_000)
     }
 
     private func utcMonthRanges(

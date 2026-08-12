@@ -1284,6 +1284,111 @@ final class RebuildUsageDataTests: XCTestCase {
         )
     }
 
+    func testUsageDataRebuilderRecalibratesCompleteCursorSpendHistory() throws {
+        let directory = try makeTemporaryDirectory()
+        let activePath = directory.appendingPathComponent("monitor.db").path
+        let temporaryPath = directory.appendingPathComponent("monitor-rebuild.tmp.db").path
+        let claudeRoot = directory.appendingPathComponent("claude-projects")
+        let codexRoot = directory.appendingPathComponent("codex-sessions")
+        let codexArchiveRoot = directory.appendingPathComponent("codex-archive")
+        try FileManager.default.createDirectory(at: claudeRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexArchiveRoot, withIntermediateDirectories: true)
+        try claudeAssistantLine().write(
+            to: claudeRoot.appendingPathComponent("session.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let identity = "cursor-account:test"
+        let activeDatabase = try DatabaseManager(path: activePath)
+        _ = try SuccessfulCursorUsageSyncer(
+            database: activeDatabase,
+            identity: identity
+        ).sync()
+        try activeDatabase.replaceCursorDailySpend(
+            accountIdentity: identity,
+            days: [CursorDailySpend(dayMilliseconds: 0, totalCents: 700)],
+            replacementStartMilliseconds: nil,
+            replacementEndMilliseconds: nil,
+            syncedThroughMilliseconds: 86_400_000,
+            updatedAt: Date(timeIntervalSince1970: 20)
+        )
+        let rebuilder = UsageDataRebuilder(
+            activeDatabase: activeDatabase,
+            temporaryDatabasePath: temporaryPath,
+            claudeProjectsPath: claudeRoot.path,
+            codexSessionsPath: codexRoot.path,
+            codexArchivedSessionsPath: codexArchiveRoot.path,
+            cursorUsageServiceFactory: {
+                SuccessfulCursorUsageSyncer(database: $0, identity: identity)
+            },
+            cursorSpendServiceFactory: {
+                RecalibratingCursorSpendSyncer(database: $0, identity: identity)
+            }
+        )
+
+        _ = try rebuilder.rebuild()
+        let archive = try XCTUnwrap(
+            activeDatabase.fetchCursorDailySpendArchive(accountIdentity: identity)
+        )
+
+        XCTAssertEqual(
+            archive.days,
+            [CursorDailySpend(dayMilliseconds: 86_400_000, totalCents: 900)]
+        )
+        XCTAssertEqual(archive.syncedThroughMilliseconds, 172_800_000)
+    }
+
+    func testUsageDataRebuilderPreservesActiveDataWhenSpendCalibrationFails() throws {
+        let directory = try makeTemporaryDirectory()
+        let activePath = directory.appendingPathComponent("monitor.db").path
+        let temporaryPath = directory.appendingPathComponent("monitor-rebuild.tmp.db").path
+        let claudeRoot = directory.appendingPathComponent("claude-projects")
+        let codexRoot = directory.appendingPathComponent("codex-sessions")
+        let codexArchiveRoot = directory.appendingPathComponent("codex-archive")
+        try FileManager.default.createDirectory(at: claudeRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexArchiveRoot, withIntermediateDirectories: true)
+        try claudeAssistantLine().write(
+            to: claudeRoot.appendingPathComponent("session.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let identity = "cursor-account:test"
+        let activeDatabase = try DatabaseManager(path: activePath)
+        _ = try SuccessfulCursorUsageSyncer(
+            database: activeDatabase,
+            identity: identity
+        ).sync()
+        let archive = CursorDailySpendArchive(
+            accountIdentity: identity,
+            days: [CursorDailySpend(dayMilliseconds: 0, totalCents: 700)],
+            syncedThroughMilliseconds: 86_400_000,
+            lastSyncedAt: Date(timeIntervalSince1970: 20)
+        )
+        try activeDatabase.restoreCursorDailySpendArchive(archive)
+        let rebuilder = UsageDataRebuilder(
+            activeDatabase: activeDatabase,
+            temporaryDatabasePath: temporaryPath,
+            claudeProjectsPath: claudeRoot.path,
+            codexSessionsPath: codexRoot.path,
+            codexArchivedSessionsPath: codexArchiveRoot.path,
+            cursorUsageServiceFactory: {
+                SuccessfulCursorUsageSyncer(database: $0, identity: identity)
+            },
+            cursorSpendServiceFactory: { _ in FailingCursorSpendSyncer() }
+        )
+
+        XCTAssertThrowsError(try rebuilder.rebuild()) { error in
+            XCTAssertEqual(error as? UsageDataRebuildError, .cursorRefreshFailed)
+        }
+        XCTAssertEqual(
+            activeDatabase.fetchCursorDailySpendArchive(accountIdentity: identity),
+            archive
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temporaryPath))
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("MonitorAgentTests-\(UUID().uuidString)", isDirectory: true)
@@ -1368,6 +1473,45 @@ private struct SuccessfulCursorUsageSyncer: CursorUsageSyncing {
             state: state
         )
         return SessionSyncResult(filesSynced: 1, recordsSynced: 1)
+    }
+}
+
+private final class RecalibratingCursorSpendSyncer: CursorSpendHistorySyncing {
+    private let database: DatabaseManager
+    private let identity: String
+
+    init(database: DatabaseManager, identity: String) {
+        self.database = database
+        self.identity = identity
+    }
+
+    func refreshFullHistory(
+        cancellation: AgentSyncCancellation?
+    ) throws -> CursorSpendSnapshot? {
+        try database.replaceCursorDailySpend(
+            accountIdentity: identity,
+            days: [CursorDailySpend(dayMilliseconds: 86_400_000, totalCents: 900)],
+            replacementStartMilliseconds: nil,
+            replacementEndMilliseconds: nil,
+            syncedThroughMilliseconds: 172_800_000,
+            updatedAt: Date(timeIntervalSince1970: 30)
+        )
+        return database.fetchCursorSpendSnapshot(
+            accountIdentity: identity,
+            range: CursorSpendRange(
+                key: TimeRange.allTime.id,
+                startMilliseconds: nil,
+                endMilliseconds: nil
+            )
+        )
+    }
+}
+
+private final class FailingCursorSpendSyncer: CursorSpendHistorySyncing {
+    func refreshFullHistory(
+        cancellation: AgentSyncCancellation?
+    ) throws -> CursorSpendSnapshot? {
+        throw CursorUsageError.requestFailed
     }
 }
 
