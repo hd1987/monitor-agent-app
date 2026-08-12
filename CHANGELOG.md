@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-08-12
+
 ### Added
 - Mark the Cursor tab when account verification, usage sync, or selected-range spend refresh fails while keeping cached history visible
 
