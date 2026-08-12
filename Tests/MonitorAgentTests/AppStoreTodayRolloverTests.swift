@@ -989,8 +989,28 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         wait(for: [cleared], timeout: 1)
     }
 
-    func testCursorSpendRefreshStartsOnlyAfterSelectingCursorTab() {
+    func testUnifiedRefreshRequestsCursorSpendOnAllAndSelectionChangesStayLocal() throws {
         let database = DatabaseManager(inMemory: true)
+        let now = Date(timeIntervalSince1970: 1_786_435_200)
+        let account = cursorAuthenticatedAccount(userId: 1)
+        try seedCursorCache(
+            database: database,
+            identity: account.account.syncIdentity,
+            model: "cursor-model",
+            inputTokens: 100
+        )
+        _ = try database.mergeCursorSpendSnapshot(
+            accountIdentity: account.account.syncIdentity,
+            range: CursorSpendRange(timeRange: .today, now: now),
+            totalCents: 500,
+            updatedAt: now
+        )
+        _ = try database.mergeCursorSpendSnapshot(
+            accountIdentity: account.account.syncIdentity,
+            range: CursorSpendRange(timeRange: .last7, now: now),
+            totalCents: 700,
+            updatedAt: now
+        )
         let refresher = RecordingCursorSpendRefresher()
         let syncManager = SessionSyncManager(
             database: database,
@@ -1002,23 +1022,31 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             database: database,
             syncManager: syncManager,
             cursorSpendRefresher: refresher,
-            observeRefreshIntervalChanges: false
+            observeRefreshIntervalChanges: false,
+            currentDateProvider: { now }
         )
         store.panelDidOpen()
-        XCTAssertEqual(refresher.refreshCount, 0)
-
-        store.appFilter = .cursor
         wait(for: [refresher.started], timeout: 1)
         XCTAssertEqual(refresher.refreshCount, 1)
 
-        store.appFilter = .codex
-        store.setTimeRangeFromFilter(.last7)
-        let unchanged = expectation(description: "Non-Cursor filters skip spend refresh")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            XCTAssertEqual(refresher.refreshCount, 1)
-            unchanged.fulfill()
+        store.appFilter = .cursor
+        let todayRestored = expectation(description: "Today spend snapshot is restored")
+        waitUntil(attemptsRemaining: 100) {
+            store.cursorSpendSnapshot?.totalCents == 500
+        } completion: {
+            todayRestored.fulfill()
         }
-        wait(for: [unchanged], timeout: 1)
+        wait(for: [todayRestored], timeout: 1)
+
+        store.setTimeRangeFromFilter(.last7)
+        let rangeRestored = expectation(description: "Last seven days spend snapshot is restored")
+        waitUntil(attemptsRemaining: 100) {
+            store.cursorSpendSnapshot?.totalCents == 700
+        } completion: {
+            rangeRestored.fulfill()
+        }
+        wait(for: [rangeRestored], timeout: 1)
+        XCTAssertEqual(refresher.refreshCount, 1)
         store.panelDidClose()
     }
 
@@ -1076,8 +1104,8 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
-    func testLeavingCursorCancelsSelectionDrivenSpendRefresh() throws {
-        let suiteName = "AppStoreTodayRolloverTests.cursorSpendSelectionCancellation"
+    func testChangingTabDoesNotCancelUnifiedSpendRefresh() throws {
+        let suiteName = "AppStoreTodayRolloverTests.cursorSpendUnifiedCancellation"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         let refreshSettings = RefreshSettings(defaults: defaults)
@@ -1093,10 +1121,6 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             inputTokens: 100
         )
         let refreshCoordinator = PanelRefreshCoordinator(currentDateProvider: { now })
-        refreshCoordinator.start(interval: .never) { completion in
-            completion()
-        }
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         let refresher = ControllableCursorSpendRefresher()
         let store = AppStore(
             database: database,
@@ -1118,8 +1142,88 @@ final class AppStoreTodayRolloverTests: XCTestCase {
 
         store.appFilter = .claude
 
-        XCTAssertFalse(cancellation.isEnabled(.cursor))
+        XCTAssertTrue(cancellation.isEnabled(.cursor))
         refresher.finishNext()
+        store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testRangeChangeDuringSpendSyncReloadsCommittedLocalSelection() throws {
+        let suiteName = "AppStoreTodayRolloverTests.cursorSpendRangeDuringSync"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let refreshSettings = RefreshSettings(defaults: defaults)
+        refreshSettings.interval = .never
+        let database = DatabaseManager(inMemory: true)
+        let now = Date(timeIntervalSince1970: 1_786_435_200)
+        let account = cursorAuthenticatedAccount(userId: 1)
+        try seedCursorCache(
+            database: database,
+            identity: account.account.syncIdentity,
+            model: "cursor-model",
+            inputTokens: 100
+        )
+        let todayRange = CursorSpendRange(timeRange: .today, now: now)
+        let last7Range = CursorSpendRange(timeRange: .last7, now: now)
+        _ = try database.mergeCursorSpendSnapshot(
+            accountIdentity: account.account.syncIdentity,
+            range: last7Range,
+            totalCents: 700,
+            updatedAt: now
+        )
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
+            codexSessionsPath: "/missing-codex-\(UUID().uuidString)",
+            codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)",
+            cursorUsageSyncer: CountingCursorUsageSyncerProbe()
+        )
+        let refresher = ControllableCursorSpendRefresher()
+        let store = AppStore(
+            database: database,
+            syncManager: syncManager,
+            refreshSettings: refreshSettings,
+            cursorSpendRefresher: refresher,
+            cursorAccountResolver: StaticCursorAccountResolver(result: .success(account)),
+            observeRefreshIntervalChanges: false,
+            currentDateProvider: { now }
+        )
+        store.appFilter = .cursor
+        store.setTimeRangeFromFilter(.today)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+
+        store.panelDidOpen()
+        wait(for: [refresher.started], timeout: 1)
+        XCTAssertEqual(refresher.ranges, [todayRange])
+        store.setTimeRangeFromFilter(.last7)
+        let initialSelectionRestored = expectation(description: "Initial local range is restored")
+        waitUntil(attemptsRemaining: 100) {
+            store.cursorSpendSnapshot?.totalCents == 700
+        } completion: {
+            initialSelectionRestored.fulfill()
+        }
+        wait(for: [initialSelectionRestored], timeout: 1)
+
+        _ = try database.mergeCursorSpendSnapshot(
+            accountIdentity: account.account.syncIdentity,
+            range: last7Range,
+            totalCents: 800,
+            updatedAt: now.addingTimeInterval(1)
+        )
+        refresher.finishNext(outcome: .success(CursorSpendSnapshot(
+            accountIdentity: account.account.syncIdentity,
+            range: todayRange,
+            totalCents: 900,
+            totalUpdatedAt: now.addingTimeInterval(1)
+        )))
+
+        let localSelectionReloaded = expectation(description: "Committed local range is reloaded")
+        waitUntil(attemptsRemaining: 100) {
+            store.cursorSpendSnapshot?.totalCents == 800 && !store.isRefreshInProgress
+        } completion: {
+            localSelectionReloaded.fulfill()
+        }
+        wait(for: [localSelectionReloaded], timeout: 1)
         store.panelDidClose()
         defaults.removePersistentDomain(forName: suiteName)
     }

@@ -1,7 +1,6 @@
 import Foundation
 
 enum CursorSpendRefreshOutcome: Equatable {
-    case cacheHit(CursorSpendSnapshot)
     case success(CursorSpendSnapshot)
     case failure(CursorSpendSnapshot?, CursorRefreshFailureReason)
     case cancelled
@@ -9,8 +8,7 @@ enum CursorSpendRefreshOutcome: Equatable {
 
     var snapshot: CursorSpendSnapshot? {
         switch self {
-        case .cacheHit(let snapshot),
-             .success(let snapshot):
+        case .success(let snapshot):
             return snapshot
         case .failure(let snapshot, _):
             return snapshot
@@ -33,13 +31,11 @@ protocol CursorSpendRefreshing: AnyObject {
 protocol CursorSpendServicing: AnyObject {
     func refresh(
         range: CursorSpendRange,
-        force: Bool,
         cancellation: AgentSyncCancellation?
     ) throws -> CursorSpendSnapshot?
 
     func refreshOutcome(
         range: CursorSpendRange,
-        force: Bool,
         cancellation: AgentSyncCancellation?
     ) -> CursorSpendRefreshOutcome
 }
@@ -47,13 +43,11 @@ protocol CursorSpendServicing: AnyObject {
 extension CursorSpendServicing {
     func refreshOutcome(
         range: CursorSpendRange,
-        force: Bool,
         cancellation: AgentSyncCancellation?
     ) -> CursorSpendRefreshOutcome {
         do {
             guard let snapshot = try refresh(
                 range: range,
-                force: force,
                 cancellation: cancellation
             ) else {
                 return .failure(nil, .request)
@@ -82,17 +76,13 @@ enum CursorSpendError: LocalizedError, Equatable {
 }
 
 final class CursorSpendService: CursorSpendServicing {
-    static let automaticCacheLifetime: TimeInterval = 5 * 60
-
     private enum RefreshResult {
-        case cacheHit(CursorSpendSnapshot)
         case success(CursorSpendSnapshot)
         case failure(CursorSpendSnapshot, CursorRefreshFailureReason)
 
         var snapshot: CursorSpendSnapshot {
             switch self {
-            case .cacheHit(let snapshot),
-                 .success(let snapshot),
+            case .success(let snapshot),
                  .failure(let snapshot, _):
                 return snapshot
             }
@@ -144,13 +134,11 @@ final class CursorSpendService: CursorSpendServicing {
 
     func refresh(
         range: CursorSpendRange,
-        force: Bool = false,
         cancellation: AgentSyncCancellation? = nil
     ) throws -> CursorSpendSnapshot? {
         do {
             return try refreshResult(
                 range: range,
-                force: force,
                 cancellation: cancellation
             ).snapshot
         } catch let error as TypedRefreshError {
@@ -160,16 +148,13 @@ final class CursorSpendService: CursorSpendServicing {
 
     func refreshOutcome(
         range: CursorSpendRange,
-        force: Bool,
         cancellation: AgentSyncCancellation?
     ) -> CursorSpendRefreshOutcome {
         do {
             switch try refreshResult(
                 range: range,
-                force: force,
                 cancellation: cancellation
             ) {
-            case .cacheHit(let snapshot): return .cacheHit(snapshot)
             case .success(let snapshot): return .success(snapshot)
             case .failure(let snapshot, let reason):
                 return .failure(snapshot, reason)
@@ -185,7 +170,6 @@ final class CursorSpendService: CursorSpendServicing {
 
     private func refreshResult(
         range: CursorSpendRange,
-        force: Bool,
         cancellation: AgentSyncCancellation?
     ) throws -> RefreshResult {
         let currentDate = now()
@@ -194,34 +178,46 @@ final class CursorSpendService: CursorSpendServicing {
             cancellation: cancellation
         )
         let account = authenticated.account
-        if !force,
-           let cached = database.fetchCursorSpendSnapshot(
-               accountIdentity: account.syncIdentity,
-               range: range
-           ),
-           cached.isFresh(at: currentDate, maximumAge: Self.automaticCacheLifetime) {
-            return .cacheHit(cached)
-        }
-
-        let startMilliseconds = range.startMilliseconds
-            ?? account.createdAtMilliseconds
-            ?? 0
-        let endMilliseconds = range.endMilliseconds
-            ?? Int64(currentDate.timeIntervalSince1970 * 1_000)
-        guard startMilliseconds >= 0,
-              endMilliseconds > startMilliseconds else {
-            throw CursorSpendError.invalidRange
-        }
-
-        let totalCents: Int
-        do {
-            totalCents = try fetchSpend(
-                token: authenticated.token,
-                account: account,
-                startMilliseconds: startMilliseconds,
-                endMilliseconds: endMilliseconds,
-                cancellation: cancellation
+        let endMilliseconds = Int64(currentDate.timeIntervalSince1970 * 1_000)
+        let hasDailyHistory = database.hasCursorDailySpendHistory(
+            accountIdentity: account.syncIdentity
+        )
+        let replacementStart: Int64?
+        let requestRanges: [(start: Int64, end: Int64)]
+        if hasDailyHistory {
+            replacementStart = previousUTCMonthStart(milliseconds: endMilliseconds)
+            requestRanges = [(replacementStart!, endMilliseconds)]
+        } else {
+            replacementStart = nil
+            requestRanges = utcMonthRanges(
+                startMilliseconds: account.createdAtMilliseconds ?? 0,
+                endMilliseconds: endMilliseconds
             )
+        }
+        guard !requestRanges.isEmpty else { throw CursorSpendError.invalidRange }
+
+        let days: [CursorDailySpend]
+        do {
+            var totals: [Int64: Int64] = [:]
+            for requestRange in requestRanges {
+                for day in try fetchSpend(
+                    token: authenticated.token,
+                    account: account,
+                    startMilliseconds: requestRange.start,
+                    endMilliseconds: requestRange.end,
+                    cancellation: cancellation
+                ) {
+                    let current = totals[day.dayMilliseconds] ?? 0
+                    let (next, overflow) = current.addingReportingOverflow(Int64(day.totalCents))
+                    guard !overflow, next <= Int64(Int.max) else {
+                        throw CursorUsageError.invalidResponse
+                    }
+                    totals[day.dayMilliseconds] = next
+                }
+            }
+            days = totals.map {
+                CursorDailySpend(dayMilliseconds: $0.key, totalCents: Int($0.value))
+            }
         } catch CursorUsageError.cancelled {
             throw CursorUsageError.cancelled
         } catch {
@@ -239,26 +235,29 @@ final class CursorSpendService: CursorSpendServicing {
         }
 
         let commit = {
-            try self.database.mergeCursorSpendSnapshot(
+            try self.database.replaceCursorDailySpend(
                 accountIdentity: account.syncIdentity,
-                range: range,
-                totalCents: totalCents,
+                days: days,
+                replacementStartMilliseconds: replacementStart,
+                replacementEndMilliseconds: replacementStart == nil ? nil : endMilliseconds,
+                syncedThroughMilliseconds: endMilliseconds,
                 updatedAt: currentDate
             )
         }
-        let snapshot: CursorSpendSnapshot?
         if let cancellation {
-            guard let committed = try cancellation.withEnabledAgent(
+            guard try cancellation.withEnabledAgent(
                 .cursor,
                 perform: commit
-            ) else {
+            ) != nil else {
                 throw CursorUsageError.cancelled
             }
-            snapshot = committed
         } else {
-            snapshot = try commit()
+            try commit()
         }
-        guard let snapshot else {
+        guard let snapshot = database.fetchCursorSpendSnapshot(
+            accountIdentity: account.syncIdentity,
+            range: range
+        ) else {
             throw CursorSpendError.accountChanged
         }
         return .success(snapshot)
@@ -270,7 +269,7 @@ final class CursorSpendService: CursorSpendServicing {
         startMilliseconds: Int64,
         endMilliseconds: Int64,
         cancellation: AgentSyncCancellation?
-    ) throws -> Int {
+    ) throws -> [CursorDailySpend] {
         var body: [String: Any] = [
             "userId": account.userId,
             "periodStartMs": String(startMilliseconds),
@@ -293,18 +292,60 @@ final class CursorSpendService: CursorSpendServicing {
         } catch {
             throw CursorUsageError.invalidResponse
         }
-        var total: Int64 = 0
+        var totals: [Int64: Int64] = [:]
+        let firstIncludedDay = startMilliseconds - (startMilliseconds % 86_400_000)
         for item in response.dailySpend {
-            guard item.spendCents >= 0 else {
+            guard item.dayMilliseconds >= 0,
+                  item.dayMilliseconds % 86_400_000 == 0,
+                  item.dayMilliseconds >= firstIncludedDay,
+                  item.dayMilliseconds < endMilliseconds,
+                  item.spendCents >= 0 else {
                 throw CursorUsageError.invalidResponse
             }
-            let (next, overflow) = total.addingReportingOverflow(Int64(item.spendCents))
+            let current = totals[item.dayMilliseconds] ?? 0
+            let (next, overflow) = current.addingReportingOverflow(Int64(item.spendCents))
             guard !overflow, next <= Int64(Int.max) else {
                 throw CursorUsageError.invalidResponse
             }
-            total = next
+            totals[item.dayMilliseconds] = next
         }
-        return Int(total)
+        return totals.map {
+            CursorDailySpend(dayMilliseconds: $0.key, totalCents: Int($0.value))
+        }
+    }
+
+    private func previousUTCMonthStart(milliseconds: Int64) -> Int64 {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let date = Date(timeIntervalSince1970: TimeInterval(milliseconds) / 1_000)
+        let currentMonth = calendar.date(
+            from: calendar.dateComponents([.year, .month], from: date)
+        )!
+        let previousMonth = calendar.date(byAdding: .month, value: -1, to: currentMonth)!
+        return Int64(previousMonth.timeIntervalSince1970 * 1_000)
+    }
+
+    private func utcMonthRanges(
+        startMilliseconds: Int64,
+        endMilliseconds: Int64
+    ) -> [(start: Int64, end: Int64)] {
+        guard startMilliseconds >= 0, endMilliseconds > startMilliseconds else { return [] }
+        guard startMilliseconds > 0 else { return [(startMilliseconds, endMilliseconds)] }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        var start = startMilliseconds
+        var ranges: [(start: Int64, end: Int64)] = []
+        while start < endMilliseconds {
+            let date = Date(timeIntervalSince1970: TimeInterval(start) / 1_000)
+            let monthStart = calendar.date(
+                from: calendar.dateComponents([.year, .month], from: date)
+            )!
+            let nextMonth = calendar.date(byAdding: .month, value: 1, to: monthStart)!
+            let end = min(Int64(nextMonth.timeIntervalSince1970 * 1_000), endMilliseconds)
+            ranges.append((start, end))
+            start = end
+        }
+        return ranges
     }
 }
 
@@ -442,7 +483,6 @@ final class CursorSpendRefreshCoordinator: CursorSpendRefreshing {
         queue.async {
             let outcome = self.service.refreshOutcome(
                 range: request.range,
-                force: request.force,
                 cancellation: request.cancellation
             )
             self.finish(request, outcome: outcome)
@@ -492,14 +532,20 @@ private struct CursorDailySpendResponse: Decodable {
 }
 
 private struct CursorDailySpendItem: Decodable {
+    let dayMilliseconds: Int64
     let spendCents: Int
 
     private enum CodingKeys: String, CodingKey {
+        case day
         case spendCents
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        guard let day = try container.decodeFlexibleInt64IfPresent(forKey: .day) else {
+            throw CursorUsageError.invalidResponse
+        }
+        dayMilliseconds = day
         spendCents = try container.decodeFlexibleInt(forKey: .spendCents)
     }
 }

@@ -1219,7 +1219,7 @@ final class RebuildUsageDataTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temporaryPath))
     }
 
-    func testUsageDataRebuilderRestoresSameAccountCursorSpendSnapshots() throws {
+    func testUsageDataRebuilderRestoresSameAccountCursorSpendData() throws {
         let directory = try makeTemporaryDirectory()
         let activePath = directory.appendingPathComponent("monitor.db").path
         let temporaryPath = directory.appendingPathComponent("monitor-rebuild.tmp.db").path
@@ -1238,8 +1238,8 @@ final class RebuildUsageDataTests: XCTestCase {
         let identity = "cursor-account:test"
         let range = CursorSpendRange(
             key: "today",
-            startMilliseconds: 1_000,
-            endMilliseconds: 2_000
+            startMilliseconds: 0,
+            endMilliseconds: 86_400_000
         )
         let activeDatabase = try DatabaseManager(path: activePath)
         _ = try SuccessfulCursorUsageSyncer(
@@ -1251,6 +1251,14 @@ final class RebuildUsageDataTests: XCTestCase {
             range: range,
             totalCents: 500,
             updatedAt: Date(timeIntervalSince1970: 10)
+        )
+        try activeDatabase.replaceCursorDailySpend(
+            accountIdentity: identity,
+            days: [CursorDailySpend(dayMilliseconds: 0, totalCents: 700)],
+            replacementStartMilliseconds: nil,
+            replacementEndMilliseconds: nil,
+            syncedThroughMilliseconds: 86_400_000,
+            updatedAt: Date(timeIntervalSince1970: 20)
         )
         let rebuilder = UsageDataRebuilder(
             activeDatabase: activeDatabase,
@@ -1269,7 +1277,11 @@ final class RebuildUsageDataTests: XCTestCase {
             range: range
         ))
 
-        XCTAssertEqual(restored.totalCents, 500)
+        XCTAssertEqual(restored.totalCents, 700)
+        XCTAssertEqual(
+            activeDatabase.fetchCursorSpendSnapshots(accountIdentity: identity).first?.totalCents,
+            500
+        )
     }
 
     private func makeTemporaryDirectory() throws -> URL {

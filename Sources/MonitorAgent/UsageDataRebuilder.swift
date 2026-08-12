@@ -78,6 +78,9 @@ final class UsageDataRebuilder {
             let activeCursorSpendSnapshots = activeCursorIdentity.map {
                 activeDatabase.fetchCursorSpendSnapshots(accountIdentity: $0)
             } ?? []
+            let activeCursorDailySpendArchive = activeCursorIdentity.flatMap {
+                activeDatabase.fetchCursorDailySpendArchive(accountIdentity: $0)
+            }
             let activeDataMustBePreserved = activeStats.totalRequests > 0
                 || (!activeDatabase.isAvailable && activeDatabase.hasExistingDatabaseFile)
             let localDataMustBePreserved =
@@ -121,6 +124,11 @@ final class UsageDataRebuilder {
                         for: CursorUsageService.syncStateKey
                     )?.sessionId,
                        rebuiltIdentity == activeCursorIdentity {
+                        if let activeCursorDailySpendArchive {
+                            try rebuildDatabase.restoreCursorDailySpendArchive(
+                                activeCursorDailySpendArchive
+                            )
+                        }
                         try rebuildDatabase.restoreCursorSpendSnapshots(
                             activeCursorSpendSnapshots
                         )
@@ -129,12 +137,14 @@ final class UsageDataRebuilder {
                 } catch let error as CursorUsageError
                     where activeCursorStats.totalRequests == 0
                         && activeCursorSpendSnapshots.isEmpty
+                        && activeCursorDailySpendArchive == nil
                         && error.allowsRebuildWithoutCursorData {
                     // A missing Cursor session does not block rebuilding other sources.
                 } catch let error as UsageDataRebuildError {
                     throw error
                 } catch where activeCursorStats.totalRequests > 0
-                    || !activeCursorSpendSnapshots.isEmpty {
+                    || !activeCursorSpendSnapshots.isEmpty
+                    || activeCursorDailySpendArchive != nil {
                     throw UsageDataRebuildError.cursorRefreshFailed
                 } catch {
                     throw error

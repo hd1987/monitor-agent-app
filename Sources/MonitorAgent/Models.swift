@@ -259,8 +259,22 @@ struct CursorSpendRange: Equatable {
     ) {
         let bounds = timeRange.bounds(now: now, calendar: calendar)
         key = timeRange.id
-        startMilliseconds = bounds.start.map { Int64($0) * 1_000 }
-        endMilliseconds = bounds.end.map { Int64($0) * 1_000 }
+        var utcCalendar = Calendar(identifier: .gregorian)
+        utcCalendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        startMilliseconds = bounds.start.flatMap { seconds in
+            let date = Date(timeIntervalSince1970: TimeInterval(seconds))
+            let components = calendar.dateComponents([.year, .month, .day], from: date)
+            return utcCalendar.date(from: components).map {
+                Int64($0.timeIntervalSince1970 * 1_000)
+            }
+        }
+        endMilliseconds = bounds.end.flatMap { seconds in
+            let date = Date(timeIntervalSince1970: TimeInterval(seconds))
+            let components = calendar.dateComponents([.year, .month, .day], from: date)
+            return utcCalendar.date(from: components).map {
+                Int64($0.timeIntervalSince1970 * 1_000)
+            }
+        }
     }
 
     init(
@@ -274,19 +288,23 @@ struct CursorSpendRange: Equatable {
     }
 }
 
+struct CursorDailySpend: Equatable {
+    let dayMilliseconds: Int64
+    let totalCents: Int
+}
+
+struct CursorDailySpendArchive: Equatable {
+    let accountIdentity: String
+    let days: [CursorDailySpend]
+    let syncedThroughMilliseconds: Int64
+    let lastSyncedAt: Date
+}
+
 struct CursorSpendSnapshot: Equatable {
     let accountIdentity: String
     let range: CursorSpendRange
     let totalCents: Int?
     let totalUpdatedAt: Date?
-
-    func isFresh(at date: Date, maximumAge: TimeInterval) -> Bool {
-        guard let totalUpdatedAt else {
-            return false
-        }
-        return totalUpdatedAt <= date
-            && date.timeIntervalSince(totalUpdatedAt) < maximumAge
-    }
 }
 
 struct DayActivity: Identifiable {

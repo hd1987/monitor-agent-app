@@ -27,13 +27,24 @@ final class CursorSpendServiceTests: XCTestCase {
         )
         XCTAssertTrue(transport.spendRequestBodies.allSatisfy {
             $0["groupBy"] as? String == "SPEND_GROUP_BY_CATEGORY_MODEL"
-                && $0["periodStartMs"] as? String == range.startMilliseconds.map(String.init)
-                && $0["periodEndMs"] as? String == range.endMilliseconds.map(String.init)
         })
-        XCTAssertEqual(transport.requestCount, 2)
+        let requestBounds = transport.spendRequestBodies.compactMap { body -> (Int64, Int64)? in
+            guard let start = (body["periodStartMs"] as? String).flatMap(Int64.init),
+                  let end = (body["periodEndMs"] as? String).flatMap(Int64.init) else {
+                return nil
+            }
+            return (start, end)
+        }
+        XCTAssertEqual(requestBounds.count, 3)
+        XCTAssertEqual(requestBounds.first?.0, 1_780_000_000_000)
+        XCTAssertEqual(requestBounds.last?.1, 1_785_470_400_000)
+        XCTAssertTrue(zip(requestBounds, requestBounds.dropFirst()).allSatisfy {
+            $0.0.1 == $0.1.0
+        })
+        XCTAssertEqual(transport.requestCount, 4)
     }
 
-    func testFreshSnapshotAvoidsSpendRequestUnlessForced() throws {
+    func testEveryRefreshRequestsSpendEvenWithFreshSnapshot() throws {
         let database = DatabaseManager(inMemory: true)
         _ = try seedCursorIdentity(database: database)
         let transport = CursorSpendTransportStub(totalCents: 500)
@@ -46,20 +57,24 @@ final class CursorSpendServiceTests: XCTestCase {
             now: { now }
         )
 
-        let initialSnapshot = try XCTUnwrap(service.refresh(range: range))
+        _ = try XCTUnwrap(service.refresh(range: range))
         let outcome = service.refreshOutcome(
             range: range,
-            force: false,
             cancellation: nil
         )
-        XCTAssertEqual(outcome, .cacheHit(initialSnapshot))
-        XCTAssertEqual(transport.requestCount, 3)
+        guard case .success = outcome else {
+            return XCTFail("Expected a network-backed refresh")
+        }
+        XCTAssertEqual(transport.requestCount, 6)
+        let incrementalBody = try XCTUnwrap(transport.spendRequestBodies.last)
+        XCTAssertEqual(incrementalBody["periodStartMs"] as? String, "1780272000000")
+        XCTAssertEqual(incrementalBody["periodEndMs"] as? String, "1785470400000")
 
-        _ = try service.refresh(range: range, force: true)
-        XCTAssertEqual(transport.requestCount, 5)
+        _ = try service.refresh(range: range)
+        XCTAssertEqual(transport.requestCount, 8)
     }
 
-    func testFreshSnapshotCannotBypassChangedAccountVerification() throws {
+    func testRefreshValidatesAccountEvenWithExistingSnapshot() throws {
         let database = DatabaseManager(inMemory: true)
         let firstIdentity = try seedCursorIdentity(database: database, userId: 42)
         let now = Date(timeIntervalSince1970: 1_785_470_400)
@@ -84,7 +99,7 @@ final class CursorSpendServiceTests: XCTestCase {
         XCTAssertThrowsError(try service.refresh(range: range)) { error in
             XCTAssertEqual(error as? CursorSpendError, .accountChanged)
         }
-        XCTAssertEqual(transport.requestCount, 2)
+        XCTAssertEqual(transport.requestCount, 4)
     }
 
     func testNonemptyResponseMissingDailySpendDoesNotReplaceCachedValuesWithZeroes() throws {
@@ -109,7 +124,6 @@ final class CursorSpendServiceTests: XCTestCase {
 
         let outcome = service.refreshOutcome(
             range: range,
-            force: true,
             cancellation: nil
         )
         guard case .failure(let retainedSnapshot, let reason) = outcome else {
@@ -136,7 +150,6 @@ final class CursorSpendServiceTests: XCTestCase {
 
         let outcome = service.refreshOutcome(
             range: spendRange(now: now),
-            force: true,
             cancellation: nil
         )
         XCTAssertEqual(outcome, .failure(nil, .authentication))
@@ -175,7 +188,6 @@ final class CursorSpendServiceTests: XCTestCase {
 
         let outcome = service.refreshOutcome(
             range: range,
-            force: true,
             cancellation: nil
         )
         guard case .success(let snapshot) = outcome else {
@@ -218,7 +230,6 @@ final class CursorSpendServiceTests: XCTestCase {
             XCTAssertEqual(
                 service.refreshOutcome(
                     range: range,
-                    force: true,
                     cancellation: nil
                 ),
                 .cancelled
@@ -261,6 +272,55 @@ final class CursorSpendServiceTests: XCTestCase {
         ))
 
         XCTAssertEqual(snapshot.totalCents, 600)
+    }
+
+    func testDailySpendHistorySumsSelectedRangeLocally() throws {
+        let database = DatabaseManager(inMemory: true)
+        let identity = try seedCursorIdentity(database: database)
+        try database.replaceCursorDailySpend(
+            accountIdentity: identity,
+            days: [
+                CursorDailySpend(dayMilliseconds: 0, totalCents: 100),
+                CursorDailySpend(dayMilliseconds: 86_400_000, totalCents: 200),
+            ],
+            replacementStartMilliseconds: nil,
+            replacementEndMilliseconds: nil,
+            syncedThroughMilliseconds: 172_800_000,
+            updatedAt: Date(timeIntervalSince1970: 20)
+        )
+
+        let selected = try XCTUnwrap(database.fetchCursorSpendSnapshot(
+            accountIdentity: identity,
+            range: CursorSpendRange(
+                key: "selected",
+                startMilliseconds: 86_400_000,
+                endMilliseconds: 172_800_000
+            )
+        ))
+        let allTime = try XCTUnwrap(database.fetchCursorSpendSnapshot(
+            accountIdentity: identity,
+            range: CursorSpendRange(
+                key: "all",
+                startMilliseconds: nil,
+                endMilliseconds: nil
+            )
+        ))
+
+        XCTAssertEqual(selected.totalCents, 200)
+        XCTAssertEqual(allTime.totalCents, 300)
+    }
+
+    func testSpendRangeMapsLocalCalendarDayToCursorUTCDayKey() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 8 * 3_600)!
+        let range = CursorSpendRange(
+            timeRange: .today,
+            now: Date(timeIntervalSince1970: 1_785_470_400),
+            calendar: calendar
+        )
+
+        XCTAssertEqual(range.startMilliseconds, 1_785_456_000_000)
+        XCTAssertEqual(range.endMilliseconds, 1_785_542_400_000)
     }
 
     func testLegacyOnDemandColumnsAreRemovedWhileTotalSnapshotIsPreserved() throws {
@@ -323,6 +383,14 @@ final class CursorSpendServiceTests: XCTestCase {
             totalCents: 500,
             updatedAt: Date(timeIntervalSince1970: 10)
         )
+        try database.replaceCursorDailySpend(
+            accountIdentity: firstIdentity,
+            days: [CursorDailySpend(dayMilliseconds: 0, totalCents: 700)],
+            replacementStartMilliseconds: nil,
+            replacementEndMilliseconds: nil,
+            syncedThroughMilliseconds: 86_400_000,
+            updatedAt: Date(timeIntervalSince1970: 20)
+        )
         let secondAccount = try account(userId: 84)
         let secondState = syncState(identity: secondAccount.syncIdentity)
 
@@ -337,6 +405,7 @@ final class CursorSpendServiceTests: XCTestCase {
             range: range
         ))
         XCTAssertTrue(database.fetchCursorSpendSnapshots(accountIdentity: firstIdentity).isEmpty)
+        XCTAssertNil(database.fetchCursorDailySpendArchive(accountIdentity: firstIdentity))
     }
 
     func testRefreshCoordinatorCoalescesMatchingActiveRequests() {
@@ -464,7 +533,7 @@ final class CursorSpendServiceTests: XCTestCase {
         service.releaseFirstRequest.signal()
 
         wait(for: [completed], timeout: 1)
-        XCTAssertEqual(service.forces, [false, true])
+        XCTAssertEqual(service.ranges, [range, range])
     }
 
     func testRefreshCoordinatorPreservesManualForceAcrossCancellationDomains() {
@@ -508,7 +577,7 @@ final class CursorSpendServiceTests: XCTestCase {
         service.releaseFirstRequest.signal()
 
         wait(for: [completed], timeout: 1)
-        XCTAssertEqual(service.forces, [false, true])
+        XCTAssertEqual(service.ranges, [range, range])
     }
 
     func testManualCompletionWaitsForOwnedForcedRequest() {
@@ -561,7 +630,7 @@ final class CursorSpendServiceTests: XCTestCase {
 
         service.releaseSecondRequest.signal()
         wait(for: [manualCompleted, automaticCompleted], timeout: 1)
-        XCTAssertEqual(service.forces, [false, true])
+        XCTAssertEqual(service.cancellations.count, 2)
         XCTAssertTrue(service.cancellations[1] === manualCancellation)
     }
 
@@ -645,7 +714,6 @@ private final class BlockingCursorSpendServiceStub: CursorSpendServicing {
     let releaseFirstRequest = DispatchSemaphore(value: 0)
     private let lock = NSLock()
     private var storedRanges: [CursorSpendRange] = []
-    private var storedForces: [Bool] = []
 
     var ranges: [CursorSpendRange] {
         lock.lock()
@@ -653,20 +721,12 @@ private final class BlockingCursorSpendServiceStub: CursorSpendServicing {
         return storedRanges
     }
 
-    var forces: [Bool] {
-        lock.lock()
-        defer { lock.unlock() }
-        return storedForces
-    }
-
     func refresh(
         range: CursorSpendRange,
-        force: Bool,
         cancellation: AgentSyncCancellation?
     ) throws -> CursorSpendSnapshot? {
         lock.lock()
         storedRanges.append(range)
-        storedForces.append(force)
         let isFirstRequest = storedRanges.count == 1
         lock.unlock()
         if isFirstRequest {
@@ -683,14 +743,8 @@ private final class TwoStageBlockingCursorSpendServiceStub: CursorSpendServicing
     let releaseFirstRequest = DispatchSemaphore(value: 0)
     let releaseSecondRequest = DispatchSemaphore(value: 0)
     private let lock = NSLock()
-    private var storedForces: [Bool] = []
+    private var requestCount = 0
     private var storedCancellations: [AgentSyncCancellation?] = []
-
-    var forces: [Bool] {
-        lock.lock()
-        defer { lock.unlock() }
-        return storedForces
-    }
 
     var cancellations: [AgentSyncCancellation?] {
         lock.lock()
@@ -700,13 +754,12 @@ private final class TwoStageBlockingCursorSpendServiceStub: CursorSpendServicing
 
     func refresh(
         range: CursorSpendRange,
-        force: Bool,
         cancellation: AgentSyncCancellation?
     ) throws -> CursorSpendSnapshot? {
         lock.lock()
-        storedForces.append(force)
+        requestCount += 1
         storedCancellations.append(cancellation)
-        let requestIndex = storedForces.count
+        let requestIndex = requestCount
         lock.unlock()
         if requestIndex == 1 {
             firstRequestStarted.fulfill()
@@ -791,14 +844,23 @@ private final class CursorSpendTransportStub: CursorHTTPTransport {
             JSONSerialization.jsonObject(with: body) as? [String: Any]
         )
         XCTAssertEqual(object["spendType"] as? String, "SPEND_TYPE_ALL")
+        let requestStart = try XCTUnwrap(
+            (object["periodStartMs"] as? String).flatMap(Int64.init)
+        )
+        let requestEnd = try XCTUnwrap(
+            (object["periodEndMs"] as? String).flatMap(Int64.init)
+        )
+        let spendDayMilliseconds: Int64 = 1_785_456_000_000
+        let includesSpendDay = requestStart <= spendDayMilliseconds
+            && spendDayMilliseconds < requestEnd
         let responseBody = totalStatusCode == 200
             ? (returnsStrictEmptyObject
                 ? #"{}"#
                 : returnsMalformedMissingDailySpend
                 ? #"{"categories":[]}"#
-                : totalCents == 0
+                : totalCents == 0 || !includesSpendDay
                 ? #"{"dailySpend":[],"categories":[]}"#
-                : #"{"dailySpend":[{"day":"1785000000000","category":"model","spendCents":"\#(totalCents)"}]}"#)
+                : #"{"dailySpend":[{"day":"\#(spendDayMilliseconds)","category":"model","spendCents":"\#(totalCents)"}]}"#)
             : "{}"
         return response(request: request, statusCode: totalStatusCode, body: responseBody)
     }
