@@ -252,7 +252,7 @@ struct SubscriptionQuotaCard: View {
                 .fontWeight(.semibold)
                 .foregroundStyle(quotaColor(item.remainingPercent))
             Text(item.countdownText)
-                .font(.system(size: 10))
+                .font(.system(size: 11))
                 .foregroundStyle(theme.panelSecondaryForeground)
         }
         .lineLimit(1)
