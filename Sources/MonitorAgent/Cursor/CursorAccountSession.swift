@@ -3,7 +3,7 @@ import Foundation
 protocol CursorAccountResolving: AnyObject {
     func resolve(
         force: Bool,
-        cancellation: AgentSyncCancellation?
+        cancellation: CursorOperationCancellation?
     ) throws -> CursorAuthenticatedAccount
 }
 
@@ -42,7 +42,7 @@ final class CursorAccountSession: CursorAccountResolving {
 
     func resolve(
         force: Bool = false,
-        cancellation: AgentSyncCancellation? = nil
+        cancellation: CursorOperationCancellation? = nil
     ) throws -> CursorAuthenticatedAccount {
         try checkCancellation(cancellation)
         condition.lock()
@@ -96,8 +96,8 @@ final class CursorAccountSession: CursorAccountResolving {
         return lastResult
     }
 
-    private func checkCancellation(_ cancellation: AgentSyncCancellation?) throws {
-        if cancellation?.isEnabled(.cursor) == false {
+    private func checkCancellation(_ cancellation: CursorOperationCancellation?) throws {
+        if cancellation?.isCursorCancelled == true {
             throw CursorUsageError.cancelled
         }
     }

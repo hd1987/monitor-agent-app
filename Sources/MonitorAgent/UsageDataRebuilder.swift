@@ -15,7 +15,7 @@ enum UsageDataRebuildError: LocalizedError, Equatable {
         case .suspiciousEmptyResult:
             return "The rebuilt database contained no usage requests. The existing database was not changed."
         case .cursorRefreshFailed:
-            return "Cursor usage could not be refreshed, so the existing Cursor cache was preserved."
+            return "Cursor usage or spend could not be refreshed, so the existing Cursor cache was preserved."
         }
     }
 }
@@ -28,6 +28,7 @@ final class UsageDataRebuilder {
     private let codexArchivedSessionsPath: String
     private let validateTemporaryDatabase: (DatabaseManager) -> Bool
     private let cursorUsageServiceFactory: ((DatabaseManager) -> CursorUsageSyncing)?
+    private let cursorSpendServiceFactory: ((DatabaseManager) -> CursorSpendHistorySyncing)?
 
     init(
         activeDatabase: DatabaseManager = .shared,
@@ -36,7 +37,8 @@ final class UsageDataRebuilder {
         codexSessionsPath: String = NSHomeDirectory() + "/.codex/sessions",
         codexArchivedSessionsPath: String = NSHomeDirectory() + "/.codex/archived_sessions",
         validateTemporaryDatabase: @escaping (DatabaseManager) -> Bool = { $0.integrityCheck() },
-        cursorUsageServiceFactory: ((DatabaseManager) -> CursorUsageSyncing)? = nil
+        cursorUsageServiceFactory: ((DatabaseManager) -> CursorUsageSyncing)? = nil,
+        cursorSpendServiceFactory: ((DatabaseManager) -> CursorSpendHistorySyncing)? = nil
     ) {
         self.activeDatabase = activeDatabase
         self.temporaryDatabasePath = temporaryDatabasePath
@@ -45,6 +47,7 @@ final class UsageDataRebuilder {
         self.codexArchivedSessionsPath = codexArchivedSessionsPath
         self.validateTemporaryDatabase = validateTemporaryDatabase
         self.cursorUsageServiceFactory = cursorUsageServiceFactory
+        self.cursorSpendServiceFactory = cursorSpendServiceFactory
     }
 
     func rebuild(
@@ -78,6 +81,12 @@ final class UsageDataRebuilder {
             let activeCursorSpendSnapshots = activeCursorIdentity.map {
                 activeDatabase.fetchCursorSpendSnapshots(accountIdentity: $0)
             } ?? []
+            let activeCursorDailySpendArchive = activeCursorIdentity.flatMap {
+                activeDatabase.fetchCursorDailySpendArchive(accountIdentity: $0)
+            }
+            let activeCursorDataMustBePreserved = activeCursorStats.totalRequests > 0
+                || !activeCursorSpendSnapshots.isEmpty
+                || activeCursorDailySpendArchive != nil
             let activeDataMustBePreserved = activeStats.totalRequests > 0
                 || (!activeDatabase.isAvailable && activeDatabase.hasExistingDatabaseFile)
             let localDataMustBePreserved =
@@ -95,6 +104,78 @@ final class UsageDataRebuilder {
                 onProgress: onProgress
             )
 
+            if let cursorUsageServiceFactory {
+                do {
+                    try checkCancellation(cancellation)
+                    onProgress?(phaseProgress(
+                        .syncingCursorUsage,
+                        recordsSynced: syncResult.recordsSynced
+                    ))
+                    let cursorUsageService = cursorUsageServiceFactory(rebuildDatabase)
+                    let cursorResult: SessionSyncResult
+                    if let cancellableService = cursorUsageService as? CancellableCursorUsageSyncing {
+                        cursorResult = try cancellableService.sync(cancellation: cancellation)
+                    } else {
+                        cursorResult = try cursorUsageService.sync()
+                    }
+                    try checkCancellation(cancellation)
+                    let rebuiltCursorStats = rebuildDatabase.fetchStats(app: .cursor, range: .allTime)
+                    guard activeCursorStats.totalRequests == 0
+                            || rebuiltCursorStats.totalRequests > 0 else {
+                        throw UsageDataRebuildError.cursorRefreshFailed
+                    }
+                    let rebuiltIdentity = rebuildDatabase.getSyncState(
+                        for: CursorUsageService.syncStateKey
+                    )?.sessionId
+                    if let cursorSpendServiceFactory {
+                        do {
+                            onProgress?(phaseProgress(
+                                .syncingCursorSpend,
+                                recordsSynced: syncResult.recordsSynced + cursorResult.recordsSynced
+                            ))
+                            _ = try cursorSpendServiceFactory(rebuildDatabase)
+                                .refreshFullHistory(cancellation: cancellation)
+                            try checkCancellation(cancellation)
+                        } catch CursorUsageError.cancelled {
+                            throw StrictSessionSyncError.cancelled
+                        } catch let error as StrictSessionSyncError {
+                            throw error
+                        } catch let error as CursorUsageError
+                            where !activeCursorDataMustBePreserved
+                                && error.allowsRebuildWithoutCursorData {
+                            // A transient Spend failure cannot erase Cursor data that does not exist.
+                        } catch {
+                            throw UsageDataRebuildError.cursorRefreshFailed
+                        }
+                    } else if rebuiltIdentity == activeCursorIdentity {
+                        if let activeCursorDailySpendArchive {
+                            try rebuildDatabase.restoreCursorDailySpendArchive(
+                                activeCursorDailySpendArchive
+                            )
+                        }
+                        try rebuildDatabase.restoreCursorSpendSnapshots(
+                            activeCursorSpendSnapshots
+                        )
+                    }
+                    syncResult.add(cursorResult)
+                } catch CursorUsageError.cancelled {
+                    throw StrictSessionSyncError.cancelled
+                } catch let error as CursorUsageError
+                    where !activeCursorDataMustBePreserved
+                        && error.allowsRebuildWithoutCursorData {
+                    // A missing Cursor session does not block rebuilding other sources.
+                } catch let error as UsageDataRebuildError {
+                    throw error
+                } catch let error as StrictSessionSyncError {
+                    throw error
+                } catch where activeCursorDataMustBePreserved {
+                    throw UsageDataRebuildError.cursorRefreshFailed
+                } catch {
+                    throw error
+                }
+            }
+
+            try checkCancellation(cancellation)
             try syncManager.validateSourcesRemainAppendCompatible(with: initialSnapshot)
             let catchUpSnapshot = try syncManager.makeSourceSnapshot(cancellation: cancellation)
             try syncManager.validateSourcesRemainAppendCompatible(with: initialSnapshot)
@@ -109,38 +190,7 @@ final class UsageDataRebuilder {
             try syncManager.validateSourcesRemainAppendCompatible(with: initialSnapshot)
             try syncManager.validateSourcesRemainAppendCompatible(with: catchUpSnapshot)
 
-            if let cursorUsageServiceFactory {
-                do {
-                    let cursorResult = try cursorUsageServiceFactory(rebuildDatabase).sync()
-                    let rebuiltCursorStats = rebuildDatabase.fetchStats(app: .cursor, range: .allTime)
-                    guard activeCursorStats.totalRequests == 0
-                            || rebuiltCursorStats.totalRequests > 0 else {
-                        throw UsageDataRebuildError.cursorRefreshFailed
-                    }
-                    if let rebuiltIdentity = rebuildDatabase.getSyncState(
-                        for: CursorUsageService.syncStateKey
-                    )?.sessionId,
-                       rebuiltIdentity == activeCursorIdentity {
-                        try rebuildDatabase.restoreCursorSpendSnapshots(
-                            activeCursorSpendSnapshots
-                        )
-                    }
-                    syncResult.add(cursorResult)
-                } catch let error as CursorUsageError
-                    where activeCursorStats.totalRequests == 0
-                        && activeCursorSpendSnapshots.isEmpty
-                        && error.allowsRebuildWithoutCursorData {
-                    // A missing Cursor session does not block rebuilding other sources.
-                } catch let error as UsageDataRebuildError {
-                    throw error
-                } catch where activeCursorStats.totalRequests > 0
-                    || !activeCursorSpendSnapshots.isEmpty {
-                    throw UsageDataRebuildError.cursorRefreshFailed
-                } catch {
-                    throw error
-                }
-            }
-
+            try checkCancellation(cancellation)
             onProgress?(phaseProgress(.validating, recordsSynced: syncResult.recordsSynced))
             guard syncManager.validateSnapshotCoverage(catchUpSnapshot),
                   validateTemporaryDatabase(rebuildDatabase) else {
@@ -152,6 +202,11 @@ final class UsageDataRebuilder {
                 throw UsageDataRebuildError.suspiciousEmptyResult
             }
 
+            try syncManager.validateSourcesRemainAppendCompatible(with: initialSnapshot)
+            try syncManager.validateSourcesRemainAppendCompatible(with: catchUpSnapshot)
+            guard cancellation.beginReplacement() else {
+                throw StrictSessionSyncError.cancelled
+            }
             onProgress?(phaseProgress(.replacing, recordsSynced: syncResult.recordsSynced))
             rebuildDatabase.close()
             temporaryDatabase = nil
@@ -209,6 +264,12 @@ final class UsageDataRebuilder {
             recordsSynced: recordsSynced,
             phase: phase
         )
+    }
+
+    private func checkCancellation(_ cancellation: UsageDataRebuildCancellation) throws {
+        if cancellation.isCancelled {
+            throw StrictSessionSyncError.cancelled
+        }
     }
 
     private func cleanUpTemporaryDatabase() {

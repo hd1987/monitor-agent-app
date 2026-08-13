@@ -330,10 +330,16 @@ struct CursorAuthenticatedAccount {
     let account: CursorAccount
 }
 
+enum CursorAccountHistoryOrigin: Equatable {
+    case missing
+    case milliseconds(Int64)
+    case invalid
+}
+
 struct CursorAccount: Decodable {
     let userId: Int
     let teamId: Int?
-    let createdAtMilliseconds: Int64?
+    let historyOrigin: CursorAccountHistoryOrigin
 
     private enum CodingKeys: String, CodingKey {
         case userId
@@ -345,7 +351,15 @@ struct CursorAccount: Decodable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         userId = try container.decodeFlexibleInt(forKey: .userId)
         teamId = try container.decodeFlexibleIntIfPresent(forKey: .teamId)
-        createdAtMilliseconds = try? container.decodeCursorTimestampIfPresent(forKey: .createdAt)
+        do {
+            if let milliseconds = try container.decodeCursorTimestampIfPresent(forKey: .createdAt) {
+                historyOrigin = .milliseconds(milliseconds)
+            } else {
+                historyOrigin = .missing
+            }
+        } catch {
+            historyOrigin = .invalid
+        }
     }
 
     var syncIdentity: String {
@@ -372,7 +386,7 @@ final class CursorDashboardClient {
     }
 
     func authenticatedAccount(
-        cancellation: AgentSyncCancellation? = nil
+        cancellation: CursorOperationCancellation? = nil
     ) throws -> CursorAuthenticatedAccount {
         try checkCancellation(cancellation)
         let token = try authenticationReader.readAccessToken()
@@ -382,7 +396,12 @@ final class CursorDashboardClient {
             body: [:],
             cancellation: cancellation
         )
-        let account = try JSONDecoder().decode(CursorAccount.self, from: data)
+        let account: CursorAccount
+        do {
+            account = try JSONDecoder().decode(CursorAccount.self, from: data)
+        } catch {
+            throw CursorUsageError.invalidResponse
+        }
         return CursorAuthenticatedAccount(token: token, account: account)
     }
 
@@ -390,7 +409,7 @@ final class CursorDashboardClient {
         path: String,
         token: String,
         body: [String: Any],
-        cancellation: AgentSyncCancellation? = nil
+        cancellation: CursorOperationCancellation? = nil
     ) throws -> Data {
         try checkCancellation(cancellation)
         let url = Self.apiOrigin.appendingPathComponent(path)
@@ -412,7 +431,7 @@ final class CursorDashboardClient {
         do {
             if let transport = transport as? CancellableCursorHTTPTransport {
                 (data, response) = try transport.send(request) {
-                    cancellation?.isEnabled(.cursor) == false
+                    cancellation?.isCursorCancelled == true
                 }
             } else {
                 (data, response) = try transport.send(request)
@@ -435,8 +454,8 @@ final class CursorDashboardClient {
         return data
     }
 
-    func checkCancellation(_ cancellation: AgentSyncCancellation?) throws {
-        if cancellation?.isEnabled(.cursor) == false {
+    func checkCancellation(_ cancellation: CursorOperationCancellation?) throws {
+        if cancellation?.isCursorCancelled == true {
             throw CursorUsageError.cancelled
         }
     }
@@ -482,7 +501,16 @@ extension KeyedDecodingContainer {
     func decodeCursorTimestampIfPresent(forKey key: Key) throws -> Int64? {
         guard contains(key), try !decodeNil(forKey: key) else { return nil }
         if let numeric = try? decodeFlexibleInt64IfPresent(forKey: key) {
-            return numeric >= 1_000_000_000_000 ? numeric : numeric * 1_000
+            guard numeric < 1_000_000_000_000 else { return numeric }
+            let (milliseconds, overflow) = numeric.multipliedReportingOverflow(by: 1_000)
+            guard !overflow else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: key,
+                    in: self,
+                    debugDescription: "Cursor timestamp overflowed milliseconds."
+                )
+            }
+            return milliseconds
         }
         let value = try decode(String.self, forKey: key)
         let formatter = ISO8601DateFormatter()

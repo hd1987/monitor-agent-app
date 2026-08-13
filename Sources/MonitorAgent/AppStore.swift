@@ -149,11 +149,11 @@ final class AppStore: ObservableObject {
     private var usageDataRebuildCancellation: UsageDataRebuildCancellation?
     private var activeAgentSyncCancellation: AgentSyncCancellation?
     private var cursorAccountSyncCancellation: AgentSyncCancellation?
-    private var cursorSpendSelectionCancellation: AgentSyncCancellation?
     private var activeQuotaParticipants: [QuotaProviderID: RefreshCycleParticipant] = [:]
     private var quotaSnapshotIdentities: [QuotaProviderID: String] = [:]
     private var quotaRefreshGenerations: [QuotaProviderID: Int] = [:]
     private var quotaRestoreGenerations: [QuotaProviderID: Int] = [:]
+    private var cursorSpendSnapshotRestoreGeneration = 0
     private var cursorSpendRefreshGeneration = 0
     private var cursorUsageRefreshGeneration = 0
     private var cursorAccountVerificationGeneration = 0
@@ -233,7 +233,7 @@ final class AppStore: ObservableObject {
                 lhs.0 == rhs.0 && lhs.1 == rhs.1
             }
             .sink { [weak self] _ in
-                self?.cancelCursorSpendSelectionRefresh()
+                self?.invalidateCursorSpendSnapshotRestore()
             }
             .store(in: &cancellables)
 
@@ -243,7 +243,7 @@ final class AppStore: ObservableObject {
             }
             .debounce(for: .milliseconds(100), scheduler: DispatchQueue.main)
             .sink { [weak self] _, _ in
-                self?.cursorSpendSelectionDidChange()
+                self?.restoreCursorSpendSnapshotForSelection()
             }
             .store(in: &cancellables)
 
@@ -477,7 +477,6 @@ final class AppStore: ObservableObject {
         let syncCancellation = AgentSyncCancellation(enabledAgents: enabledAgents)
         activeAgentSyncCancellation = syncCancellation
         let shouldRefreshCursorSpend = enabledAgents.contains(.cursor)
-            && appFilter == .cursor
         let cursorSpendRange = CursorSpendRange(
             timeRange: timeRange,
             now: currentDateProvider()
@@ -663,7 +662,7 @@ final class AppStore: ObservableObject {
         isPanelVisible = true
         normalizeCodexResetCredits(at: currentDateProvider())
         verifyCursorAccountForPresentation(force: true)
-        cursorSpendSelectionDidChange()
+        restoreCursorSpendSnapshotForSelection()
         applyRefreshInterval(refreshSettings.interval, throttleInitialRefresh: true)
     }
 
@@ -671,7 +670,8 @@ final class AppStore: ObservableObject {
     func panelDidClose() {
         isPanelVisible = false
         cursorAccountVerificationGeneration += 1
-        cancelCursorSpendSelectionRefresh()
+        invalidateCursorSpendSnapshotRestore()
+        cursorSpendRefreshGeneration += 1
         refreshCoordinator.stop()
     }
 
@@ -742,7 +742,8 @@ final class AppStore: ObservableObject {
             cursorAccountVerificationGeneration += 1
             cursorUsageRefreshGeneration += 1
             cursorAccountPresentationState = .unverified
-            cancelCursorSpendSelectionRefresh()
+            invalidateCursorSpendSnapshotRestore()
+            cursorSpendRefreshGeneration += 1
             cursorSpendSnapshot = nil
             cursorRefreshFailures = [:]
         }
@@ -777,10 +778,12 @@ final class AppStore: ObservableObject {
     func rebuildLocalUsageData() {
         guard !isRebuildingUsageData else { return }
 
+        cancelActiveSyncForRebuild()
         isRebuildingUsageData = true
         cursorAccountVerificationGeneration += 1
         cursorAccountPresentationState = .unverified
-        cancelCursorSpendSelectionRefresh()
+        invalidateCursorSpendSnapshotRestore()
+        cursorSpendRefreshGeneration += 1
         cursorSpendSnapshot = nil
         clearCursorDependentPresentation()
         reload()
@@ -799,7 +802,8 @@ final class AppStore: ObservableObject {
                 let summary = try syncManager.performExclusive {
                     try UsageDataRebuilder(
                         activeDatabase: self.db,
-                        cursorUsageServiceFactory: { CursorUsageService(database: $0) }
+                        cursorUsageServiceFactory: { CursorUsageService(database: $0) },
+                        cursorSpendServiceFactory: { CursorSpendService(database: $0) }
                     ).rebuild(
                         cancellation: cancellation
                     ) { [weak self] progress in
@@ -829,6 +833,11 @@ final class AppStore: ObservableObject {
                 }
             }
         }
+    }
+
+    func cancelActiveSyncForRebuild() {
+        activeAgentSyncCancellation?.disableAgents(notIn: [])
+        cursorAccountSyncCancellation?.disableAgents(notIn: [])
     }
 
     func cancelUsageDataRebuild() {
@@ -1015,13 +1024,13 @@ final class AppStore: ObservableObject {
               enabledAgents.contains(.cursor) else {
             return
         }
-        cancelCursorSpendSelectionRefresh()
+        invalidateCursorSpendSnapshotRestore()
         cursorAccountPresentationState = .verifying(nil)
         reload()
         resolveCursorAccount(force: force) { [weak self] identity, isAccepted, verificationGeneration in
             guard let self, isAccepted, let identity else { return }
             if self.cursorAccountPresentationState == .verified(identity) {
-                self.cursorSpendSelectionDidChange()
+                self.restoreCursorSpendSnapshotForSelection()
                 return
             }
             guard self.cursorAccountPresentationState == .verifying(identity) else { return }
@@ -1067,7 +1076,8 @@ final class AppStore: ObservableObject {
                             : .verifying(identity)
                         if cachedIdentity != identity {
                             self.cursorRefreshFailures = [:]
-                            self.cancelCursorSpendSelectionRefresh()
+                            self.invalidateCursorSpendSnapshotRestore()
+                            self.cursorSpendRefreshGeneration += 1
                             self.cursorSpendSnapshot = nil
                             self.clearCursorDependentPresentation()
                         }
@@ -1118,7 +1128,7 @@ final class AppStore: ObservableObject {
                     self.cursorAccountSyncCancellation = nil
                     self.cursorAccountPresentationState = .verified(identity)
                     self.reload()
-                    self.cursorSpendSelectionDidChange()
+                    self.restoreCursorSpendSnapshotForSelection()
                 }
             },
             onOutcome: { [weak self] outcome in
@@ -1168,9 +1178,9 @@ final class AppStore: ObservableObject {
         }
     }
 
-    private func cursorSpendSelectionDidChange() {
-        cancelCursorSpendSelectionRefresh()
-        let generation = cursorSpendRefreshGeneration
+    private func restoreCursorSpendSnapshotForSelection() {
+        invalidateCursorSpendSnapshotRestore()
+        let generation = cursorSpendSnapshotRestoreGeneration
         guard appFilter == .cursor,
               enabledAgents.contains(.cursor),
               isCursorDataPresentationAvailable else {
@@ -1183,8 +1193,6 @@ final class AppStore: ObservableObject {
             timeRange: timeRange,
             now: currentDateProvider()
         )
-        let cancellation = AgentSyncCancellation(enabledAgents: [.cursor])
-        cursorSpendSelectionCancellation = cancellation
         let db = db
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let cached = accountIdentity.flatMap {
@@ -1192,8 +1200,7 @@ final class AppStore: ObservableObject {
             }
             DispatchQueue.main.async {
                 guard let self,
-                      self.cursorSpendSelectionCancellation === cancellation,
-                      self.cursorSpendRefreshGeneration == generation,
+                      self.cursorSpendSnapshotRestoreGeneration == generation,
                       self.appFilter == .cursor,
                       self.isCursorDataPresentationAvailable,
                       (self.cursorPresentationIdentity ?? self.cachedCursorIdentity) == accountIdentity,
@@ -1204,26 +1211,12 @@ final class AppStore: ObservableObject {
                     return
                 }
                 self.cursorSpendSnapshot = cached
-                guard self.isPanelVisible, self.isCursorRefreshAvailable else {
-                    self.cursorSpendSelectionCancellation = nil
-                    return
-                }
-                self.refreshCursorSpend(
-                    range: range,
-                    force: false,
-                    cancellation: cancellation
-                ) { [weak self] in
-                    guard self?.cursorSpendSelectionCancellation === cancellation else { return }
-                    self?.cursorSpendSelectionCancellation = nil
-                }
             }
         }
     }
 
-    private func cancelCursorSpendSelectionRefresh() {
-        cursorSpendSelectionCancellation?.disableAgents(notIn: [])
-        cursorSpendSelectionCancellation = nil
-        cursorSpendRefreshGeneration += 1
+    private func invalidateCursorSpendSnapshotRestore() {
+        cursorSpendSnapshotRestoreGeneration += 1
     }
 
     private func refreshCursorSpend(
@@ -1233,8 +1226,8 @@ final class AppStore: ObservableObject {
         completion: @escaping () -> Void = {}
     ) {
         guard let cursorSpendRefresher,
-              appFilter == .cursor,
               enabledAgents.contains(.cursor),
+              isPanelVisible,
               isCursorRefreshAvailable else {
             completion()
             return
@@ -1254,19 +1247,22 @@ final class AppStore: ObservableObject {
             defer { completion() }
             guard let self,
                   self.cursorSpendRefreshGeneration == generation,
-                  self.appFilter == .cursor,
-                  self.isCursorRefreshAvailable,
-                  CursorSpendRange(
-                      timeRange: self.timeRange,
-                      now: self.currentDateProvider()
-                  ) == range else {
+                  self.isPanelVisible,
+                  self.enabledAgents.contains(.cursor),
+                  self.isCursorRefreshAvailable else {
                 return
             }
-            if let snapshot = outcome.snapshot {
+            let currentRange = CursorSpendRange(
+                timeRange: self.timeRange,
+                now: self.currentDateProvider()
+            )
+            if let snapshot = outcome.snapshot, currentRange == range {
                 if case .verified(let identity) = self.cursorAccountPresentationState {
                     guard snapshot.accountIdentity == identity else { return }
                 }
                 self.cursorSpendSnapshot = snapshot
+            } else if currentRange != range {
+                self.restoreCursorSpendSnapshotForSelection()
             }
             self.applyCursorSpendRefreshOutcome(outcome)
         }
@@ -1289,7 +1285,7 @@ final class AppStore: ObservableObject {
             clearCursorRefreshFailure(.spend)
         case .failure(_, let reason):
             recordCursorRefreshFailure(.spend, kind: failureKind(for: reason))
-        case .cacheHit, .cancelled, .superseded:
+        case .cancelled, .superseded:
             break
         }
     }

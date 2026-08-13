@@ -124,6 +124,20 @@ final class DatabaseManager {
                     last_accessed_at INTEGER NOT NULL,
                     PRIMARY KEY (account_identity, range_key)
                 );
+
+                CREATE TABLE IF NOT EXISTS cursor_daily_spend (
+                    account_identity TEXT NOT NULL,
+                    day_ms INTEGER NOT NULL,
+                    total_cents INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (account_identity, day_ms)
+                );
+
+                CREATE TABLE IF NOT EXISTS cursor_spend_sync_state (
+                    account_identity TEXT PRIMARY KEY,
+                    synced_through_ms INTEGER NOT NULL,
+                    last_synced_at INTEGER NOT NULL
+                );
                 """)
             try migrateCursorSpendSnapshotsSchemaIfNeeded(db)
             try addColumnIfMissing(
@@ -297,8 +311,18 @@ final class DatabaseManager {
                         sql: "DELETE FROM cursor_spend_snapshots WHERE account_identity <> ?",
                         arguments: [accountIdentity]
                     )
+                    try db.execute(
+                        sql: "DELETE FROM cursor_daily_spend WHERE account_identity <> ?",
+                        arguments: [accountIdentity]
+                    )
+                    try db.execute(
+                        sql: "DELETE FROM cursor_spend_sync_state WHERE account_identity <> ?",
+                        arguments: [accountIdentity]
+                    )
                 } else {
                     try db.execute(sql: "DELETE FROM cursor_spend_snapshots")
+                    try db.execute(sql: "DELETE FROM cursor_daily_spend")
+                    try db.execute(sql: "DELETE FROM cursor_spend_sync_state")
                 }
             }
             try insertRecords(records, in: db)
@@ -357,6 +381,48 @@ final class DatabaseManager {
         defer { lifecycleLock.unlock() }
         guard let db = dbQueue else { return nil }
         return try? db.write { db in
+            let hasDailyHistory = try Bool.fetchOne(
+                db,
+                sql: "SELECT EXISTS(SELECT 1 FROM cursor_spend_sync_state WHERE account_identity = ?)",
+                arguments: [accountIdentity]
+            ) ?? false
+            if hasDailyHistory {
+                var conditions = ["account_identity = ?"]
+                var arguments: [DatabaseValueConvertible?] = [accountIdentity]
+                if let start = range.startMilliseconds {
+                    conditions.append("day_ms >= ?")
+                    arguments.append(start)
+                }
+                if let end = range.endMilliseconds {
+                    conditions.append("day_ms < ?")
+                    arguments.append(end)
+                }
+                let row = try Row.fetchOne(
+                    db,
+                    sql: """
+                        SELECT COALESCE(SUM(total_cents), 0) AS total_cents,
+                               MAX(updated_at) AS total_updated_at
+                        FROM cursor_daily_spend
+                        WHERE \(conditions.joined(separator: " AND "))
+                        """,
+                    arguments: StatementArguments(arguments)
+                )
+                let totalCents: Int = row?["total_cents"] ?? 0
+                let updatedAtSeconds: Int? = row?["total_updated_at"]
+                let syncUpdatedAt = try Int.fetchOne(
+                    db,
+                    sql: "SELECT last_synced_at FROM cursor_spend_sync_state WHERE account_identity = ?",
+                    arguments: [accountIdentity]
+                )
+                return CursorSpendSnapshot(
+                    accountIdentity: accountIdentity,
+                    range: range,
+                    totalCents: totalCents,
+                    totalUpdatedAt: (updatedAtSeconds ?? syncUpdatedAt).map {
+                        Date(timeIntervalSince1970: TimeInterval($0))
+                    }
+                )
+            }
             guard let row = try Row.fetchOne(
                 db,
                 sql: """
@@ -552,6 +618,132 @@ final class DatabaseManager {
                 )
             }
         }
+    }
+
+    func fetchCursorSpendSyncedThrough(accountIdentity: String) -> Int64? {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard let db = dbQueue else { return nil }
+        return try? db.read { db in
+            try Int64.fetchOne(
+                db,
+                sql: "SELECT synced_through_ms FROM cursor_spend_sync_state WHERE account_identity = ?",
+                arguments: [accountIdentity]
+            )
+        }
+    }
+
+    func replaceCursorDailySpend(
+        accountIdentity: String,
+        days: [CursorDailySpend],
+        replacementStartMilliseconds: Int64?,
+        replacementEndMilliseconds: Int64?,
+        syncedThroughMilliseconds: Int64,
+        updatedAt: Date
+    ) throws {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard let db = dbQueue else { throw DatabaseManagerError.unavailable }
+        let timestamp = Int(updatedAt.timeIntervalSince1970)
+        try db.write { db in
+            let currentIdentity = try String.fetchOne(
+                db,
+                sql: "SELECT session_id FROM sync_state WHERE file_path = ? LIMIT 1",
+                arguments: [CursorUsageService.syncStateKey]
+            )
+            guard currentIdentity == accountIdentity else {
+                throw CursorSpendError.accountChanged
+            }
+            if let replacementStartMilliseconds, let replacementEndMilliseconds {
+                try db.execute(
+                    sql: """
+                        DELETE FROM cursor_daily_spend
+                        WHERE account_identity = ? AND day_ms >= ? AND day_ms < ?
+                        """,
+                    arguments: [
+                        accountIdentity,
+                        replacementStartMilliseconds,
+                        replacementEndMilliseconds,
+                    ]
+                )
+            } else {
+                try db.execute(
+                    sql: "DELETE FROM cursor_daily_spend WHERE account_identity = ?",
+                    arguments: [accountIdentity]
+                )
+            }
+            for day in days {
+                try db.execute(
+                    sql: """
+                        INSERT INTO cursor_daily_spend (
+                            account_identity, day_ms, total_cents, updated_at
+                        ) VALUES (?, ?, ?, ?)
+                        """,
+                    arguments: [accountIdentity, day.dayMilliseconds, day.totalCents, timestamp]
+                )
+            }
+            try db.execute(
+                sql: """
+                    INSERT INTO cursor_spend_sync_state (
+                        account_identity, synced_through_ms, last_synced_at
+                    ) VALUES (?, ?, ?)
+                    ON CONFLICT(account_identity) DO UPDATE SET
+                        synced_through_ms = excluded.synced_through_ms,
+                        last_synced_at = excluded.last_synced_at
+                    """,
+                arguments: [accountIdentity, syncedThroughMilliseconds, timestamp]
+            )
+        }
+    }
+
+    func fetchCursorDailySpendArchive(accountIdentity: String) -> CursorDailySpendArchive? {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard let db = dbQueue else { return nil }
+        return try? db.read { db in
+            guard let state = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT synced_through_ms, last_synced_at
+                    FROM cursor_spend_sync_state WHERE account_identity = ?
+                    """,
+                arguments: [accountIdentity]
+            ) else {
+                return nil
+            }
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT day_ms, total_cents FROM cursor_daily_spend
+                    WHERE account_identity = ? ORDER BY day_ms
+                    """,
+                arguments: [accountIdentity]
+            )
+            return CursorDailySpendArchive(
+                accountIdentity: accountIdentity,
+                days: rows.map {
+                    CursorDailySpend(
+                        dayMilliseconds: $0["day_ms"],
+                        totalCents: $0["total_cents"]
+                    )
+                },
+                syncedThroughMilliseconds: state["synced_through_ms"],
+                lastSyncedAt: Date(
+                    timeIntervalSince1970: TimeInterval(state["last_synced_at"] as Int)
+                )
+            )
+        }
+    }
+
+    func restoreCursorDailySpendArchive(_ archive: CursorDailySpendArchive) throws {
+        try replaceCursorDailySpend(
+            accountIdentity: archive.accountIdentity,
+            days: archive.days,
+            replacementStartMilliseconds: nil,
+            replacementEndMilliseconds: nil,
+            syncedThroughMilliseconds: archive.syncedThroughMilliseconds,
+            updatedAt: archive.lastSyncedAt
+        )
     }
 
     func insertRecords(_ records: [ParsedRecord]) {

@@ -6,7 +6,7 @@ protocol CursorUsageSyncing {
 }
 
 protocol CancellableCursorUsageSyncing: CursorUsageSyncing {
-    func sync(cancellation: AgentSyncCancellation?) throws -> SessionSyncResult
+    func sync(cancellation: CursorOperationCancellation?) throws -> SessionSyncResult
 }
 
 final class CursorUsageService: CancellableCursorUsageSyncing {
@@ -58,7 +58,7 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
         try sync(cancellation: nil)
     }
 
-    func sync(cancellation: AgentSyncCancellation?) throws -> SessionSyncResult {
+    func sync(cancellation: CursorOperationCancellation?) throws -> SessionSyncResult {
         try client.checkCancellation(cancellation)
         let currentDate = now()
         let currentSeconds = Int(currentDate.timeIntervalSince1970)
@@ -94,7 +94,7 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
             lastSyncedAt: currentSeconds
         )
         if let cancellation {
-            guard try cancellation.withEnabledAgent(.cursor, perform: {
+            guard try cancellation.withActiveCursor(perform: {
                 try commit(records: records, state: state, accountChanged: accountChanged)
             }) != nil else {
                 throw CursorUsageError.cancelled
@@ -126,7 +126,7 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
         account: CursorAccount,
         startMilliseconds: Int64?,
         endMilliseconds: Int64,
-        cancellation: AgentSyncCancellation?
+        cancellation: CursorOperationCancellation?
     ) throws -> [CursorUsageEvent] {
         var events: [CursorUsageEvent] = []
         var page = 1

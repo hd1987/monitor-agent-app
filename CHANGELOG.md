@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-08-13
+
+### Changed
+- Initialize Cursor Total Usage from complete UTC daily Spend history, refresh recent UTC months on every eligible unified refresh, and keep tab and time-range changes local-only
+- Refresh Cursor Spend from a seven-day overlap before the last successful coverage watermark, catch up long gaps in UTC-month requests, and fully recalibrate Spend during Data Rebuild
+
+### Fixed
+- Allow Data Rebuild to finish when Cursor Spend temporarily fails and the active database has no Cursor data to preserve
+
 ## [0.12.1] - 2026-08-12
 
 ### Added
@@ -17,6 +26,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 - Show subscription quota status and its failed-attempt time only after a refresh failure or sign-in expiration
 
 ### Fixed
+- Cancel active sync commits before Data Rebuild and revalidate source files immediately before database replacement
+- Revalidate Claude Code and Codex sources after Cursor calibration before Data Rebuild replaces the active database
+- Make full-history Cursor Spend calibration fail when any request fails instead of accepting cached history as success
+- Reject missing or invalid Cursor account history origins instead of issuing an epoch-wide Spend request, while retaining matching cached spend
+- Make Data Rebuild cancellation stop Cursor Usage and Spend network work and atomically prevent database replacement when cancellation wins
 - Treat Cursor DashboardService's strict empty-object Usage and Spend responses as successful empty results without accepting malformed nonempty responses
 - Preserve Cursor spend cancellation as a non-failure outcome instead of reporting a request failure
 - Keep Cursor failure indicators account-scoped and preserve authentication failures through Usage, Spend, and multi-component Help text
