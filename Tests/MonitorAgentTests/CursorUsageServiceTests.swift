@@ -59,6 +59,27 @@ final class CursorUsageServiceTests: XCTestCase {
         )
     }
 
+    func testSyncIgnoresMalformedSpendHistoryOrigin() throws {
+        let database = DatabaseManager(inMemory: true)
+        let transport = CursorTransportStub(responses: [
+            response(body: #"{"userId":42,"teamId":7,"createdAt":"not-a-date"}"#),
+            response(body: usagePage(
+                total: 1,
+                timestamp: "1785376800000",
+                conversation: "usage-only"
+            )),
+        ])
+        let service = CursorUsageService(
+            database: database,
+            authenticationReader: CursorAuthenticationStub(token: "token"),
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_785_377_000) }
+        )
+
+        XCTAssertEqual(try service.sync().recordsSynced, 1)
+        XCTAssertEqual(transport.requests.count, 2)
+    }
+
     func testSyncPaginatesAndUsesIncrementalOverlap() throws {
         let database = DatabaseManager(inMemory: true)
         let transport = CursorTransportStub(responses: [

@@ -117,7 +117,19 @@ final class UsageDataRebuilder {
 
             if let cursorUsageServiceFactory {
                 do {
-                    let cursorResult = try cursorUsageServiceFactory(rebuildDatabase).sync()
+                    try checkCancellation(cancellation)
+                    onProgress?(phaseProgress(
+                        .syncingCursorUsage,
+                        recordsSynced: syncResult.recordsSynced
+                    ))
+                    let cursorUsageService = cursorUsageServiceFactory(rebuildDatabase)
+                    let cursorResult: SessionSyncResult
+                    if let cancellableService = cursorUsageService as? CancellableCursorUsageSyncing {
+                        cursorResult = try cancellableService.sync(cancellation: cancellation)
+                    } else {
+                        cursorResult = try cursorUsageService.sync()
+                    }
+                    try checkCancellation(cancellation)
                     let rebuiltCursorStats = rebuildDatabase.fetchStats(app: .cursor, range: .allTime)
                     guard activeCursorStats.totalRequests == 0
                             || rebuiltCursorStats.totalRequests > 0 else {
@@ -128,8 +140,17 @@ final class UsageDataRebuilder {
                     )?.sessionId
                     if let cursorSpendServiceFactory {
                         do {
+                            onProgress?(phaseProgress(
+                                .syncingCursorSpend,
+                                recordsSynced: syncResult.recordsSynced + cursorResult.recordsSynced
+                            ))
                             _ = try cursorSpendServiceFactory(rebuildDatabase)
-                                .refreshFullHistory(cancellation: nil)
+                                .refreshFullHistory(cancellation: cancellation)
+                            try checkCancellation(cancellation)
+                        } catch CursorUsageError.cancelled {
+                            throw StrictSessionSyncError.cancelled
+                        } catch let error as StrictSessionSyncError {
+                            throw error
                         } catch {
                             throw UsageDataRebuildError.cursorRefreshFailed
                         }
@@ -144,6 +165,8 @@ final class UsageDataRebuilder {
                         )
                     }
                     syncResult.add(cursorResult)
+                } catch CursorUsageError.cancelled {
+                    throw StrictSessionSyncError.cancelled
                 } catch let error as CursorUsageError
                     where activeCursorStats.totalRequests == 0
                         && activeCursorSpendSnapshots.isEmpty
@@ -151,6 +174,8 @@ final class UsageDataRebuilder {
                         && error.allowsRebuildWithoutCursorData {
                     // A missing Cursor session does not block rebuilding other sources.
                 } catch let error as UsageDataRebuildError {
+                    throw error
+                } catch let error as StrictSessionSyncError {
                     throw error
                 } catch where activeCursorStats.totalRequests > 0
                     || !activeCursorSpendSnapshots.isEmpty
@@ -161,6 +186,7 @@ final class UsageDataRebuilder {
                 }
             }
 
+            try checkCancellation(cancellation)
             onProgress?(phaseProgress(.validating, recordsSynced: syncResult.recordsSynced))
             guard syncManager.validateSnapshotCoverage(catchUpSnapshot),
                   validateTemporaryDatabase(rebuildDatabase) else {
@@ -172,6 +198,9 @@ final class UsageDataRebuilder {
                 throw UsageDataRebuildError.suspiciousEmptyResult
             }
 
+            guard cancellation.beginReplacement() else {
+                throw StrictSessionSyncError.cancelled
+            }
             onProgress?(phaseProgress(.replacing, recordsSynced: syncResult.recordsSynced))
             rebuildDatabase.close()
             temporaryDatabase = nil
@@ -229,6 +258,12 @@ final class UsageDataRebuilder {
             recordsSynced: recordsSynced,
             phase: phase
         )
+    }
+
+    private func checkCancellation(_ cancellation: UsageDataRebuildCancellation) throws {
+        if cancellation.isCancelled {
+            throw StrictSessionSyncError.cancelled
+        }
     }
 
     private func cleanUpTemporaryDatabase() {

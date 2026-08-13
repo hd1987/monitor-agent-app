@@ -21,6 +21,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 - Show subscription quota status and its failed-attempt time only after a refresh failure or sign-in expiration
 
 ### Fixed
+- Reject missing or invalid Cursor account history origins instead of issuing an epoch-wide Spend request, while retaining matching cached spend
+- Make Data Rebuild cancellation stop Cursor Usage and Spend network work and atomically prevent database replacement when cancellation wins
 - Treat Cursor DashboardService's strict empty-object Usage and Spend responses as successful empty results without accepting malformed nonempty responses
 - Preserve Cursor spend cancellation as a non-failure outcome instead of reporting a request failure
 - Keep Cursor failure indicators account-scoped and preserve authentication failures through Usage, Spend, and multi-component Help text

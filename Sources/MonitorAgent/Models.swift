@@ -414,6 +414,8 @@ enum UsageDataRebuildPhase: Equatable {
     case rebuildingClaude
     case rebuildingCodex
     case catchingUp
+    case syncingCursorUsage
+    case syncingCursorSpend
     case validating
     case replacing
     case syncingLatest
@@ -424,6 +426,8 @@ enum UsageDataRebuildPhase: Equatable {
         case .rebuildingClaude: return "Rebuilding Claude Code data..."
         case .rebuildingCodex: return "Rebuilding Codex data..."
         case .catchingUp: return "Catching up new activity..."
+        case .syncingCursorUsage: return "Rebuilding Cursor usage..."
+        case .syncingCursorSpend: return "Rebuilding Cursor spend history..."
         case .validating: return "Validating rebuilt database..."
         case .replacing: return "Replacing local database..."
         case .syncingLatest: return "Syncing latest activity..."
@@ -432,28 +436,58 @@ enum UsageDataRebuildPhase: Equatable {
 
     var isCancellable: Bool {
         switch self {
-        case .scanning, .rebuildingClaude, .rebuildingCodex, .catchingUp:
+        case .scanning, .rebuildingClaude, .rebuildingCodex, .catchingUp,
+             .syncingCursorUsage, .syncingCursorSpend, .validating:
             return true
-        case .validating, .replacing, .syncingLatest:
+        case .replacing, .syncingLatest:
             return false
         }
     }
 }
 
 final class UsageDataRebuildCancellation {
+    private enum State {
+        case cancellable
+        case cancelled
+        case replacementStarted
+    }
+
     private let lock = NSLock()
-    private var cancelled = false
+    private var state: State = .cancellable
 
     var isCancelled: Bool {
         lock.lock()
         defer { lock.unlock() }
-        return cancelled
+        return state == .cancelled
     }
 
     func cancel() {
         lock.lock()
-        cancelled = true
+        if state == .cancellable {
+            state = .cancelled
+        }
         lock.unlock()
+    }
+
+    func beginReplacement() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard state == .cancellable else { return false }
+        state = .replacementStarted
+        return true
+    }
+}
+
+extension UsageDataRebuildCancellation: CursorOperationCancellation {
+    var isCursorCancelled: Bool { isCancelled }
+
+    func withActiveCursor<T>(
+        perform operation: () throws -> T
+    ) rethrows -> T? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard state == .cancellable else { return nil }
+        return try operation()
     }
 }
 

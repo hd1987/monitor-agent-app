@@ -2213,7 +2213,7 @@ private final class StaticCursorAccountResolver: CursorAccountResolving {
 
     func resolve(
         force: Bool,
-        cancellation: AgentSyncCancellation?
+        cancellation: CursorOperationCancellation?
     ) throws -> CursorAuthenticatedAccount {
         lock.lock()
         storedCallCount += 1
@@ -2247,7 +2247,7 @@ private final class BlockingCursorAccountResolver: CursorAccountResolving {
 
     func resolve(
         force: Bool,
-        cancellation: AgentSyncCancellation?
+        cancellation: CursorOperationCancellation?
     ) throws -> CursorAuthenticatedAccount {
         lock.lock()
         storedCallCount += 1
@@ -2310,7 +2310,7 @@ private final class FailingThenBlockingReplacementCursorUsageSyncer: Cancellable
         try sync(cancellation: nil)
     }
 
-    func sync(cancellation: AgentSyncCancellation?) throws -> SessionSyncResult {
+    func sync(cancellation: CursorOperationCancellation?) throws -> SessionSyncResult {
         lock.lock()
         let currentSync = syncCount
         syncCount += 1
@@ -2322,7 +2322,7 @@ private final class FailingThenBlockingReplacementCursorUsageSyncer: Cancellable
             replacementStarted.fulfill()
             _ = releaseReplacement.wait(timeout: .now() + 2)
         }
-        guard cancellation?.isEnabled(.cursor) != false else {
+        guard cancellation?.isCursorCancelled != true else {
             throw CursorUsageError.cancelled
         }
         let identity = replacementAccount.account.syncIdentity
@@ -2365,10 +2365,10 @@ private final class BlockingReplacementCursorUsageSyncer: CancellableCursorUsage
         try sync(cancellation: nil)
     }
 
-    func sync(cancellation: AgentSyncCancellation?) throws -> SessionSyncResult {
+    func sync(cancellation: CursorOperationCancellation?) throws -> SessionSyncResult {
         started.fulfill()
         _ = release.wait(timeout: .now() + 2)
-        guard cancellation?.isEnabled(.cursor) != false else {
+        guard cancellation?.isCursorCancelled != true else {
             throw CursorUsageError.cancelled
         }
         let record = ParsedRecord(
@@ -2417,7 +2417,7 @@ private final class BlockingThenSuccessfulCursorUsageSyncer: CancellableCursorUs
         try sync(cancellation: nil)
     }
 
-    func sync(cancellation: AgentSyncCancellation?) throws -> SessionSyncResult {
+    func sync(cancellation: CursorOperationCancellation?) throws -> SessionSyncResult {
         lock.lock()
         let index = syncCount
         syncCount += 1
@@ -2425,7 +2425,7 @@ private final class BlockingThenSuccessfulCursorUsageSyncer: CancellableCursorUs
         if index == 0 {
             firstStarted.fulfill()
             _ = releaseFirst.wait(timeout: .now() + 2)
-            guard cancellation?.isEnabled(.cursor) != false else {
+            guard cancellation?.isCursorCancelled != true else {
                 throw CursorUsageError.cancelled
             }
         }
@@ -2456,13 +2456,13 @@ private final class CancellableCursorUsageSyncerProbe: CancellableCursorUsageSyn
         return SessionSyncResult()
     }
 
-    func sync(cancellation: AgentSyncCancellation?) throws -> SessionSyncResult {
+    func sync(cancellation: CursorOperationCancellation?) throws -> SessionSyncResult {
         started.fulfill()
         guard let cancellation else {
             XCTFail("Routine Cursor sync should receive a cancellation token")
             return SessionSyncResult()
         }
-        while cancellation.isEnabled(.cursor) {
+        while !cancellation.isCursorCancelled {
             Thread.sleep(forTimeInterval: 0.001)
         }
         cancelled.fulfill()

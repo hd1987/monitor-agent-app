@@ -1,6 +1,14 @@
 import Combine
 import Foundation
 
+protocol CursorOperationCancellation: AnyObject {
+    var isCursorCancelled: Bool { get }
+
+    func withActiveCursor<T>(
+        perform operation: () throws -> T
+    ) rethrows -> T?
+}
+
 final class AgentMonitoringSettings: ObservableObject {
     static let shared = AgentMonitoringSettings()
 
@@ -66,5 +74,17 @@ final class AgentSyncCancellation {
         defer { lock.unlock() }
         guard enabledAgents.contains(agent) else { return nil }
         return try operation()
+    }
+}
+
+extension AgentSyncCancellation: CursorOperationCancellation {
+    var isCursorCancelled: Bool {
+        !isEnabled(.cursor)
+    }
+
+    func withActiveCursor<T>(
+        perform operation: () throws -> T
+    ) rethrows -> T? {
+        try withEnabledAgent(.cursor, perform: operation)
     }
 }

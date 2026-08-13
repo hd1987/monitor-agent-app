@@ -914,6 +914,130 @@ final class RebuildUsageDataTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temporaryPath))
     }
 
+    func testUsageDataRebuilderCancelsDuringCursorUsageWithoutReplacingActiveDatabase() throws {
+        let directory = try makeTemporaryDirectory()
+        let activePath = directory.appendingPathComponent("monitor.db").path
+        let temporaryPath = directory.appendingPathComponent("monitor-rebuild.tmp.db").path
+        let claudeRoot = directory.appendingPathComponent("claude-projects")
+        let codexRoot = directory.appendingPathComponent("codex-sessions")
+        let codexArchiveRoot = directory.appendingPathComponent("codex-archive")
+        try FileManager.default.createDirectory(at: claudeRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexArchiveRoot, withIntermediateDirectories: true)
+        try claudeAssistantLine().write(
+            to: claudeRoot.appendingPathComponent("session.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let activeDatabase = try DatabaseManager(path: activePath)
+        activeDatabase.insertRecords([record(id: "old", input: 10)])
+        let cancellation = UsageDataRebuildCancellation()
+        let cursorUsageSyncer = BlockingCancellableCursorUsageSyncer()
+        let rebuilder = UsageDataRebuilder(
+            activeDatabase: activeDatabase,
+            temporaryDatabasePath: temporaryPath,
+            claudeProjectsPath: claudeRoot.path,
+            codexSessionsPath: codexRoot.path,
+            codexArchivedSessionsPath: codexArchiveRoot.path,
+            cursorUsageServiceFactory: { _ in cursorUsageSyncer }
+        )
+        let finished = expectation(description: "Rebuild stops during Cursor usage")
+        var rebuildError: Error?
+
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                _ = try rebuilder.rebuild(cancellation: cancellation)
+            } catch {
+                rebuildError = error
+            }
+            finished.fulfill()
+        }
+        XCTAssertEqual(cursorUsageSyncer.started.wait(timeout: .now() + 1), .success)
+        cancellation.cancel()
+        wait(for: [finished], timeout: 2)
+
+        XCTAssertEqual(rebuildError as? StrictSessionSyncError, .cancelled)
+        XCTAssertEqual(activeDatabase.fetchStats(app: .all, range: .allTime).inputTokens, 10)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temporaryPath))
+    }
+
+    func testUsageDataRebuilderCancelsDuringCursorSpendWithoutReplacingActiveDatabase() throws {
+        let directory = try makeTemporaryDirectory()
+        let activePath = directory.appendingPathComponent("monitor.db").path
+        let temporaryPath = directory.appendingPathComponent("monitor-rebuild.tmp.db").path
+        let claudeRoot = directory.appendingPathComponent("claude-projects")
+        let codexRoot = directory.appendingPathComponent("codex-sessions")
+        let codexArchiveRoot = directory.appendingPathComponent("codex-archive")
+        try FileManager.default.createDirectory(at: claudeRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexArchiveRoot, withIntermediateDirectories: true)
+        try claudeAssistantLine().write(
+            to: claudeRoot.appendingPathComponent("session.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let activeDatabase = try DatabaseManager(path: activePath)
+        activeDatabase.insertRecords([record(id: "old", input: 10)])
+        let identity = "cursor-account:test"
+        _ = try SuccessfulCursorUsageSyncer(
+            database: activeDatabase,
+            identity: identity
+        ).sync()
+        let activeSpendArchive = CursorDailySpendArchive(
+            accountIdentity: identity,
+            days: [CursorDailySpend(dayMilliseconds: 0, totalCents: 700)],
+            syncedThroughMilliseconds: 86_400_000,
+            lastSyncedAt: Date(timeIntervalSince1970: 20)
+        )
+        try activeDatabase.restoreCursorDailySpendArchive(activeSpendArchive)
+        let cancellation = UsageDataRebuildCancellation()
+        let cursorSpendSyncer = BlockingCancellableCursorSpendSyncer()
+        let rebuilder = UsageDataRebuilder(
+            activeDatabase: activeDatabase,
+            temporaryDatabasePath: temporaryPath,
+            claudeProjectsPath: claudeRoot.path,
+            codexSessionsPath: codexRoot.path,
+            codexArchivedSessionsPath: codexArchiveRoot.path,
+            cursorUsageServiceFactory: {
+                SuccessfulCursorUsageSyncer(database: $0, identity: identity)
+            },
+            cursorSpendServiceFactory: { _ in cursorSpendSyncer }
+        )
+        let finished = expectation(description: "Rebuild stops during Cursor spend")
+        var rebuildError: Error?
+
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                _ = try rebuilder.rebuild(cancellation: cancellation)
+            } catch {
+                rebuildError = error
+            }
+            finished.fulfill()
+        }
+        XCTAssertEqual(cursorSpendSyncer.started.wait(timeout: .now() + 1), .success)
+        cancellation.cancel()
+        wait(for: [finished], timeout: 2)
+
+        XCTAssertEqual(rebuildError as? StrictSessionSyncError, .cancelled)
+        XCTAssertEqual(activeDatabase.fetchStats(app: .all, range: .allTime).inputTokens, 11)
+        XCTAssertEqual(
+            activeDatabase.fetchCursorDailySpendArchive(accountIdentity: identity),
+            activeSpendArchive
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temporaryPath))
+    }
+
+    func testUsageDataRebuildReplacementBoundaryHasSingleWinner() {
+        let cancelledFirst = UsageDataRebuildCancellation()
+        cancelledFirst.cancel()
+        XCTAssertFalse(cancelledFirst.beginReplacement())
+
+        let replacementFirst = UsageDataRebuildCancellation()
+        XCTAssertTrue(replacementFirst.beginReplacement())
+        replacementFirst.cancel()
+        XCTAssertFalse(replacementFirst.isCancelled)
+    }
+
     func testUsageDataRebuilderRejectsSourceReplacementDuringRebuild() throws {
         let directory = try makeTemporaryDirectory()
         let activePath = directory.appendingPathComponent("monitor.db").path
@@ -1486,7 +1610,7 @@ private final class RecalibratingCursorSpendSyncer: CursorSpendHistorySyncing {
     }
 
     func refreshFullHistory(
-        cancellation: AgentSyncCancellation?
+        cancellation: CursorOperationCancellation?
     ) throws -> CursorSpendSnapshot? {
         try database.replaceCursorDailySpend(
             accountIdentity: identity,
@@ -1509,9 +1633,40 @@ private final class RecalibratingCursorSpendSyncer: CursorSpendHistorySyncing {
 
 private final class FailingCursorSpendSyncer: CursorSpendHistorySyncing {
     func refreshFullHistory(
-        cancellation: AgentSyncCancellation?
+        cancellation: CursorOperationCancellation?
     ) throws -> CursorSpendSnapshot? {
         throw CursorUsageError.requestFailed
+    }
+}
+
+private final class BlockingCancellableCursorUsageSyncer: CancellableCursorUsageSyncing {
+    let started = DispatchSemaphore(value: 0)
+
+    func sync() throws -> SessionSyncResult {
+        XCTFail("Rebuild Cursor usage must receive its cancellation token")
+        return SessionSyncResult()
+    }
+
+    func sync(cancellation: CursorOperationCancellation?) throws -> SessionSyncResult {
+        started.signal()
+        while cancellation?.isCursorCancelled != true {
+            Thread.sleep(forTimeInterval: 0.001)
+        }
+        throw CursorUsageError.cancelled
+    }
+}
+
+private final class BlockingCancellableCursorSpendSyncer: CursorSpendHistorySyncing {
+    let started = DispatchSemaphore(value: 0)
+
+    func refreshFullHistory(
+        cancellation: CursorOperationCancellation?
+    ) throws -> CursorSpendSnapshot? {
+        started.signal()
+        while cancellation?.isCursorCancelled != true {
+            Thread.sleep(forTimeInterval: 0.001)
+        }
+        throw CursorUsageError.cancelled
     }
 }
 

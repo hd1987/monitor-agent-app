@@ -42,7 +42,7 @@ protocol CursorSpendServicing: AnyObject {
 
 protocol CursorSpendHistorySyncing: AnyObject {
     func refreshFullHistory(
-        cancellation: AgentSyncCancellation?
+        cancellation: CursorOperationCancellation?
     ) throws -> CursorSpendSnapshot?
 }
 
@@ -69,12 +69,21 @@ extension CursorSpendServicing {
 
 enum CursorSpendError: LocalizedError, Equatable {
     case accountChanged
+    case historyOriginUnavailable
+    case invalidHistoryOrigin
+    case historyRangeTooLarge
     case invalidRange
 
     var errorDescription: String? {
         switch self {
         case .accountChanged:
             return "Cursor changed accounts before spend could be saved."
+        case .historyOriginUnavailable:
+            return "Cursor did not provide an account history origin."
+        case .invalidHistoryOrigin:
+            return "Cursor provided an invalid account history origin."
+        case .historyRangeTooLarge:
+            return "Cursor spend history exceeded the request safety limit."
         case .invalidRange:
             return "The selected Cursor spend range is invalid."
         }
@@ -83,6 +92,7 @@ enum CursorSpendError: LocalizedError, Equatable {
 
 final class CursorSpendService: CursorSpendServicing, CursorSpendHistorySyncing {
     private static let incrementalOverlapMilliseconds: Int64 = 7 * 86_400_000
+    private static let maximumHistoryMonthRanges = 120
 
     private enum RefreshResult {
         case success(CursorSpendSnapshot)
@@ -177,7 +187,7 @@ final class CursorSpendService: CursorSpendServicing, CursorSpendHistorySyncing 
     }
 
     func refreshFullHistory(
-        cancellation: AgentSyncCancellation? = nil
+        cancellation: CursorOperationCancellation? = nil
     ) throws -> CursorSpendSnapshot? {
         do {
             return try refreshResult(
@@ -197,7 +207,7 @@ final class CursorSpendService: CursorSpendServicing, CursorSpendHistorySyncing 
     private func refreshResult(
         range: CursorSpendRange,
         forceFullHistory: Bool = false,
-        cancellation: AgentSyncCancellation?
+        cancellation: CursorOperationCancellation?
     ) throws -> RefreshResult {
         let currentDate = now()
         let authenticated = try accountSession.resolve(
@@ -211,31 +221,58 @@ final class CursorSpendService: CursorSpendServicing, CursorSpendHistorySyncing 
         )
         let replacementStart: Int64?
         let requestRanges: [(start: Int64, end: Int64)]
-        if forceFullHistory || syncedThroughMilliseconds == nil {
-            replacementStart = nil
-            requestRanges = utcMonthRanges(
-                startMilliseconds: utcDayStart(
-                    milliseconds: account.createdAtMilliseconds ?? 0
-                ),
-                endMilliseconds: endMilliseconds
-            )
-        } else {
-            let boundedWatermark = min(syncedThroughMilliseconds!, endMilliseconds)
-            let overlapStart = max(
-                0,
-                utcDayStart(milliseconds: boundedWatermark)
-                    - Self.incrementalOverlapMilliseconds
-            )
-            replacementStart = max(
-                utcDayStart(milliseconds: account.createdAtMilliseconds ?? 0),
-                overlapStart
-            )
-            requestRanges = utcMonthRanges(
-                startMilliseconds: replacementStart!,
-                endMilliseconds: endMilliseconds
-            )
+        do {
+            let accountStart: Int64?
+            switch account.historyOrigin {
+            case .milliseconds(let createdAtMilliseconds):
+                guard createdAtMilliseconds > 0,
+                      createdAtMilliseconds <= endMilliseconds else {
+                    throw CursorSpendError.invalidHistoryOrigin
+                }
+                accountStart = utcDayStart(milliseconds: createdAtMilliseconds)
+            case .missing:
+                accountStart = nil
+            case .invalid:
+                throw CursorSpendError.invalidHistoryOrigin
+            }
+
+            if forceFullHistory || syncedThroughMilliseconds == nil {
+                guard let accountStart else {
+                    throw CursorSpendError.historyOriginUnavailable
+                }
+                replacementStart = nil
+                requestRanges = try utcMonthRanges(
+                    startMilliseconds: accountStart,
+                    endMilliseconds: endMilliseconds
+                )
+            } else {
+                guard syncedThroughMilliseconds! >= 0 else {
+                    throw CursorSpendError.invalidRange
+                }
+                let boundedWatermark = min(syncedThroughMilliseconds!, endMilliseconds)
+                let overlapStart = max(
+                    0,
+                    utcDayStart(milliseconds: boundedWatermark)
+                        - Self.incrementalOverlapMilliseconds
+                )
+                replacementStart = max(accountStart ?? 0, overlapStart)
+                requestRanges = try utcMonthRanges(
+                    startMilliseconds: replacementStart!,
+                    endMilliseconds: endMilliseconds
+                )
+            }
+            guard !requestRanges.isEmpty else { throw CursorSpendError.invalidRange }
+        } catch {
+            let reason = error.cursorRefreshFailureReason
+            if !forceFullHistory,
+               let cached = database.fetchCursorSpendSnapshot(
+                accountIdentity: account.syncIdentity,
+                range: range
+            ) {
+                return .failure(cached, reason)
+            }
+            throw TypedRefreshError(reason: reason, underlyingError: error)
         }
-        guard !requestRanges.isEmpty else { throw CursorSpendError.invalidRange }
 
         let days: [CursorDailySpend]
         do {
@@ -286,10 +323,7 @@ final class CursorSpendService: CursorSpendServicing, CursorSpendHistorySyncing 
             )
         }
         if let cancellation {
-            guard try cancellation.withEnabledAgent(
-                .cursor,
-                perform: commit
-            ) != nil else {
+            guard try cancellation.withActiveCursor(perform: commit) != nil else {
                 throw CursorUsageError.cancelled
             }
         } else {
@@ -309,7 +343,7 @@ final class CursorSpendService: CursorSpendServicing, CursorSpendHistorySyncing 
         account: CursorAccount,
         startMilliseconds: Int64,
         endMilliseconds: Int64,
-        cancellation: AgentSyncCancellation?
+        cancellation: CursorOperationCancellation?
     ) throws -> [CursorDailySpend] {
         var body: [String: Any] = [
             "userId": account.userId,
@@ -362,19 +396,22 @@ final class CursorSpendService: CursorSpendServicing, CursorSpendHistorySyncing 
     private func utcMonthRanges(
         startMilliseconds: Int64,
         endMilliseconds: Int64
-    ) -> [(start: Int64, end: Int64)] {
+    ) throws -> [(start: Int64, end: Int64)] {
         guard startMilliseconds >= 0, endMilliseconds > startMilliseconds else { return [] }
-        guard startMilliseconds > 0 else { return [(startMilliseconds, endMilliseconds)] }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         var start = startMilliseconds
         var ranges: [(start: Int64, end: Int64)] = []
         while start < endMilliseconds {
+            guard ranges.count < Self.maximumHistoryMonthRanges else {
+                throw CursorSpendError.historyRangeTooLarge
+            }
             let date = Date(timeIntervalSince1970: TimeInterval(start) / 1_000)
-            let monthStart = calendar.date(
+            guard let monthStart = calendar.date(
                 from: calendar.dateComponents([.year, .month], from: date)
-            )!
-            let nextMonth = calendar.date(byAdding: .month, value: 1, to: monthStart)!
+            ), let nextMonth = calendar.date(byAdding: .month, value: 1, to: monthStart) else {
+                throw CursorSpendError.invalidRange
+            }
             let end = min(Int64(nextMonth.timeIntervalSince1970 * 1_000), endMilliseconds)
             ranges.append((start, end))
             start = end
