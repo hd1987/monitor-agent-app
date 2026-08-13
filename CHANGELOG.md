@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-13
+
+### Changed
+- Show quota reset countdowns from the quota card data-publication time so they change only when quota data changes
+
 ## [0.12.2] - 2026-08-13
 
 ### Changed

@@ -54,6 +54,11 @@ struct CursorRefreshFailure: Equatable {
     let attemptedAt: Date
 }
 
+struct QuotaCardState: Equatable {
+    let snapshot: QuotaSnapshot?
+    let presentedAt: Date
+}
+
 private final class RefreshCycleParticipant {
     private let lock = NSLock()
     private var isFinished = false
@@ -120,7 +125,7 @@ final class AppStore: ObservableObject {
     @Published var usageDataRebuildSummary: UsageDataRebuildSummary?
     @Published var usageDataRebuildErrorMessage: String?
     @Published var usageDataRebuildWasCancelled = false
-    @Published var quotaSnapshots: [QuotaProviderID: QuotaSnapshot] = [:]
+    @Published private(set) var quotaCardStates: [QuotaProviderID: QuotaCardState] = [:]
     @Published private(set) var quotaRefreshPhases: [QuotaProviderID: QuotaRefreshPhase] = [:]
     @Published private(set) var cursorSpendSnapshot: CursorSpendSnapshot?
     @Published private(set) var cursorAccountPresentationState: CursorAccountPresentationState = .unverified
@@ -161,6 +166,9 @@ final class AppStore: ObservableObject {
     private var activityLoadGeneration = 0
     private(set) var isPanelVisible = false
     var isPeriodicRefreshActive: Bool { refreshCoordinator.isRunning }
+    var quotaSnapshots: [QuotaProviderID: QuotaSnapshot] {
+        quotaCardStates.compactMapValues(\.snapshot)
+    }
 
     init(
         database: DatabaseManager = .shared,
@@ -203,6 +211,7 @@ final class AppStore: ObservableObject {
         self.hourlyTokenUsageLoader = hourlyTokenUsageLoader
         self.activityRangeTokenUsageLoader = activityRangeTokenUsageLoader
         self.activeDay = Calendar.current.startOfDay(for: currentDateProvider())
+        ensureEnabledQuotaCardStates()
         if activityPresentationSettings?.isPresented == true, !enabledAgents.isEmpty {
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -692,12 +701,10 @@ final class AppStore: ObservableObject {
                 || !isAgentEnabled(for: provider, in: enabledAgents) {
             activeQuotaParticipants.removeValue(forKey: provider)?.finish()
         }
-        quotaSnapshots = quotaSnapshots.filter {
-            quotaSettings.isEnabled($0.key) && isAgentEnabled(for: $0.key, in: enabledAgents)
-        }
         retainQuotaPresentationState {
             quotaSettings.isEnabled($0) && isAgentEnabled(for: $0, in: enabledAgents)
         }
+        ensureEnabledQuotaCardStates()
         restoreCachedQuotaSnapshots()
     }
 
@@ -716,6 +723,10 @@ final class AppStore: ObservableObject {
 
     func quotaExpirationDate(for provider: QuotaProviderID) -> Date? {
         quotaSettings.expirationDate(for: provider)
+    }
+
+    func quotaCardState(for provider: QuotaProviderID) -> QuotaCardState? {
+        quotaCardStates[provider]
     }
 
     func cycleAppFilter(reverse: Bool = false) {
@@ -747,10 +758,8 @@ final class AppStore: ObservableObject {
             cursorSpendSnapshot = nil
             cursorRefreshFailures = [:]
         }
-        quotaSnapshots = quotaSnapshots.filter {
-            isAgentEnabled(for: $0.key, in: enabledAgents)
-        }
         retainQuotaPresentationState { isAgentEnabled(for: $0, in: enabledAgents) }
+        ensureEnabledQuotaCardStates()
         restoreCachedQuotaSnapshots()
         applyRefreshInterval(
             refreshSettings.interval,
@@ -1435,10 +1444,10 @@ final class AppStore: ObservableObject {
                                     now: self.currentDateProvider()
                                   ) else { return }
                             let merged = current.replacingResetCredits(with: state)
-                            self.quotaSnapshots[provider] = merged
+                            self.publishQuotaSnapshot(merged, for: provider)
                             self.quotaCache?.store(merged, identityDigest: identityDigest)
                         } else {
-                            self.quotaSnapshots[provider] = snapshot
+                            self.publishQuotaSnapshot(snapshot, for: provider)
                             self.quotaSnapshotIdentities[provider] = identityDigest
                         }
                     }
@@ -1476,7 +1485,7 @@ final class AppStore: ObservableObject {
                 }
                 snapshot = snapshot.replacingResetCredits(with: resetCreditsState)
             }
-            quotaSnapshots[provider] = snapshot
+            publishQuotaSnapshot(snapshot, for: provider)
             quotaSnapshotIdentities[provider] = identityDigest
             quotaRefreshPhases[provider] = .idle
             if shouldStoreSnapshot {
@@ -1490,7 +1499,7 @@ final class AppStore: ObservableObject {
             && quotaSnapshots[provider]?.status == .available
             && shouldRetainSuccessfulQuota(for: snapshot.status)
         if !canRetainSuccess {
-            quotaSnapshots[provider] = snapshot
+            publishQuotaSnapshot(snapshot, for: provider)
             quotaSnapshotIdentities.removeValue(forKey: provider)
         }
         quotaRefreshPhases[provider] = .failed(
@@ -1508,8 +1517,32 @@ final class AppStore: ObservableObject {
         )
         let normalized = snapshot.replacingResetCredits(with: state)
         if normalized != snapshot {
-            quotaSnapshots[.codex] = normalized
+            publishQuotaSnapshot(normalized, for: .codex, at: date)
         }
+    }
+
+    private func ensureEnabledQuotaCardStates() {
+        let presentedAt = currentDateProvider()
+        for provider in QuotaProviderID.allCases
+            where quotaSettings.isEnabled(provider)
+                && isAgentEnabled(for: provider, in: enabledAgents)
+                && quotaCardStates[provider] == nil {
+            quotaCardStates[provider] = QuotaCardState(
+                snapshot: nil,
+                presentedAt: presentedAt
+            )
+        }
+    }
+
+    private func publishQuotaSnapshot(
+        _ snapshot: QuotaSnapshot,
+        for provider: QuotaProviderID,
+        at presentedAt: Date? = nil
+    ) {
+        quotaCardStates[provider] = QuotaCardState(
+            snapshot: snapshot,
+            presentedAt: presentedAt ?? currentDateProvider()
+        )
     }
 
     private func shouldRetainSuccessfulQuota(for status: QuotaSnapshotStatus) -> Bool {
@@ -1524,6 +1557,7 @@ final class AppStore: ObservableObject {
     private func retainQuotaPresentationState(
         where shouldRetain: (QuotaProviderID) -> Bool
     ) {
+        quotaCardStates = quotaCardStates.filter { shouldRetain($0.key) }
         quotaRefreshPhases = quotaRefreshPhases.filter { shouldRetain($0.key) }
         quotaSnapshotIdentities = quotaSnapshotIdentities.filter { shouldRetain($0.key) }
         for provider in QuotaProviderID.allCases where !shouldRetain(provider) {
