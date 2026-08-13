@@ -16,13 +16,11 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(QuotaCardLayout.metricHeight, 20)
         XCTAssertEqual(QuotaCardLayout.horizontalPadding, 12)
         XCTAssertEqual(QuotaCardLayout.contentSpacing, 16)
-        XCTAssertEqual(QuotaCardLayout.expirationHoverInset, 8)
         XCTAssertEqual(QuotaCardLayout.metricSpacing, 28)
         XCTAssertLessThan(QuotaCardLayout.metricHeight, QuotaCardLayout.cardHeight)
-        XCTAssertEqual(QuotaCardLayout.expirationTipWidth, 200)
-        XCTAssertEqual(QuotaCardLayout.resetTipWidth, 220)
-        XCTAssertEqual(QuotaCardLayout.resetTipSectionSpacing, 10)
-        XCTAssertEqual(QuotaCardLayout.resetTipItemSpacing, 8)
+        XCTAssertEqual(QuotaCardLayout.detailsTipWidth, 280)
+        XCTAssertEqual(QuotaCardLayout.detailsTipSectionSpacing, 10)
+        XCTAssertEqual(QuotaCardLayout.detailsTipItemSpacing, 8)
         XCTAssertEqual(QuotaCardLayout.tipHoverBridgeHeight, 6)
     }
 
@@ -146,43 +144,38 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertFalse(state.isPresented)
     }
 
-    func testQuotaTipOwnershipAllowsOnlyOneProviderAndTipKind() {
+    func testQuotaTipOwnershipAllowsOnlyOneProvider() {
         var ownership = QuotaTipOwnership()
-        let codexExpiration = QuotaTipOwner(provider: .codex, kind: .expiration)
-        let claudeExpiration = QuotaTipOwner(provider: .claude, kind: .expiration)
-        let codexResetCredits = QuotaTipOwner(provider: .codex, kind: .resetCredits)
+        let codex = QuotaTipOwner(provider: .codex)
+        let claude = QuotaTipOwner(provider: .claude)
 
-        ownership.claim(codexExpiration)
-        XCTAssertTrue(ownership.owns(codexExpiration))
+        ownership.claim(codex)
+        XCTAssertTrue(ownership.owns(codex))
 
-        ownership.claim(claudeExpiration)
-        XCTAssertFalse(ownership.owns(codexExpiration))
-        XCTAssertTrue(ownership.owns(claudeExpiration))
-
-        ownership.claim(codexResetCredits)
-        XCTAssertFalse(ownership.owns(claudeExpiration))
-        XCTAssertTrue(ownership.owns(codexResetCredits))
+        ownership.claim(claude)
+        XCTAssertFalse(ownership.owns(codex))
+        XCTAssertTrue(ownership.owns(claude))
     }
 
     func testQuotaTipOwnershipIgnoresReleaseFromOutgoingTip() {
         var ownership = QuotaTipOwnership()
-        let codexExpiration = QuotaTipOwner(provider: .codex, kind: .expiration)
-        let claudeExpiration = QuotaTipOwner(provider: .claude, kind: .expiration)
+        let codex = QuotaTipOwner(provider: .codex)
+        let claude = QuotaTipOwner(provider: .claude)
 
-        ownership.claim(codexExpiration)
-        ownership.claim(claudeExpiration)
-        ownership.release(codexExpiration)
+        ownership.claim(codex)
+        ownership.claim(claude)
+        ownership.release(codex)
 
-        XCTAssertTrue(ownership.owns(claudeExpiration))
+        XCTAssertTrue(ownership.owns(claude))
 
-        ownership.release(claudeExpiration)
+        ownership.release(claude)
         XCTAssertNil(ownership.owner)
     }
 
     func testQuotaTipOwnershipClearsOwnerWhenVisibleProvidersBecomeEmpty() {
         var ownership = QuotaTipOwnership()
-        let codexResetCredits = QuotaTipOwner(provider: .codex, kind: .resetCredits)
-        ownership.claim(codexResetCredits)
+        let codex = QuotaTipOwner(provider: .codex)
+        ownership.claim(codex)
 
         ownership.retainProviders([])
 
@@ -191,12 +184,12 @@ final class QuotaFeatureTests: XCTestCase {
 
     func testQuotaTipOwnershipKeepsOwnerWhileProviderRemainsVisible() {
         var ownership = QuotaTipOwnership()
-        let codexResetCredits = QuotaTipOwner(provider: .codex, kind: .resetCredits)
-        ownership.claim(codexResetCredits)
+        let codex = QuotaTipOwner(provider: .codex)
+        ownership.claim(codex)
 
         ownership.retainProviders([.claude, .codex])
 
-        XCTAssertTrue(ownership.owns(codexResetCredits))
+        XCTAssertTrue(ownership.owns(codex))
     }
 
     func testQuotaRemainingStatusThresholds() {
@@ -211,9 +204,168 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(ResetCreditsCopy.expiresTitle, "Expires")
     }
 
-    func testSubscriptionExpirationTipUsesCompactColumnHeadings() {
+    func testQuotaDetailsTipUsesCompactColumnHeadings() {
         XCTAssertEqual(SubscriptionExpirationCopy.subscriptionTitle, "Subscription")
         XCTAssertEqual(SubscriptionExpirationCopy.expiresTitle, "Expires")
+        XCTAssertEqual(QuotaDetailsCopy.usageLimitsTitle, "Usage limits")
+        XCTAssertEqual(QuotaDetailsCopy.resetsAtTitle, "Resets at")
+    }
+
+    func testQuotaResetCountdownUsesCompactRoundedUnits() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+        XCTAssertEqual(QuotaResetCountdown.text(until: nil, now: now), "--")
+        XCTAssertEqual(
+            QuotaResetCountdown.text(
+                until: Date(timeIntervalSince1970: .infinity),
+                now: now
+            ),
+            "--"
+        )
+        XCTAssertEqual(
+            QuotaResetCountdown.text(
+                until: Date(timeIntervalSince1970: Double(Int.max) * 120),
+                now: now
+            ),
+            "--"
+        )
+        XCTAssertEqual(QuotaResetCountdown.text(until: now, now: now), "Now")
+        XCTAssertEqual(
+            QuotaResetCountdown.text(until: now.addingTimeInterval(-1), now: now),
+            "Now"
+        )
+        XCTAssertEqual(
+            QuotaResetCountdown.text(until: now.addingTimeInterval(1), now: now),
+            "1m"
+        )
+        XCTAssertEqual(
+            QuotaResetCountdown.text(until: now.addingTimeInterval(42 * 60), now: now),
+            "42m"
+        )
+        XCTAssertEqual(
+            QuotaResetCountdown.text(until: now.addingTimeInterval((2 * 60 + 18) * 60), now: now),
+            "2h 18m"
+        )
+        XCTAssertEqual(
+            QuotaResetCountdown.text(
+                until: now.addingTimeInterval((3 * 24 + 6) * 60 * 60),
+                now: now
+            ),
+            "3d 6h"
+        )
+    }
+
+    func testQuotaDetailsPresentationIncludesEveryClaudeWindowInOrder() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let snapshot = QuotaSnapshot(
+            provider: .claude,
+            plan: "MAX",
+            fiveHour: QuotaWindow(
+                remainingPercent: 80,
+                resetsAt: now.addingTimeInterval(2 * 60 * 60),
+                durationSeconds: nil
+            ),
+            weekly: QuotaWindow(
+                remainingPercent: 60,
+                resetsAt: now.addingTimeInterval(3 * 24 * 60 * 60),
+                durationSeconds: nil
+            ),
+            opusWeekly: QuotaWindow(
+                remainingPercent: 40,
+                resetsAt: now.addingTimeInterval(4 * 24 * 60 * 60),
+                durationSeconds: nil
+            ),
+            resetCredits: nil,
+            resetCreditExpirations: [],
+            status: .available,
+            fetchedAt: now.addingTimeInterval(-6 * 60 * 60)
+        )
+
+        let presentation = QuotaDetailsPresentation.make(
+            provider: .claude,
+            snapshot: snapshot,
+            refreshPhase: .idle,
+            expirationDate: nil,
+            now: now
+        )
+
+        XCTAssertEqual(presentation.usageWindows.map(\.label), ["5h", "1w", "Opus"])
+        XCTAssertEqual(presentation.usageWindows.map(\.countdownText), ["2h", "3d", "4d"])
+        XCTAssertEqual(
+            presentation.usageWindows.map(\.absoluteResetText),
+            [snapshot.fiveHour, snapshot.weekly, snapshot.opusWeekly].map {
+                QuotaDateFormat.resetDateTime($0?.resetsAt)
+            }
+        )
+        XCTAssertNil(presentation.resetCredits)
+    }
+
+    func testQuotaDetailsPresentationUsesDataDrivenOptionalSections() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let creditExpiration = now.addingTimeInterval(2 * 24 * 60 * 60)
+        let subscriptionExpiration = now.addingTimeInterval(10 * 24 * 60 * 60)
+        let failure = QuotaRefreshPhase.failed(
+            status: .unavailable("Quota service unavailable"),
+            attemptedAt: now
+        )
+        let snapshot = QuotaSnapshot(
+            provider: .claude,
+            plan: "MAX",
+            fiveHour: QuotaWindow(
+                remainingPercent: 80,
+                resetsAt: now.addingTimeInterval(3 * 60 * 60),
+                durationSeconds: 10_800
+            ),
+            weekly: nil,
+            opusWeekly: nil,
+            resetCredits: 1,
+            resetCreditExpirations: [creditExpiration],
+            status: .available,
+            fetchedAt: now
+        )
+
+        let presentation = QuotaDetailsPresentation.make(
+            provider: .claude,
+            snapshot: snapshot,
+            refreshPhase: failure,
+            expirationDate: subscriptionExpiration,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(presentation.usageWindows.map(\.label), ["5h"])
+        XCTAssertEqual(presentation.resetCredits?.count, 1)
+        XCTAssertEqual(presentation.resetCredits?.items.first?.countdownText, "2 days")
+        XCTAssertEqual(presentation.subscription?.distanceText, "10 days")
+        XCTAssertEqual(presentation.refreshFailure?.label, "Refresh failed")
+        XCTAssertTrue(presentation.hasContent)
+    }
+
+    func testQuotaDetailsPresentationOmitsFailureWithoutRetainedSnapshot() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let failed = QuotaRefreshPhase.failed(
+            status: .unavailable("Quota service unavailable"),
+            attemptedAt: now
+        )
+
+        let presentation = QuotaDetailsPresentation.make(
+            provider: .codex,
+            snapshot: .failure(
+                provider: .codex,
+                status: .unavailable("Quota service unavailable"),
+                at: now
+            ),
+            refreshPhase: failed,
+            expirationDate: now.addingTimeInterval(10 * 24 * 60 * 60),
+            now: now
+        )
+
+        XCTAssertTrue(presentation.usageWindows.isEmpty)
+        XCTAssertNil(presentation.resetCredits)
+        XCTAssertNotNil(presentation.subscription)
+        XCTAssertNil(presentation.refreshFailure)
     }
 
     func testResetCreditExpirationUsesNearestFutureDate() throws {
@@ -473,11 +625,15 @@ final class QuotaFeatureTests: XCTestCase {
         let quotaSettings = QuotaSettings(defaults: defaults)
         quotaSettings.claudeExpirationDate = Date(timeIntervalSince1970: 1_900_000_000)
         quotaSettings.codexExpirationDate = Date(timeIntervalSince1970: 1_900_000_000)
+        var now = Date(timeIntervalSince1970: 1_800_000_000)
         let store = AppStore(
             database: DatabaseManager(inMemory: true),
             quotaSettings: quotaSettings,
-            observeRefreshIntervalChanges: false
+            observeRefreshIntervalChanges: false,
+            currentDateProvider: { now }
         )
+        let initialClaudeState = store.quotaCardState(for: .claude)
+        let initialCodexState = store.quotaCardState(for: .codex)
 
         store.appFilter = .all
         XCTAssertEqual(store.visibleQuotaProviders, [.claude, .codex])
@@ -490,6 +646,8 @@ final class QuotaFeatureTests: XCTestCase {
 
         store.appFilter = .cursor
         XCTAssertEqual(store.visibleQuotaProviders, [])
+        XCTAssertEqual(store.quotaCardState(for: .claude), initialClaudeState)
+        XCTAssertEqual(store.quotaCardState(for: .codex), initialCodexState)
 
         quotaSettings.codexExpirationDate = nil
         store.quotaProviderSettingsDidChange()
@@ -501,6 +659,12 @@ final class QuotaFeatureTests: XCTestCase {
         )
         store.appFilter = .codex
         XCTAssertEqual(store.visibleQuotaProviders, [])
+        XCTAssertNil(store.quotaCardState(for: .codex))
+
+        now = now.addingTimeInterval(60)
+        quotaSettings.codexExpirationDate = Date(timeIntervalSince1970: 1_900_000_000)
+        store.quotaProviderSettingsDidChange()
+        XCTAssertEqual(store.quotaCardState(for: .codex)?.presentedAt, now)
     }
 
     func testQuotaResetFormatsStayCompactAndSingleLine() {
@@ -700,6 +864,7 @@ private struct QuotaCardRenderHarness: View {
             snapshot: snapshot,
             refreshPhase: phase,
             expirationDate: Date(timeIntervalSince1970: 1_900_000_000),
+            presentationDate: Date(timeIntervalSince1970: 1_800_000_000),
             tipOwnership: $ownership
         )
         .frame(width: 580)

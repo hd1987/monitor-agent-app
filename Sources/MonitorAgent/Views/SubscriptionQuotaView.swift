@@ -13,13 +13,16 @@ struct SubscriptionQuotaView: View {
             if !providers.isEmpty {
                 VStack(spacing: 8) {
                     ForEach(providers, id: \.self) { provider in
-                        SubscriptionQuotaCard(
-                            provider: provider,
-                            snapshot: store.quotaSnapshots[provider],
-                            refreshPhase: store.quotaRefreshPhase(for: provider),
-                            expirationDate: store.quotaExpirationDate(for: provider),
-                            tipOwnership: $tipOwnership
-                        )
+                        if let cardState = store.quotaCardState(for: provider) {
+                            SubscriptionQuotaCard(
+                                provider: provider,
+                                snapshot: cardState.snapshot,
+                                refreshPhase: store.quotaRefreshPhase(for: provider),
+                                expirationDate: store.quotaExpirationDate(for: provider),
+                                presentationDate: cardState.presentedAt,
+                                tipOwnership: $tipOwnership
+                            )
+                        }
                     }
                 }
                 .padding(.horizontal, MainPanelDesign.horizontalPadding)
@@ -36,73 +39,32 @@ struct SubscriptionQuotaView: View {
 struct SubscriptionQuotaCard: View {
     @EnvironmentObject private var theme: ThemeManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var expirationTipHoverState = QuotaTipHoverState()
-    @State private var resetTipHoverState = QuotaTipHoverState()
+    @State private var tipHoverState = QuotaTipHoverState()
     @State private var cardWidth: CGFloat = 0
-    @State private var rightRegionWidth: CGFloat = 0
-    @State private var resetTipAnchorX: CGFloat = 0
+    @State private var tipAnchorX: CGFloat = 0
     let provider: QuotaProviderID
     let snapshot: QuotaSnapshot?
     let refreshPhase: QuotaRefreshPhase
     let expirationDate: Date?
+    let presentationDate: Date
     @Binding var tipOwnership: QuotaTipOwnership
 
     var body: some View {
+        let presentation = QuotaDetailsPresentation.make(
+            provider: provider,
+            snapshot: snapshot,
+            refreshPhase: refreshPhase,
+            expirationDate: expirationDate,
+            now: presentationDate
+        )
+
         HStack(spacing: 0) {
-            header
-                .padding(.trailing, QuotaCardLayout.expirationHoverInset)
+            header(subscriptionStatus: presentation.subscription?.status)
                 .frame(maxHeight: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .onContinuousHover { phase in
-                    switch phase {
-                    case .active:
-                        guard expirationDate != nil else { return }
-                        withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
-                            tipOwnership.claim(expirationTipOwner)
-                            expirationTipHoverState.triggerHoverChanged(true)
-                        }
-                    case .ended:
-                        expirationTipHoverState.triggerHoverChanged(false)
-                        reconcileExpirationTipPresentation()
-                    }
-                }
             Spacer(minLength: QuotaCardLayout.contentSpacing)
             if let snapshot {
-                snapshotContent(snapshot)
+                snapshotContent(snapshot, presentation: presentation)
                     .frame(maxHeight: .infinity)
-                    .contentShape(Rectangle())
-                    .background(
-                        GeometryReader { proxy in
-                            Color.clear
-                                .onAppear { rightRegionWidth = proxy.size.width }
-                                .onChange(of: proxy.size.width) { _, newValue in
-                                    rightRegionWidth = newValue
-                                }
-                        }
-                    )
-                    .onContinuousHover { phase in
-                        switch phase {
-                        case .active(let location):
-                            guard hasResetCredits(snapshot) else { return }
-                            if !tipOwnership.owns(resetTipOwner) {
-                                resetTipAnchorX = resetRegionOriginX + location.x
-                            }
-                            withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
-                                tipOwnership.claim(resetTipOwner)
-                                resetTipHoverState.triggerHoverChanged(true)
-                            }
-                        case .ended:
-                            resetTipHoverState.triggerHoverChanged(false)
-                            reconcileResetTipPresentation()
-                        }
-                    }
-                    .onChange(of: hasResetCredits(snapshot)) { _, hasResetCredits in
-                        guard !hasResetCredits else { return }
-                        withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
-                            resetTipHoverState.reset()
-                            tipOwnership.release(resetTipOwner)
-                        }
-                    }
             } else {
                 loadingContent
                     .frame(maxHeight: .infinity)
@@ -113,6 +75,7 @@ struct SubscriptionQuotaCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: QuotaCardLayout.cardHeight)
         .mainPanelGroupedSurface()
+        .contentShape(Rectangle())
         .background(
             GeometryReader { proxy in
                 Color.clear
@@ -122,53 +85,38 @@ struct SubscriptionQuotaCard: View {
         )
         .onChange(of: tipOwnership.owner) { _, owner in
             withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
-                if owner != expirationTipOwner {
-                    expirationTipHoverState.reset()
-                }
-                if owner != resetTipOwner {
-                    resetTipHoverState.reset()
+                if owner != tipOwner {
+                    tipHoverState.reset()
                 }
             }
         }
-        .overlay(alignment: .bottomLeading) {
-            if tipOwnership.owns(expirationTipOwner),
-               expirationTipHoverState.isPresented,
-               let expirationDate {
-                QuotaHoverTip(
-                    width: QuotaCardLayout.expirationTipWidth,
-                    onHoverChanged: expirationTipSurfaceHoverChanged
-                ) {
-                    SubscriptionExpirationTip(
-                        expirationDate: expirationDate,
-                        quotaSnapshot: snapshot?.status == .available ? snapshot : nil,
-                        refreshPhase: refreshPhase
-                    )
+        .onContinuousHover { phase in
+            switch phase {
+            case .active(let location):
+                guard presentation.hasContent else { return }
+                if !tipOwnership.owns(tipOwner) {
+                    tipAnchorX = location.x
                 }
-                .padding(.leading, 8)
-                .offset(y: -QuotaCardLayout.cardHeight)
-                .transition(
-                    reduceMotion
-                        ? .opacity
-                        : .opacity.combined(with: .scale(scale: 0.98, anchor: .bottomLeading))
-                )
+                withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
+                    tipOwnership.claim(tipOwner)
+                    tipHoverState.triggerHoverChanged(true)
+                }
+            case .ended:
+                tipHoverState.triggerHoverChanged(false)
+                reconcileTipPresentation()
             }
         }
         .overlay(alignment: .bottomLeading) {
-            if tipOwnership.owns(resetTipOwner),
-               resetTipHoverState.isPresented,
-               let snapshot,
-               let credits = snapshot.resetCredits,
-               credits > 0 {
+            if tipOwnership.owns(tipOwner),
+               tipHoverState.isPresented,
+               presentation.hasContent {
                 QuotaHoverTip(
-                    width: QuotaCardLayout.resetTipWidth,
-                    onHoverChanged: resetTipSurfaceHoverChanged
+                    width: QuotaCardLayout.detailsTipWidth,
+                    onHoverChanged: tipSurfaceHoverChanged
                 ) {
-                    ResetCreditsTip(
-                        count: credits,
-                        expirations: snapshot.resetCreditExpirations
-                    )
+                    QuotaDetailsTip(presentation: presentation)
                 }
-                .offset(x: clampedResetTipX, y: -QuotaCardLayout.cardHeight)
+                .offset(x: clampedTipX, y: -QuotaCardLayout.cardHeight)
                 .transition(
                     reduceMotion
                         ? .opacity
@@ -179,66 +127,37 @@ struct SubscriptionQuotaCard: View {
         .zIndex(tipOwnership.owner?.provider == provider ? 2 : 0)
     }
 
-    private var clampedResetTipX: CGFloat {
-        let maxX = max(0, cardWidth - QuotaCardLayout.resetTipWidth)
-        return min(max(0, resetTipAnchorX - QuotaCardLayout.resetTipWidth / 2), maxX)
+    private var clampedTipX: CGFloat {
+        let maxX = max(0, cardWidth - QuotaCardLayout.detailsTipWidth)
+        return min(max(0, tipAnchorX - QuotaCardLayout.detailsTipWidth / 2), maxX)
     }
 
-    private var resetRegionOriginX: CGFloat {
-        max(0, cardWidth - QuotaCardLayout.horizontalPadding - rightRegionWidth)
+    private var tipOwner: QuotaTipOwner {
+        QuotaTipOwner(provider: provider)
     }
 
-    private var expirationTipOwner: QuotaTipOwner {
-        QuotaTipOwner(provider: provider, kind: .expiration)
-    }
-
-    private var resetTipOwner: QuotaTipOwner {
-        QuotaTipOwner(provider: provider, kind: .resetCredits)
-    }
-
-    private func expirationTipSurfaceHoverChanged(_ hovering: Bool) {
-        guard tipOwnership.owns(expirationTipOwner) else { return }
+    private func tipSurfaceHoverChanged(_ hovering: Bool) {
+        guard tipOwnership.owns(tipOwner) else { return }
         withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
-            expirationTipHoverState.surfaceHoverChanged(hovering)
+            tipHoverState.surfaceHoverChanged(hovering)
         }
         if !hovering {
-            reconcileExpirationTipPresentation()
+            reconcileTipPresentation()
         }
     }
 
-    private func resetTipSurfaceHoverChanged(_ hovering: Bool) {
-        guard tipOwnership.owns(resetTipOwner) else { return }
-        withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
-            resetTipHoverState.surfaceHoverChanged(hovering)
-        }
-        if !hovering {
-            reconcileResetTipPresentation()
-        }
-    }
-
-    private func reconcileExpirationTipPresentation() {
+    private func reconcileTipPresentation() {
         DispatchQueue.main.async {
             withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
-                expirationTipHoverState.reconcilePresentation()
-                if !expirationTipHoverState.isPresented {
-                    tipOwnership.release(expirationTipOwner)
+                tipHoverState.reconcilePresentation()
+                if !tipHoverState.isPresented {
+                    tipOwnership.release(tipOwner)
                 }
             }
         }
     }
 
-    private func reconcileResetTipPresentation() {
-        DispatchQueue.main.async {
-            withAnimation(MainPanelMotion.presentation(reduceMotion: reduceMotion)) {
-                resetTipHoverState.reconcilePresentation()
-                if !resetTipHoverState.isPresented {
-                    tipOwnership.release(resetTipOwner)
-                }
-            }
-        }
-    }
-
-    private var header: some View {
+    private func header(subscriptionStatus: QuotaStatus?) -> some View {
         HStack(spacing: 5) {
             ProviderIcon(provider: provider)
                 .overlay(alignment: .topTrailing) {
@@ -255,7 +174,7 @@ struct SubscriptionQuotaCard: View {
 
             if let plan = snapshot?.plan, !plan.isEmpty, snapshot?.status == .available {
                 Text("· \(plan)")
-                    .foregroundStyle(planColor)
+                    .foregroundStyle(planColor(subscriptionStatus: subscriptionStatus))
             }
         }
         .lineLimit(1)
@@ -284,32 +203,26 @@ struct SubscriptionQuotaCard: View {
     }
 
     @ViewBuilder
-    private func snapshotContent(_ snapshot: QuotaSnapshot) -> some View {
+    private func snapshotContent(
+        _ snapshot: QuotaSnapshot,
+        presentation: QuotaDetailsPresentation
+    ) -> some View {
         switch snapshot.status {
         case .available:
             HStack(spacing: QuotaCardLayout.metricSpacing) {
-                ForEach(Array(metricItems(snapshot).enumerated()), id: \.offset) { _, item in
-                    quotaMetric(label: item.label, window: item.window, reset: item.reset)
+                ForEach(Array(presentation.usageWindows.enumerated()), id: \.offset) { _, item in
+                    quotaMetric(item)
                 }
-                if provider == .codex, let credits = snapshot.resetCredits, credits > 0 {
+                if let resetCredits = presentation.resetCredits {
                     HStack(spacing: 5) {
                         Text("resets")
                             .fontWeight(.medium)
                             .foregroundStyle(theme.panelSecondaryForeground)
                         Text("·")
                             .foregroundStyle(theme.panelSecondaryForeground)
-                        Text("\(credits)")
+                        Text("\(resetCredits.count)")
                             .fontWeight(.semibold)
-                            .foregroundStyle(resetCreditCountColor(
-                                expirations: snapshot.resetCreditExpirations
-                            ))
-                        if let expiration = ResetCreditExpiration.next(
-                            in: snapshot.resetCreditExpirations
-                        ) {
-                            Text(QuotaDateFormat.resetDateTime(expiration))
-                                .font(.system(size: 10))
-                                .foregroundStyle(theme.panelSecondaryForeground)
-                        }
+                            .foregroundStyle(resetCreditCountColor(status: resetCredits.status))
                     }
                     .lineLimit(1)
                     .fixedSize()
@@ -328,39 +241,17 @@ struct SubscriptionQuotaCard: View {
         }
     }
 
-    private func metricItems(_ snapshot: QuotaSnapshot) -> [QuotaMetricItem] {
-        var items: [QuotaMetricItem] = []
-        if let window = snapshot.fiveHour {
-            items.append(metricItem(fallbackLabel: "5h", window: window))
-        }
-        if let window = snapshot.weekly {
-            items.append(metricItem(fallbackLabel: "1w", window: window))
-        }
-        if provider == .claude, let window = snapshot.opusWeekly {
-            items.append(.init(label: "Opus", window: window, reset: QuotaDateFormat.resetDateTime(window.resetsAt)))
-        }
-        return items
-    }
-
-    private func metricItem(fallbackLabel: String, window: QuotaWindow) -> QuotaMetricItem {
-        let label = provider == .codex ? window.displayLabel(fallback: fallbackLabel) : fallbackLabel
-        let reset = window.usesDateTimeReset || fallbackLabel == "1w"
-            ? QuotaDateFormat.resetDateTime(window.resetsAt)
-            : QuotaDateFormat.resetTime(window.resetsAt)
-        return QuotaMetricItem(label: label, window: window, reset: reset)
-    }
-
-    private func quotaMetric(label: String, window: QuotaWindow, reset: String) -> some View {
+    private func quotaMetric(_ item: QuotaWindowPresentation) -> some View {
         HStack(spacing: 5) {
-            Text(label)
+            Text(item.label)
                 .fontWeight(.medium)
                 .foregroundStyle(theme.panelSecondaryForeground)
             Text("·")
                 .foregroundStyle(theme.panelSecondaryForeground)
-            Text("\(Int(window.remainingPercent.rounded()))%")
+            Text("\(Int(item.remainingPercent.rounded()))%")
                 .fontWeight(.semibold)
-                .foregroundStyle(quotaColor(window.remainingPercent))
-            Text(reset)
+                .foregroundStyle(quotaColor(item.remainingPercent))
+            Text(item.countdownText)
                 .font(.system(size: 10))
                 .foregroundStyle(theme.panelSecondaryForeground)
         }
@@ -392,22 +283,18 @@ struct SubscriptionQuotaCard: View {
         )
     }
 
-    private var planColor: Color {
-        guard let expirationDate else { return theme.panelSecondaryForeground }
-        switch SubscriptionExpiration.status(for: expirationDate) {
+    private func planColor(subscriptionStatus: QuotaStatus?) -> Color {
+        switch subscriptionStatus {
         case .healthy, .unknown: return theme.panelSecondaryForeground
         case .warning: return QuotaStatusPalette.warning
         case .critical: return QuotaStatusPalette.critical
+        case nil: return theme.panelSecondaryForeground
         }
     }
 
-    private func hasResetCredits(_ snapshot: QuotaSnapshot) -> Bool {
-        provider == .codex && (snapshot.resetCredits ?? 0) > 0
-    }
-
-    private func resetCreditCountColor(expirations: [Date]) -> Color {
+    private func resetCreditCountColor(status: QuotaStatus) -> Color {
         QuotaStatusPalette.color(
-            for: ResetCreditExpiration.status(in: expirations),
+            for: status,
             unknown: theme.panelSecondaryForeground
         )
     }
@@ -415,13 +302,7 @@ struct SubscriptionQuotaCard: View {
 }
 
 struct QuotaTipOwner: Equatable {
-    enum Kind: Equatable {
-        case expiration
-        case resetCredits
-    }
-
     let provider: QuotaProviderID
-    let kind: Kind
 }
 
 struct QuotaTipOwnership: Equatable {
@@ -506,135 +387,314 @@ private struct QuotaHoverTip<Content: View>: View {
     }
 }
 
-private struct QuotaMetricItem {
+struct QuotaWindowPresentation: Equatable {
     let label: String
-    let window: QuotaWindow
-    let reset: String
+    let remainingPercent: Double
+    let countdownText: String
+    let absoluteResetText: String
 }
 
-private struct SubscriptionExpirationTip: View {
-    @EnvironmentObject var theme: ThemeManager
-    let expirationDate: Date
-    let quotaSnapshot: QuotaSnapshot?
-    let refreshPhase: QuotaRefreshPhase
+struct QuotaResetCreditPresentation: Equatable {
+    let countdownText: String
+    let absoluteExpirationText: String
+    let status: QuotaStatus
+}
+
+struct QuotaResetCreditsPresentation: Equatable {
+    let count: Int
+    let items: [QuotaResetCreditPresentation]
+    let status: QuotaStatus
+}
+
+struct QuotaSubscriptionPresentation: Equatable {
+    let distanceText: String
+    let expirationText: String
+    let status: QuotaStatus
+}
+
+struct QuotaDetailsPresentation: Equatable {
+    let usageWindows: [QuotaWindowPresentation]
+    let resetCredits: QuotaResetCreditsPresentation?
+    let subscription: QuotaSubscriptionPresentation?
+    let refreshFailure: QuotaRefreshPresentation.Failure?
+
+    var hasContent: Bool {
+        !usageWindows.isEmpty
+            || resetCredits != nil
+            || subscription != nil
+            || refreshFailure != nil
+    }
+
+    static func make(
+        provider: QuotaProviderID,
+        snapshot: QuotaSnapshot?,
+        refreshPhase: QuotaRefreshPhase,
+        expirationDate: Date?,
+        now: Date,
+        calendar: Calendar = .current
+    ) -> QuotaDetailsPresentation {
+        let isAvailable = snapshot?.status == .available
+        var usageWindows: [QuotaWindowPresentation] = []
+
+        if isAvailable, let window = snapshot?.fiveHour {
+            usageWindows.append(windowPresentation(
+                provider: provider,
+                fallbackLabel: "5h",
+                window: window,
+                now: now
+            ))
+        }
+        if isAvailable, let window = snapshot?.weekly {
+            usageWindows.append(windowPresentation(
+                provider: provider,
+                fallbackLabel: "1w",
+                window: window,
+                now: now
+            ))
+        }
+        if isAvailable, let window = snapshot?.opusWeekly {
+            usageWindows.append(windowPresentation(
+                provider: provider,
+                fallbackLabel: "Opus",
+                window: window,
+                now: now,
+                usesProviderDurationLabel: false
+            ))
+        }
+
+        let resetCredits: QuotaResetCreditsPresentation?
+        if isAvailable, let count = snapshot?.resetCredits, count > 0 {
+            let expirations = snapshot?.resetCreditExpirations ?? []
+            let items = (0..<count).map { index in
+                guard expirations.indices.contains(index) else {
+                    return QuotaResetCreditPresentation(
+                        countdownText: ResetCreditsCopy.expirationUnavailable,
+                        absoluteExpirationText: ResetCreditsCopy.expirationUnavailable,
+                        status: .unknown
+                    )
+                }
+                let expiration = expirations[index]
+                return QuotaResetCreditPresentation(
+                    countdownText: SubscriptionExpiration.distanceText(
+                        to: expiration,
+                        now: now,
+                        calendar: calendar
+                    ),
+                    absoluteExpirationText: QuotaDateFormat.resetDateTime(expiration),
+                    status: ResetCreditExpiration.status(
+                        for: expiration,
+                        now: now,
+                        calendar: calendar
+                    )
+                )
+            }
+            resetCredits = QuotaResetCreditsPresentation(
+                count: count,
+                items: items,
+                status: ResetCreditExpiration.status(
+                    in: expirations,
+                    after: now,
+                    calendar: calendar
+                )
+            )
+        } else {
+            resetCredits = nil
+        }
+
+        let subscription = expirationDate.map {
+            QuotaSubscriptionPresentation(
+                distanceText: SubscriptionExpiration.distanceText(
+                    to: $0,
+                    now: now,
+                    calendar: calendar
+                ),
+                expirationText: SubscriptionExpiration.dateText($0),
+                status: SubscriptionExpiration.status(
+                    for: $0,
+                    now: now,
+                    calendar: calendar
+                )
+            )
+        }
+        let refreshFailure = isAvailable
+            ? QuotaRefreshPresentation.failure(for: refreshPhase)
+            : nil
+
+        return QuotaDetailsPresentation(
+            usageWindows: usageWindows,
+            resetCredits: resetCredits,
+            subscription: subscription,
+            refreshFailure: refreshFailure
+        )
+    }
+
+    private static func windowPresentation(
+        provider: QuotaProviderID,
+        fallbackLabel: String,
+        window: QuotaWindow,
+        now: Date,
+        usesProviderDurationLabel: Bool = true
+    ) -> QuotaWindowPresentation {
+        let label = provider == .codex && usesProviderDurationLabel
+            ? window.displayLabel(fallback: fallbackLabel)
+            : fallbackLabel
+        return QuotaWindowPresentation(
+            label: label,
+            remainingPercent: window.remainingPercent,
+            countdownText: QuotaResetCountdown.text(until: window.resetsAt, now: now),
+            absoluteResetText: QuotaDateFormat.resetDateTime(window.resetsAt)
+        )
+    }
+}
+
+enum QuotaResetCountdown {
+    static func text(until resetDate: Date?, now: Date) -> String {
+        guard let resetDate else { return "--" }
+        let remainingSeconds = resetDate.timeIntervalSince(now)
+        guard remainingSeconds.isFinite else { return "--" }
+        guard remainingSeconds > 0 else { return "Now" }
+
+        let roundedMinutes = ceil(remainingSeconds / 60)
+        guard roundedMinutes <= Double(Int.max) else { return "--" }
+        let totalMinutes = max(1, Int(roundedMinutes))
+        let days = totalMinutes / (24 * 60)
+        let hours = (totalMinutes % (24 * 60)) / 60
+        let minutes = totalMinutes % 60
+
+        if days > 0 {
+            return hours > 0 ? "\(days)d \(hours)h" : "\(days)d"
+        }
+        if hours > 0 {
+            return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
+        }
+        return "\(minutes)m"
+    }
+}
+
+private struct QuotaDetailsTip: View {
+    @EnvironmentObject private var theme: ThemeManager
+    let presentation: QuotaDetailsPresentation
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 12) {
-                Text(SubscriptionExpirationCopy.subscriptionTitle)
-                    .font(.system(size: 11, weight: .semibold))
-                Spacer()
-                Text(SubscriptionExpirationCopy.expiresTitle)
-                    .font(.system(size: 10))
+        VStack(alignment: .leading, spacing: QuotaCardLayout.detailsTipSectionSpacing) {
+            if !presentation.usageWindows.isEmpty {
+                usageLimitsSection
             }
-            HStack(spacing: 12) {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(statusColor)
-                        .frame(width: 6, height: 6)
-                    Text(SubscriptionExpiration.distanceText(to: expirationDate))
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(theme.tooltipForeground.opacity(0.72))
+            if let resetCredits = presentation.resetCredits {
+                if !presentation.usageWindows.isEmpty { sectionDivider }
+                resetCreditsSection(resetCredits)
+            }
+            if let subscription = presentation.subscription {
+                if !presentation.usageWindows.isEmpty || presentation.resetCredits != nil { sectionDivider }
+                subscriptionSection(subscription)
+            }
+            if let failure = presentation.refreshFailure {
+                if !presentation.usageWindows.isEmpty
+                    || presentation.resetCredits != nil
+                    || presentation.subscription != nil {
+                    sectionDivider
                 }
-                Spacer()
-                Text(SubscriptionExpiration.dateText(expirationDate))
-                    .font(.system(size: 10))
+                failureSection(failure)
             }
-            if quotaSnapshot != nil,
-               let failure = QuotaRefreshPresentation.failure(for: refreshPhase) {
-                Divider()
-                    .overlay(theme.tooltipForeground.opacity(0.12))
+        }
+        .foregroundStyle(theme.tooltipForeground)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .frame(width: QuotaCardLayout.detailsTipWidth)
+        .mainPanelTooltipSurface()
+    }
+
+    private var usageLimitsSection: some View {
+        VStack(alignment: .leading, spacing: QuotaCardLayout.detailsTipItemSpacing) {
+            sectionHeader(QuotaDetailsCopy.usageLimitsTitle, trailing: QuotaDetailsCopy.resetsAtTitle)
+            ForEach(Array(presentation.usageWindows.enumerated()), id: \.offset) { _, window in
                 HStack(spacing: 8) {
-                    Circle()
-                        .fill(QuotaStatusPalette.critical)
-                        .frame(width: 6, height: 6)
-                    Text(failure.label)
+                    Text("\(window.label) · \(window.countdownText)")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(theme.tooltipForeground.opacity(0.72))
-                    Spacer(minLength: 8)
-                    Text(QuotaDateFormat.updateDateTime(failure.attemptedAt))
+                    Spacer(minLength: 12)
+                    Text(window.absoluteResetText)
                         .font(.system(size: 10))
                 }
             }
         }
-        .foregroundStyle(theme.tooltipForeground)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .frame(width: QuotaCardLayout.expirationTipWidth)
-        .mainPanelTooltipSurface()
     }
 
-    private var statusColor: Color {
-        QuotaStatusPalette.color(
-            for: SubscriptionExpiration.status(for: expirationDate),
-            unknown: theme.tooltipForeground.opacity(0.72)
-        )
-    }
-
-}
-
-private struct ResetCreditsTip: View {
-    @EnvironmentObject var theme: ThemeManager
-    let count: Int
-    let expirations: [Date]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: QuotaCardLayout.resetTipSectionSpacing) {
-            HStack {
-                Text(ResetCreditsCopy.title)
-                    .font(.system(size: 11, weight: .semibold))
-                Spacer()
-                Text(ResetCreditsCopy.expiresTitle)
-                    .font(.system(size: 10))
-            }
-
-            VStack(spacing: QuotaCardLayout.resetTipItemSpacing) {
-                ForEach(0..<count, id: \.self) { index in
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(expirationColor(at: index))
-                            .frame(width: 6, height: 6)
-                        Text(countdownText(at: index))
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(theme.tooltipForeground.opacity(0.72))
-                        Spacer(minLength: 12)
-                        Text(expirationText(at: index))
-                            .font(.system(size: 10))
-                            .foregroundStyle(theme.tooltipForeground)
-                    }
+    private func resetCreditsSection(_ resetCredits: QuotaResetCreditsPresentation) -> some View {
+        VStack(alignment: .leading, spacing: QuotaCardLayout.detailsTipItemSpacing) {
+            sectionHeader(ResetCreditsCopy.title, trailing: ResetCreditsCopy.expiresTitle)
+            ForEach(Array(resetCredits.items.enumerated()), id: \.offset) { _, item in
+                HStack(spacing: 8) {
+                    statusDot(item.status)
+                    Text(item.countdownText)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(theme.tooltipForeground.opacity(0.72))
+                    Spacer(minLength: 12)
+                    Text(item.absoluteExpirationText)
+                        .font(.system(size: 10))
                 }
             }
         }
-        .foregroundStyle(theme.tooltipForeground)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .frame(width: QuotaCardLayout.resetTipWidth)
-        .mainPanelTooltipSurface()
-        .contentShape(Rectangle())
     }
 
-    private func expirationText(at index: Int) -> String {
-        guard expirations.indices.contains(index) else { return ResetCreditsCopy.expirationUnavailable }
-        return QuotaDateFormat.resetDateTime(expirations[index])
-    }
-
-    private func countdownText(at index: Int) -> String {
-        guard expirations.indices.contains(index) else { return ResetCreditsCopy.expirationUnavailable }
-        return SubscriptionExpiration.distanceText(to: expirations[index])
-    }
-
-    private func expirationColor(at index: Int) -> Color {
-        guard expirations.indices.contains(index) else {
-            return QuotaStatusPalette.color(
-                for: .unknown,
-                unknown: theme.tooltipForeground.opacity(0.72)
+    private func subscriptionSection(_ subscription: QuotaSubscriptionPresentation) -> some View {
+        VStack(alignment: .leading, spacing: QuotaCardLayout.detailsTipItemSpacing) {
+            sectionHeader(
+                SubscriptionExpirationCopy.subscriptionTitle,
+                trailing: SubscriptionExpirationCopy.expiresTitle
             )
+            HStack(spacing: 8) {
+                statusDot(subscription.status)
+                Text(subscription.distanceText)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(theme.tooltipForeground.opacity(0.72))
+                Spacer(minLength: 12)
+                Text(subscription.expirationText)
+                    .font(.system(size: 10))
+            }
         }
-        return QuotaStatusPalette.color(
-            for: ResetCreditExpiration.status(for: expirations[index]),
-            unknown: theme.tooltipForeground.opacity(0.72)
-        )
     }
+
+    private func failureSection(_ failure: QuotaRefreshPresentation.Failure) -> some View {
+        HStack(spacing: 8) {
+            statusDot(.critical)
+            Text(failure.label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(theme.tooltipForeground.opacity(0.72))
+            Spacer(minLength: 8)
+            Text(QuotaDateFormat.updateDateTime(failure.attemptedAt))
+                .font(.system(size: 10))
+        }
+    }
+
+    private func sectionHeader(_ title: String, trailing: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+            Spacer()
+            Text(trailing)
+                .font(.system(size: 10))
+        }
+    }
+
+    private var sectionDivider: some View {
+        Divider()
+            .overlay(theme.tooltipForeground.opacity(0.12))
+    }
+
+    private func statusDot(_ status: QuotaStatus) -> some View {
+        Circle()
+            .fill(QuotaStatusPalette.color(
+                for: status,
+                unknown: theme.tooltipForeground.opacity(0.72)
+            ))
+            .frame(width: 6, height: 6)
+    }
+}
+
+enum QuotaDetailsCopy {
+    static let usageLimitsTitle = "Usage limits"
+    static let resetsAtTitle = "Resets at"
 }
 
 enum ResetCreditsCopy {
@@ -796,11 +856,9 @@ enum QuotaCardLayout {
     static let metricHeight: CGFloat = 20
     static let horizontalPadding: CGFloat = 12
     static let contentSpacing: CGFloat = 16
-    static let expirationHoverInset: CGFloat = 8
     static let metricSpacing: CGFloat = 28
-    static let expirationTipWidth: CGFloat = 200
-    static let resetTipWidth: CGFloat = 220
-    static let resetTipSectionSpacing: CGFloat = 10
-    static let resetTipItemSpacing: CGFloat = 8
+    static let detailsTipWidth: CGFloat = 280
+    static let detailsTipSectionSpacing: CGFloat = 10
+    static let detailsTipItemSpacing: CGFloat = 8
     static let tipHoverBridgeHeight: CGFloat = 6
 }

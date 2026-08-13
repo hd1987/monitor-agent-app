@@ -313,9 +313,11 @@ final class PersistedPanelStateTests: XCTestCase {
             observeRefreshIntervalChanges: false
         )
         XCTAssertEqual(store.quotaSnapshots[.claude], cached)
+        let cachedPresentationDate = store.quotaCardState(for: .claude)?.presentedAt
 
         store.panelDidOpen()
         wait(for: [quotaService.started], timeout: 1)
+        XCTAssertEqual(store.quotaCardState(for: .claude)?.presentedAt, cachedPresentationDate)
         quotaService.finish(
             snapshot: .failure(
                 provider: .claude,
@@ -326,6 +328,10 @@ final class PersistedPanelStateTests: XCTestCase {
         let retained = expectation(description: "Cached success remains after failure")
         DispatchQueue.main.async {
             XCTAssertEqual(store.quotaSnapshots[.claude], cached)
+            XCTAssertEqual(
+                store.quotaCardState(for: .claude)?.presentedAt,
+                cachedPresentationDate
+            )
             guard case .failed(.unavailable, _) = store.quotaRefreshPhase(for: .claude) else {
                 XCTFail("Expected a failed refresh phase")
                 retained.fulfill()
@@ -335,6 +341,55 @@ final class PersistedPanelStateTests: XCTestCase {
             retained.fulfill()
         }
         wait(for: [retained], timeout: 1)
+        store.panelDidClose()
+    }
+
+    func testAcceptedQuotaRefreshAdvancesCardPresentationDate() {
+        let suiteName = "PersistedPanelStateTests.quotaPresentationDate.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        var now = Date(timeIntervalSince1970: 1_800_000_000)
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        monitoringSettings.enabledAgents = [.claude]
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        quotaSettings.claudeExpirationDate = now.addingTimeInterval(30 * 24 * 60 * 60)
+        let cached = quotaSnapshot(provider: .claude, fetchedAt: now.addingTimeInterval(-3_600))
+        let cache = MemoryQuotaCache(records: [
+            .claude: MemoryQuotaRecord(identityDigest: "account-a", snapshot: cached)
+        ])
+        let quotaService = ControlledQuotaService(identityDigest: "account-a")
+        let database = DatabaseManager(inMemory: true)
+        let store = AppStore(
+            database: database,
+            syncManager: SessionSyncManager(
+                database: database,
+                claudeProjectsPath: "/nonexistent/claude",
+                codexSessionsPath: "/nonexistent/codex",
+                codexArchivedSessionsPath: "/nonexistent/codex-archive"
+            ),
+            monitoringSettings: monitoringSettings,
+            quotaService: quotaService,
+            quotaSettings: quotaSettings,
+            quotaCache: cache,
+            observeRefreshIntervalChanges: false,
+            currentDateProvider: { now }
+        )
+
+        XCTAssertEqual(store.quotaCardState(for: .claude)?.presentedAt, now)
+        XCTAssertNotEqual(store.quotaCardState(for: .claude)?.presentedAt, cached.fetchedAt)
+
+        store.panelDidOpen()
+        wait(for: [quotaService.started], timeout: 1)
+        let refreshedAt = now.addingTimeInterval(120)
+        now = refreshedAt
+        quotaService.finish(snapshot: quotaSnapshot(provider: .claude, fetchedAt: now))
+
+        let applied = expectation(description: "Accepted quota refresh advances presentation date")
+        DispatchQueue.main.async {
+            XCTAssertEqual(store.quotaCardState(for: .claude)?.presentedAt, refreshedAt)
+            applied.fulfill()
+        }
+        wait(for: [applied], timeout: 1)
         store.panelDidClose()
     }
 
