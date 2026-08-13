@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Increase quota card reset countdown text to 11pt
+
 ## [0.13.0] - 2026-08-13
 
 ### Changed
