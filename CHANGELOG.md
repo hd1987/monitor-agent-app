@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-08-13
+
 ### Changed
 - Initialize Cursor Total Usage from complete UTC daily Spend history, refresh recent UTC months on every eligible unified refresh, and keep tab and time-range changes local-only
 - Refresh Cursor Spend from a seven-day overlap before the last successful coverage watermark, catch up long gaps in UTC-month requests, and fully recalibrate Spend during Data Rebuild
