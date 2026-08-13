@@ -84,6 +84,9 @@ final class UsageDataRebuilder {
             let activeCursorDailySpendArchive = activeCursorIdentity.flatMap {
                 activeDatabase.fetchCursorDailySpendArchive(accountIdentity: $0)
             }
+            let activeCursorDataMustBePreserved = activeCursorStats.totalRequests > 0
+                || !activeCursorSpendSnapshots.isEmpty
+                || activeCursorDailySpendArchive != nil
             let activeDataMustBePreserved = activeStats.totalRequests > 0
                 || (!activeDatabase.isAvailable && activeDatabase.hasExistingDatabaseFile)
             let localDataMustBePreserved =
@@ -100,20 +103,6 @@ final class UsageDataRebuilder {
                 cancellation: cancellation,
                 onProgress: onProgress
             )
-
-            try syncManager.validateSourcesRemainAppendCompatible(with: initialSnapshot)
-            let catchUpSnapshot = try syncManager.makeSourceSnapshot(cancellation: cancellation)
-            try syncManager.validateSourcesRemainAppendCompatible(with: initialSnapshot)
-            let recordsBeforeCatchUp = syncResult.recordsSynced
-            syncResult.add(try syncManager.rebuild(
-                snapshot: catchUpSnapshot,
-                isCatchUp: true,
-                startingRecordsSynced: recordsBeforeCatchUp,
-                cancellation: cancellation,
-                onProgress: onProgress
-            ))
-            try syncManager.validateSourcesRemainAppendCompatible(with: initialSnapshot)
-            try syncManager.validateSourcesRemainAppendCompatible(with: catchUpSnapshot)
 
             if let cursorUsageServiceFactory {
                 do {
@@ -151,6 +140,10 @@ final class UsageDataRebuilder {
                             throw StrictSessionSyncError.cancelled
                         } catch let error as StrictSessionSyncError {
                             throw error
+                        } catch let error as CursorUsageError
+                            where !activeCursorDataMustBePreserved
+                                && error.allowsRebuildWithoutCursorData {
+                            // A transient Spend failure cannot erase Cursor data that does not exist.
                         } catch {
                             throw UsageDataRebuildError.cursorRefreshFailed
                         }
@@ -168,23 +161,34 @@ final class UsageDataRebuilder {
                 } catch CursorUsageError.cancelled {
                     throw StrictSessionSyncError.cancelled
                 } catch let error as CursorUsageError
-                    where activeCursorStats.totalRequests == 0
-                        && activeCursorSpendSnapshots.isEmpty
-                        && activeCursorDailySpendArchive == nil
+                    where !activeCursorDataMustBePreserved
                         && error.allowsRebuildWithoutCursorData {
                     // A missing Cursor session does not block rebuilding other sources.
                 } catch let error as UsageDataRebuildError {
                     throw error
                 } catch let error as StrictSessionSyncError {
                     throw error
-                } catch where activeCursorStats.totalRequests > 0
-                    || !activeCursorSpendSnapshots.isEmpty
-                    || activeCursorDailySpendArchive != nil {
+                } catch where activeCursorDataMustBePreserved {
                     throw UsageDataRebuildError.cursorRefreshFailed
                 } catch {
                     throw error
                 }
             }
+
+            try checkCancellation(cancellation)
+            try syncManager.validateSourcesRemainAppendCompatible(with: initialSnapshot)
+            let catchUpSnapshot = try syncManager.makeSourceSnapshot(cancellation: cancellation)
+            try syncManager.validateSourcesRemainAppendCompatible(with: initialSnapshot)
+            let recordsBeforeCatchUp = syncResult.recordsSynced
+            syncResult.add(try syncManager.rebuild(
+                snapshot: catchUpSnapshot,
+                isCatchUp: true,
+                startingRecordsSynced: recordsBeforeCatchUp,
+                cancellation: cancellation,
+                onProgress: onProgress
+            ))
+            try syncManager.validateSourcesRemainAppendCompatible(with: initialSnapshot)
+            try syncManager.validateSourcesRemainAppendCompatible(with: catchUpSnapshot)
 
             try checkCancellation(cancellation)
             onProgress?(phaseProgress(.validating, recordsSynced: syncResult.recordsSynced))
@@ -198,6 +202,8 @@ final class UsageDataRebuilder {
                 throw UsageDataRebuildError.suspiciousEmptyResult
             }
 
+            try syncManager.validateSourcesRemainAppendCompatible(with: initialSnapshot)
+            try syncManager.validateSourcesRemainAppendCompatible(with: catchUpSnapshot)
             guard cancellation.beginReplacement() else {
                 throw StrictSessionSyncError.cancelled
             }

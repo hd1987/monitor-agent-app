@@ -300,7 +300,8 @@ final class CursorSpendService: CursorSpendServicing, CursorSpendHistorySyncing 
             throw CursorUsageError.cancelled
         } catch {
             let failureReason = error.cursorRefreshFailureReason
-            if let cached = database.fetchCursorSpendSnapshot(
+            if !forceFullHistory,
+               let cached = database.fetchCursorSpendSnapshot(
                 accountIdentity: account.syncIdentity,
                 range: range
             ) {

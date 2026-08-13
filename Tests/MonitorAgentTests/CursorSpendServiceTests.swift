@@ -136,6 +136,33 @@ final class CursorSpendServiceTests: XCTestCase {
         XCTAssertEqual(transport.spendRequestBodies.count, 3)
     }
 
+    func testFullHistoryRequestFailureDoesNotTreatCachedSpendAsCalibration() throws {
+        let database = DatabaseManager(inMemory: true)
+        let identity = try seedCursorIdentity(database: database)
+        let now = Date(timeIntervalSince1970: 1_785_470_400)
+        let archive = CursorDailySpendArchive(
+            accountIdentity: identity,
+            days: [CursorDailySpend(dayMilliseconds: 1_785_456_000_000, totalCents: 500)],
+            syncedThroughMilliseconds: 1_785_470_400_000,
+            lastSyncedAt: now.addingTimeInterval(-600)
+        )
+        try database.restoreCursorDailySpendArchive(archive)
+        let transport = CursorSpendTransportStub(totalCents: 900)
+        transport.failingSpendRequestNumber = 2
+        let service = CursorSpendService(
+            database: database,
+            authenticationReader: CursorSpendAuthenticationStub(),
+            transport: transport,
+            now: { now }
+        )
+
+        XCTAssertThrowsError(try service.refreshFullHistory()) { error in
+            XCTAssertEqual(error as? CursorUsageError, .requestFailed)
+        }
+        XCTAssertEqual(database.fetchCursorDailySpendArchive(accountIdentity: identity), archive)
+        XCTAssertEqual(transport.spendRequestBodies.count, 2)
+    }
+
     func testMissingHistoryOriginFailsClosedAndRetainsCachedSpend() throws {
         let database = DatabaseManager(inMemory: true)
         let identity = try seedCursorIdentity(database: database)

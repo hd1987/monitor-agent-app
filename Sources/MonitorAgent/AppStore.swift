@@ -778,6 +778,7 @@ final class AppStore: ObservableObject {
     func rebuildLocalUsageData() {
         guard !isRebuildingUsageData else { return }
 
+        cancelActiveSyncForRebuild()
         isRebuildingUsageData = true
         cursorAccountVerificationGeneration += 1
         cursorAccountPresentationState = .unverified
@@ -832,6 +833,11 @@ final class AppStore: ObservableObject {
                 }
             }
         }
+    }
+
+    func cancelActiveSyncForRebuild() {
+        activeAgentSyncCancellation?.disableAgents(notIn: [])
+        cursorAccountSyncCancellation?.disableAgents(notIn: [])
     }
 
     func cancelUsageDataRebuild() {

@@ -1027,6 +1027,125 @@ final class RebuildUsageDataTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temporaryPath))
     }
 
+    func testUsageDataRebuilderRejectsSourceReplacementDuringCursorSpend() throws {
+        let directory = try makeTemporaryDirectory()
+        let activePath = directory.appendingPathComponent("monitor.db").path
+        let temporaryPath = directory.appendingPathComponent("monitor-rebuild.tmp.db").path
+        let claudeRoot = directory.appendingPathComponent("claude-projects")
+        let codexRoot = directory.appendingPathComponent("codex-sessions")
+        let codexArchiveRoot = directory.appendingPathComponent("codex-archive")
+        try FileManager.default.createDirectory(at: claudeRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexArchiveRoot, withIntermediateDirectories: true)
+        let sourceFile = claudeRoot.appendingPathComponent("session.jsonl")
+        try claudeAssistantLine(messageId: "original").write(
+            to: sourceFile,
+            atomically: true,
+            encoding: .utf8
+        )
+        let activeDatabase = try DatabaseManager(path: activePath)
+        activeDatabase.insertRecords([record(id: "old", input: 10)])
+        let identity = "cursor-account:test"
+        let cursorSpendSyncer = BlockingSuccessfulCursorSpendSyncer()
+        let rebuilder = UsageDataRebuilder(
+            activeDatabase: activeDatabase,
+            temporaryDatabasePath: temporaryPath,
+            claudeProjectsPath: claudeRoot.path,
+            codexSessionsPath: codexRoot.path,
+            codexArchivedSessionsPath: codexArchiveRoot.path,
+            cursorUsageServiceFactory: {
+                SuccessfulCursorUsageSyncer(database: $0, identity: identity)
+            },
+            cursorSpendServiceFactory: { _ in cursorSpendSyncer }
+        )
+        let finished = expectation(description: "Rebuild rejects replacement during Cursor spend")
+        var rebuildError: Error?
+
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                _ = try rebuilder.rebuild()
+            } catch {
+                rebuildError = error
+            }
+            finished.fulfill()
+        }
+        XCTAssertEqual(cursorSpendSyncer.started.wait(timeout: .now() + 1), .success)
+        try claudeAssistantLine(messageId: "replacement").write(
+            to: sourceFile,
+            atomically: true,
+            encoding: .utf8
+        )
+        cursorSpendSyncer.release.signal()
+        wait(for: [finished], timeout: 2)
+
+        guard let syncError = rebuildError as? StrictSessionSyncError,
+              case .sourceFileChanged = syncError else {
+            return XCTFail("Expected sourceFileChanged, got \(String(describing: rebuildError))")
+        }
+        XCTAssertEqual(activeDatabase.fetchStats(app: .all, range: .allTime).inputTokens, 10)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temporaryPath))
+    }
+
+    func testUsageDataRebuilderRejectsSourceReplacementDuringDatabaseValidation() throws {
+        let directory = try makeTemporaryDirectory()
+        let activePath = directory.appendingPathComponent("monitor.db").path
+        let temporaryPath = directory.appendingPathComponent("monitor-rebuild.tmp.db").path
+        let claudeRoot = directory.appendingPathComponent("claude-projects")
+        let codexRoot = directory.appendingPathComponent("codex-sessions")
+        let codexArchiveRoot = directory.appendingPathComponent("codex-archive")
+        try FileManager.default.createDirectory(at: claudeRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexArchiveRoot, withIntermediateDirectories: true)
+        let sourceFile = claudeRoot.appendingPathComponent("session.jsonl")
+        try claudeAssistantLine(messageId: "original").write(
+            to: sourceFile,
+            atomically: true,
+            encoding: .utf8
+        )
+        let activeDatabase = try DatabaseManager(path: activePath)
+        activeDatabase.insertRecords([record(id: "old", input: 10)])
+        let validationStarted = DispatchSemaphore(value: 0)
+        let releaseValidation = DispatchSemaphore(value: 0)
+        let rebuilder = UsageDataRebuilder(
+            activeDatabase: activeDatabase,
+            temporaryDatabasePath: temporaryPath,
+            claudeProjectsPath: claudeRoot.path,
+            codexSessionsPath: codexRoot.path,
+            codexArchivedSessionsPath: codexArchiveRoot.path,
+            validateTemporaryDatabase: { _ in
+                validationStarted.signal()
+                releaseValidation.wait()
+                return true
+            }
+        )
+        let finished = expectation(description: "Rebuild rejects replacement during validation")
+        var rebuildError: Error?
+
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                _ = try rebuilder.rebuild()
+            } catch {
+                rebuildError = error
+            }
+            finished.fulfill()
+        }
+        XCTAssertEqual(validationStarted.wait(timeout: .now() + 1), .success)
+        try claudeAssistantLine(messageId: "replacement").write(
+            to: sourceFile,
+            atomically: true,
+            encoding: .utf8
+        )
+        releaseValidation.signal()
+        wait(for: [finished], timeout: 2)
+
+        guard let syncError = rebuildError as? StrictSessionSyncError,
+              case .sourceFileChanged = syncError else {
+            return XCTFail("Expected sourceFileChanged, got \(String(describing: rebuildError))")
+        }
+        XCTAssertEqual(activeDatabase.fetchStats(app: .all, range: .allTime).inputTokens, 10)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temporaryPath))
+    }
+
     func testUsageDataRebuildReplacementBoundaryHasSingleWinner() {
         let cancelledFirst = UsageDataRebuildCancellation()
         cancelledFirst.cancel()
@@ -1463,6 +1582,44 @@ final class RebuildUsageDataTests: XCTestCase {
         XCTAssertEqual(archive.syncedThroughMilliseconds, 172_800_000)
     }
 
+    func testUsageDataRebuilderContinuesWithoutActiveCursorDataWhenSpendRefreshFails() throws {
+        let directory = try makeTemporaryDirectory()
+        let activePath = directory.appendingPathComponent("monitor.db").path
+        let temporaryPath = directory.appendingPathComponent("monitor-rebuild.tmp.db").path
+        let claudeRoot = directory.appendingPathComponent("claude-projects")
+        let codexRoot = directory.appendingPathComponent("codex-sessions")
+        let codexArchiveRoot = directory.appendingPathComponent("codex-archive")
+        try FileManager.default.createDirectory(at: claudeRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: codexArchiveRoot, withIntermediateDirectories: true)
+        try claudeAssistantLine().write(
+            to: claudeRoot.appendingPathComponent("session.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let identity = "cursor-account:test"
+        let activeDatabase = try DatabaseManager(path: activePath)
+        activeDatabase.insertRecords([record(id: "old", input: 10)])
+        let rebuilder = UsageDataRebuilder(
+            activeDatabase: activeDatabase,
+            temporaryDatabasePath: temporaryPath,
+            claudeProjectsPath: claudeRoot.path,
+            codexSessionsPath: codexRoot.path,
+            codexArchivedSessionsPath: codexArchiveRoot.path,
+            cursorUsageServiceFactory: {
+                SuccessfulCursorUsageSyncer(database: $0, identity: identity)
+            },
+            cursorSpendServiceFactory: { _ in FailingCursorSpendSyncer() }
+        )
+
+        let summary = try rebuilder.rebuild()
+
+        XCTAssertEqual(summary.totalRequests, 2)
+        XCTAssertEqual(summary.cursorRequests, 1)
+        XCTAssertNil(activeDatabase.fetchCursorDailySpendArchive(accountIdentity: identity))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temporaryPath))
+    }
+
     func testUsageDataRebuilderPreservesActiveDataWhenSpendCalibrationFails() throws {
         let directory = try makeTemporaryDirectory()
         let activePath = directory.appendingPathComponent("monitor.db").path
@@ -1667,6 +1824,19 @@ private final class BlockingCancellableCursorSpendSyncer: CursorSpendHistorySync
             Thread.sleep(forTimeInterval: 0.001)
         }
         throw CursorUsageError.cancelled
+    }
+}
+
+private final class BlockingSuccessfulCursorSpendSyncer: CursorSpendHistorySyncing {
+    let started = DispatchSemaphore(value: 0)
+    let release = DispatchSemaphore(value: 0)
+
+    func refreshFullHistory(
+        cancellation: CursorOperationCancellation?
+    ) throws -> CursorSpendSnapshot? {
+        started.signal()
+        release.wait()
+        return nil
     }
 }
 

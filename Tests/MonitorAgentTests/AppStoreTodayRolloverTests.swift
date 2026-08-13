@@ -1148,6 +1148,44 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
+    func testDataRebuildPreparationCancelsUnifiedSpendCommitDomain() throws {
+        let suiteName = "AppStoreTodayRolloverTests.rebuildSpendCancellation"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let refreshSettings = RefreshSettings(defaults: defaults)
+        refreshSettings.interval = .never
+        let database = DatabaseManager(inMemory: true)
+        let account = cursorAuthenticatedAccount(userId: 1)
+        try seedCursorCache(
+            database: database,
+            identity: account.account.syncIdentity,
+            model: "cursor-model",
+            inputTokens: 100
+        )
+        let refresher = ControllableCursorSpendRefresher()
+        let store = AppStore(
+            database: database,
+            refreshSettings: refreshSettings,
+            cursorSpendRefresher: refresher,
+            cursorAccountResolver: StaticCursorAccountResolver(result: .success(account)),
+            observeRefreshIntervalChanges: false
+        )
+        store.appFilter = .cursor
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+
+        store.panelDidOpen()
+        wait(for: [refresher.started], timeout: 1)
+        let cancellation = try XCTUnwrap(refresher.cancellations.first ?? nil)
+        XCTAssertTrue(cancellation.isEnabled(.cursor))
+
+        store.cancelActiveSyncForRebuild()
+
+        XCTAssertFalse(cancellation.isEnabled(.cursor))
+        refresher.finishNext(outcome: .cancelled)
+        store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
     func testRangeChangeDuringSpendSyncReloadsCommittedLocalSelection() throws {
         let suiteName = "AppStoreTodayRolloverTests.cursorSpendRangeDuringSync"
         let defaults = UserDefaults(suiteName: suiteName)!
