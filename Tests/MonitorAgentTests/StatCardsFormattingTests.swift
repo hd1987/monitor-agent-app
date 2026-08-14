@@ -20,6 +20,11 @@ final class StatCardsFormattingTests: XCTestCase {
         XCTAssertEqual(formatTokenDetail(1_234_567), formatTokens(1_234_567))
     }
 
+    func testPercentFormattingUsesCompactZeroAndOneDecimalForNonzeroValues() {
+        XCTAssertEqual(formatPercent(0), "0%")
+        XCTAssertEqual(formatPercent(0.125), "12.5%")
+    }
+
     func testCursorSpendFormattingUsesCompactZeroExactCentsAndUnavailableState() {
         XCTAssertEqual(formatCursorSpend(nil), "—")
         XCTAssertEqual(formatCursorSpend(-1), "—")

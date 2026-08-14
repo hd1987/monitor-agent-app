@@ -268,7 +268,8 @@ func formatTokenDetail(_ n: Int64) -> String {
 }
 
 func formatPercent(_ rate: Double) -> String {
-    String(format: "%.1f%%", rate * 100)
+    guard rate != 0 else { return "0%" }
+    return String(format: "%.1f%%", rate * 100)
 }
 
 func formatCursorSpend(_ cents: Int?) -> String {
