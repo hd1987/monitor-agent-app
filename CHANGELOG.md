@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.13.2] - 2026-08-14
+
 ### Changed
 - Display a zero Cache Hit percentage as `0%` while retaining one decimal place for nonzero values
 
