@@ -11,6 +11,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 - Bind request-history queries to the main panel's Cursor account presentation context so a failed account replacement cannot leave the previous account's requests visible
 
 ### Fixed
+- Reject negative or overflowing Cursor token totals and preserve valid subsecond Usage watermarks during request-cost migration
 - Reject Cursor Cost values outside the persisted micro-dollar range and prefetch request-history pages without eagerly copying every loaded row
 - Replace Cursor Usage inside its one-hour incremental overlap so withdrawn events disappear while token-less Free requests remain visible
 - Preserve the normal Cursor Usage watermark during request-cost schema upgrades and recover historical Cost in bounded, independently resumable ranges

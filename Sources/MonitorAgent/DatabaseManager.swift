@@ -214,7 +214,7 @@ final class DatabaseManager {
         }
 
         let storedWatermark: Int64 = state["byte_offset"]
-        let recoveredWatermark = max(storedWatermark, (latestSeconds + 1) * 1_000)
+        let recoveredWatermark = max(storedWatermark, latestSeconds * 1_000)
         if recoveredWatermark != storedWatermark {
             try db.execute(
                 sql: "UPDATE sync_state SET byte_offset = ? WHERE file_path = ?",

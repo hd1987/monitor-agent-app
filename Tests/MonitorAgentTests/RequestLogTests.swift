@@ -124,12 +124,16 @@ final class RequestLogTests: XCTestCase {
                     last_synced_at INTEGER NOT NULL
                 );
                 INSERT INTO sync_state VALUES (
-                    'cursor://usage-events', 1800000000000, 1,
+                    'cursor://usage-events', 1800000000500, 2,
                     'cursor-account:identity', NULL, 0, 0, 10, 10
                 );
                 INSERT INTO request_logs VALUES (
                     'cursor:legacy', 'cursor', 'cursor-model', 1, 2, 3, 4,
                     'cursor-session', 1790000000
+                );
+                INSERT INTO request_logs VALUES (
+                    'cursor:latest', 'cursor', 'cursor-model', 1, 2, 3, 4,
+                    'cursor-session', 1800000000
                 );
                 """)
         }
@@ -146,9 +150,9 @@ final class RequestLogTests: XCTestCase {
         }
 
         XCTAssertEqual(state.sessionId, "cursor-account:identity")
-        XCTAssertEqual(state.byteOffset, 1_800_000_000_000)
+        XCTAssertEqual(state.byteOffset, 1_800_000_000_500)
         XCTAssertEqual(backfill.nextStartMilliseconds, 1_790_000_000_000)
-        XCTAssertEqual(backfill.targetEndMilliseconds, 1_799_996_400_000)
+        XCTAssertEqual(backfill.targetEndMilliseconds, 1_799_996_400_500)
         XCTAssertTrue(columns.contains("charged_cost_micros"))
         XCTAssertTrue(columns.contains("list_cost_micros"))
         XCTAssertTrue(columns.contains("discount_percent"))

@@ -684,6 +684,50 @@ final class CursorUsageServiceTests: XCTestCase {
         XCTAssertTrue(database.fetchRequestLogPage(app: .cursor, range: .allTime).items.isEmpty)
     }
 
+    func testInvalidTokenTotalsFailClosed() {
+        let invalidTokenSets = [
+            (-1, 0, 0, 0),
+            (Int.max, 1, 0, 0),
+        ]
+
+        for tokens in invalidTokenSets {
+            let database = DatabaseManager(inMemory: true)
+            let transport = CursorTransportStub(responses: [
+                response(body: #"{"userId":42}"#),
+                response(body: """
+                    {
+                      "totalUsageEventsCount": 1,
+                      "usageEventsDisplay": [{
+                        "timestamp": "1785376800000",
+                        "model": "cursor-model",
+                        "conversationId": "invalid-tokens",
+                        "tokenUsage": {
+                          "inputTokens": \(tokens.0),
+                          "outputTokens": \(tokens.1),
+                          "cacheReadTokens": \(tokens.2),
+                          "cacheWriteTokens": \(tokens.3)
+                        }
+                      }]
+                    }
+                    """),
+            ])
+            let service = CursorUsageService(
+                database: database,
+                authenticationReader: CursorAuthenticationStub(token: "token"),
+                transport: transport,
+                now: { Date(timeIntervalSince1970: 1_785_377_000) }
+            )
+
+            XCTAssertThrowsError(try service.sync()) { error in
+                XCTAssertEqual(error as? CursorUsageError, .invalidResponse)
+            }
+            XCTAssertNil(database.getSyncState(for: CursorUsageService.syncStateKey))
+            XCTAssertTrue(
+                database.fetchRequestLogPage(app: .cursor, range: .allTime).items.isEmpty
+            )
+        }
+    }
+
     func testZeroValuedTokenUsageIsNotClassifiedAsFree() throws {
         let database = DatabaseManager(inMemory: true)
         let transport = CursorTransportStub(responses: [

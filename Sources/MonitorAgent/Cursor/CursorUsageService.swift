@@ -329,6 +329,9 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
         if usage == nil, event.chargedCents != 0 {
             throw CursorUsageError.invalidResponse
         }
+        if let usage {
+            try validateTokenUsage(usage)
+        }
 
         var identity = [
             String(timestamp),
@@ -357,10 +360,10 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
             requestId: requestId,
             appType: "cursor",
             model: event.model,
-            inputTokens: max(usage?.inputTokens ?? 0, 0),
-            outputTokens: max(usage?.outputTokens ?? 0, 0),
-            cacheReadTokens: max(usage?.cacheReadTokens ?? 0, 0),
-            cacheCreationTokens: max(usage?.cacheWriteTokens ?? 0, 0),
+            inputTokens: usage?.inputTokens ?? 0,
+            outputTokens: usage?.outputTokens ?? 0,
+            cacheReadTokens: usage?.cacheReadTokens ?? 0,
+            cacheCreationTokens: usage?.cacheWriteTokens ?? 0,
             sessionId: sessionId,
             createdAt: Int(timestamp / 1_000),
             chargedCostMicros: try costMicros(fromCents: event.chargedCents),
@@ -368,6 +371,21 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
             discountPercent: usage?.discountPercentOff,
             isFreeRequest: usage == nil
         )
+    }
+
+    private func validateTokenUsage(_ usage: CursorTokenUsage) throws {
+        var total = 0
+        for value in [
+            usage.inputTokens,
+            usage.outputTokens,
+            usage.cacheReadTokens,
+            usage.cacheWriteTokens,
+        ] {
+            guard value >= 0 else { throw CursorUsageError.invalidResponse }
+            let addition = total.addingReportingOverflow(value)
+            guard !addition.overflow else { throw CursorUsageError.invalidResponse }
+            total = addition.partialValue
+        }
     }
 
     private func makeRecords(
