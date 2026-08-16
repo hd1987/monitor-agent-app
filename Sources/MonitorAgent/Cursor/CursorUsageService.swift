@@ -86,7 +86,11 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
             cancellation: cancellation
         )
         try client.checkCancellation(cancellation)
-        let records = try makeRecords(events: events)
+        let records = try makeRecords(
+            events: events,
+            startMilliseconds: startMilliseconds,
+            endMilliseconds: endMilliseconds
+        )
         if let startMilliseconds {
             let replacementRange = Self.createdAtRange(
                 startMilliseconds: startMilliseconds,
@@ -209,7 +213,11 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
             }
         }
 
-        let records = try makeRecords(events: events)
+        let records = try makeRecords(
+            events: events,
+            startMilliseconds: startMilliseconds,
+            endMilliseconds: endMilliseconds
+        )
         let replacementRange = Self.createdAtRange(
             startMilliseconds: startMilliseconds,
             endMilliseconds: endMilliseconds
@@ -245,6 +253,9 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
 
         while page <= Self.maximumPages {
             try client.checkCancellation(cancellation)
+            if reportsDenseRange, page > Self.maximumBackfillPages {
+                throw CursorUsageFetchError.rangeTooDense
+            }
             var body: [String: Any] = [
                 "userId": account.userId,
                 "endDate": String(endMilliseconds),
@@ -353,7 +364,19 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
         )
     }
 
-    private func makeRecords(events: [CursorUsageEvent]) throws -> [ParsedRecord] {
+    private func makeRecords(
+        events: [CursorUsageEvent],
+        startMilliseconds: Int64?,
+        endMilliseconds: Int64
+    ) throws -> [ParsedRecord] {
+        let lowerBound = startMilliseconds ?? 0
+        guard lowerBound <= endMilliseconds,
+              events.allSatisfy({ event in
+                  guard let timestamp = event.timestampMilliseconds else { return false }
+                  return lowerBound <= timestamp && timestamp <= endMilliseconds
+              }) else {
+            throw CursorUsageError.invalidResponse
+        }
         let records = try events.map { try makeRecord(event: $0) }
         guard Set(records.map(\.requestId)).count == records.count else {
             throw CursorUsageError.invalidResponse

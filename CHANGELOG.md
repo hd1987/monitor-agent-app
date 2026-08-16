@@ -17,6 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 - Skip superseded request-detail queries so rapid Provider and date changes do not wait behind obsolete local aggregation work
 - Reject incomplete Cursor Usage pagination and malformed required event fields before range replacement, and publish request-detail results under the account revision lock
 - Reject duplicate Cursor request identities before range replacement, preserve coalesced refreshes across visibility changes, and retain distinct stat-card accessibility semantics
+- Reject out-of-range Cursor events, enforce the actual historical Cost page budget, and show unavailable detail metrics during confirmed account mismatch
 
 ## [0.13.2] - 2026-08-14
 

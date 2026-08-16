@@ -8,6 +8,34 @@ final class RequestLogTests: XCTestCase {
         XCTAssertEqual(RequestsWindowLayout.initialSize.height, 750)
     }
 
+    func testCursorDetailSummaryIsUnavailableWhenPresentationExcludesCursor() {
+        let unavailableContext = RequestPresentationContext(
+            enabledAgents: [.claude, .codex],
+            cursorDataPresentationToken: nil,
+            cursorSpendAccountIdentity: nil
+        )
+        let model = RequestsViewModel(
+            database: DatabaseManager(inMemory: true),
+            provider: .cursor,
+            timeRange: .today,
+            enabledAgents: Set(AgentID.allCases),
+            presentationContext: unavailableContext
+        )
+
+        XCTAssertFalse(model.isSummaryAvailable)
+
+        model.updateEnabledAgents(
+            Set(AgentID.allCases),
+            presentationContext: RequestPresentationContext(
+                enabledAgents: Set(AgentID.allCases),
+                cursorDataPresentationToken: nil,
+                cursorSpendAccountIdentity: nil
+            )
+        )
+
+        XCTAssertTrue(model.isSummaryAvailable)
+    }
+
     func testDetailTotalUsageUsesCursorSpendSnapshotForAllAndCursor() throws {
         let database = DatabaseManager(inMemory: true)
         let now = Date(timeIntervalSince1970: 1_786_435_200)

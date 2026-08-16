@@ -147,6 +147,10 @@ final class RequestsViewModel: ObservableObject {
         AppFilter.available(for: enabledAgents)
     }
 
+    var isSummaryAvailable: Bool {
+        provider != .cursor || presentationContext.enabledAgents.contains(.cursor)
+    }
+
     func reset(
         provider: AppFilter,
         timeRange: TimeRange,
@@ -348,26 +352,26 @@ struct RequestsView: View {
         HStack(spacing: 0) {
             StatCard(
                 title: "Requests",
-                value: formatCount(model.summary.totalRequests),
+                value: model.isSummaryAvailable ? formatCount(model.summary.totalRequests) : "—",
                 presentation: .detailSummary
             )
             summaryDivider
             StatCard(
                 title: "Sessions",
-                value: formatCount(model.summary.totalSessions),
+                value: model.isSummaryAvailable ? formatCount(model.summary.totalSessions) : "—",
                 presentation: .detailSummary
             )
             summaryDivider
             TokenSummaryCard(
                 stats: summaryStats,
-                isAvailable: true,
+                isAvailable: model.isSummaryAvailable,
                 activeTip: $activeStatCardTip,
                 presentation: .detailSummary
             )
             summaryDivider
             CacheHitCard(
                 stats: summaryStats,
-                isAvailable: true,
+                isAvailable: model.isSummaryAvailable,
                 presentation: .detailSummary
             )
             summaryDivider
