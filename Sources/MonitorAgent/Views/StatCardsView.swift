@@ -3,45 +3,76 @@ import SwiftUI
 struct StatCardsView: View {
     @EnvironmentObject var store: AppStore
     @Binding var activeTip: StatCardTip?
+    let onOpenRequests: () -> Void
 
     var body: some View {
         HStack(spacing: StatCardLayout.spacing) {
-            StatCard(
-                title: "Requests",
-                value: isCursorUnavailable ? "—" : formatCount(store.stats.totalRequests)
-            )
+            detailButton {
+                StatCard(
+                    title: "Requests",
+                    value: isCursorUnavailable ? "—" : formatCount(store.stats.totalRequests)
+                )
+            }
                 .frame(width: cardWidth)
-            StatCard(
-                title: "Sessions",
-                value: isCursorUnavailable ? "—" : formatCount(store.stats.totalSessions)
-            )
+
+            detailButton {
+                StatCard(
+                    title: "Sessions",
+                    value: isCursorUnavailable ? "—" : formatCount(store.stats.totalSessions)
+                )
+            }
                 .frame(width: cardWidth)
-            TokenSummaryCard(
-                stats: store.stats,
-                isAvailable: !isCursorUnavailable,
-                activeTip: $activeTip
-            )
+
+            detailButton {
+                TokenSummaryCard(
+                    stats: store.stats,
+                    isAvailable: !isCursorUnavailable,
+                    activeTip: $activeTip
+                )
+            }
                 .frame(width: cardWidth)
-            CacheHitCard(stats: store.stats, isAvailable: !isCursorUnavailable)
+
+            detailButton {
+                CacheHitCard(stats: store.stats, isAvailable: !isCursorUnavailable)
+            }
                 .frame(width: cardWidth)
-            if store.appFilter == .cursor {
+
+            detailButton {
                 StatCard(
                     title: "Total Usage",
-                    value: formatCursorSpend(store.cursorSpendSnapshot?.totalCents)
+                    value: totalUsageValue
                 )
-                    .frame(width: cardWidth)
             }
+                .frame(width: cardWidth)
         }
         .padding(.horizontal, MainPanelDesign.horizontalPadding)
         .padding(.vertical, MainPanelDesign.sectionVerticalPadding)
     }
 
     private var cardWidth: CGFloat {
-        StatCardLayout.equalCardWidth(cardCount: store.appFilter == .cursor ? 5 : 4)
+        StatCardLayout.equalCardWidth(cardCount: StatCardLayout.visibleCardCount)
     }
 
     private var isCursorUnavailable: Bool {
         store.appFilter == .cursor && !store.isCursorDataPresentationAvailable
+    }
+
+    private var totalUsageValue: String {
+        formatTotalUsage(
+            store.cursorSpendSnapshot?.totalCents,
+            for: store.appFilter
+        )
+    }
+
+    private func detailButton<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        Button(action: onOpenRequests) {
+            content()
+        }
+        .buttonStyle(MainPanelPressButtonStyle())
+        .help("Open request details")
+        .accessibilityLabel("Open request details")
     }
 }
 
@@ -57,6 +88,7 @@ enum StatCardTipLayer {
 
 enum StatCardLayout {
     static let spacing: CGFloat = 8
+    static let visibleCardCount = 5
     static let availableWidth = MainPanelDesign.width - 2 * MainPanelDesign.horizontalPadding
     static let titleRowHeight: CGFloat = 12
 
@@ -70,32 +102,78 @@ enum TokenBreakdownTipLayout {
     static let itemSpacing: CGFloat = 8
 }
 
+enum StatCardPresentation: Equatable {
+    case mainPanel
+    case detailSummary
+
+    var height: CGFloat {
+        switch self {
+        case .mainPanel: 54
+        case .detailSummary: 64
+        }
+    }
+
+    var horizontalPadding: CGFloat {
+        switch self {
+        case .mainPanel: 10
+        case .detailSummary: 16
+        }
+    }
+
+    var verticalPadding: CGFloat {
+        switch self {
+        case .mainPanel: 8
+        case .detailSummary: 11
+        }
+    }
+
+    var titleFont: Font {
+        .system(size: 10, weight: .medium)
+    }
+
+    var valueFont: Font {
+        .system(size: 17, weight: .semibold, design: .rounded)
+    }
+
+    var alignment: Alignment {
+        .center
+    }
+
+    var usesIndividualSurface: Bool { self == .mainPanel }
+}
+
 struct StatCard: View {
     @EnvironmentObject private var theme: ThemeManager
     let title: String
     let value: String
+    var presentation: StatCardPresentation = .mainPanel
 
     var body: some View {
-        StatCardContainer {
+        StatCardContainer(presentation: presentation) {
             VStack(spacing: 4) {
-                statCardTitle(title, color: theme.panelSecondaryForeground)
+                statCardTitle(
+                    title,
+                    color: theme.panelSecondaryForeground,
+                    presentation: presentation
+                )
                 Text(value)
-                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .font(presentation.valueFont)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
                     .foregroundStyle(.primary)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: presentation.alignment)
         }
     }
 }
 
-private struct TokenSummaryCard: View {
+struct TokenSummaryCard: View {
     @EnvironmentObject private var theme: ThemeManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let stats: UsageStats
     let isAvailable: Bool
     @Binding var activeTip: StatCardTip?
+    var presentation: StatCardPresentation = .mainPanel
 
     private var isDetailPresented: Bool {
         isAvailable && activeTip == .tokenBreakdown
@@ -103,17 +181,25 @@ private struct TokenSummaryCard: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            StatCardContainer {
+            StatCardContainer(presentation: presentation) {
                 ZStack(alignment: .topTrailing) {
                     VStack(spacing: 4) {
-                        statCardTitle("Tokens", color: theme.panelSecondaryForeground)
+                        statCardTitle(
+                            "Tokens",
+                            color: theme.panelSecondaryForeground,
+                            presentation: presentation
+                        )
                         Text(isAvailable ? formatTokenDetail(stats.totalTokens) : "—")
-                            .font(.system(size: 17, weight: .semibold, design: .rounded))
+                            .font(presentation.valueFont)
                             .lineLimit(1)
                             .minimumScaleFactor(0.82)
                             .foregroundStyle(.primary)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .frame(
+                        maxWidth: .infinity,
+                        maxHeight: .infinity,
+                        alignment: presentation.alignment
+                    )
 
                     if isAvailable {
                         Image(systemName: "info.circle")
@@ -128,7 +214,7 @@ private struct TokenSummaryCard: View {
             if isDetailPresented {
                 TokenBreakdownTip(stats: stats)
                     .frame(width: 180)
-                    .offset(y: 56)
+                    .offset(y: presentation.height + 2)
                     .transition(
                         reduceMotion
                             ? .opacity
@@ -158,14 +244,16 @@ private struct TokenSummaryCard: View {
     }
 }
 
-private struct CacheHitCard: View {
+struct CacheHitCard: View {
     let stats: UsageStats
     let isAvailable: Bool
+    var presentation: StatCardPresentation = .mainPanel
 
     var body: some View {
         StatCard(
             title: "Cache Hit",
-            value: isAvailable ? formatPercent(stats.cacheHitRate) : "—"
+            value: isAvailable ? formatPercent(stats.cacheHitRate) : "—",
+            presentation: presentation
         )
             .help(cacheHitHelp())
     }
@@ -222,21 +310,39 @@ private struct TokenBreakdownTip: View {
 }
 
 private struct StatCardContainer<Content: View>: View {
+    let presentation: StatCardPresentation
     @ViewBuilder let content: Content
 
     var body: some View {
         content
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity)
-        .frame(height: 54)
-        .mainPanelGroupedSurface()
+            .padding(.horizontal, presentation.horizontalPadding)
+            .padding(.vertical, presentation.verticalPadding)
+            .frame(maxWidth: .infinity)
+            .frame(height: presentation.height)
+            .modifier(StatCardSurfaceModifier(isEnabled: presentation.usesIndividualSurface))
     }
 }
 
-private func statCardTitle(_ title: String, color: Color) -> some View {
+private struct StatCardSurfaceModifier: ViewModifier {
+    let isEnabled: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content.mainPanelGroupedSurface()
+        } else {
+            content
+        }
+    }
+}
+
+private func statCardTitle(
+    _ title: String,
+    color: Color,
+    presentation: StatCardPresentation
+) -> some View {
     Text(title)
-        .font(.system(size: 10, weight: .medium))
+        .font(presentation.titleFont)
         .foregroundStyle(color)
         .frame(height: StatCardLayout.titleRowHeight, alignment: .center)
 }
@@ -280,4 +386,9 @@ func formatCursorSpend(_ cents: Int?) -> String {
         locale: Locale(identifier: "en_US_POSIX"),
         arguments: [Double(cents) / 100]
     )
+}
+
+func formatTotalUsage(_ cents: Int?, for filter: AppFilter) -> String {
+    guard filter == .all || filter == .cursor else { return "—" }
+    return formatCursorSpend(cents)
 }

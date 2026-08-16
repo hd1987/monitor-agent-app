@@ -139,6 +139,64 @@ struct MainPanelHeaderToolButton<Label: View>: View {
     }
 }
 
+struct UnifiedRefreshButton: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let cooldownRemaining = store.manualRefreshCooldownRemaining(at: context.date)
+            let isCoolingDown = cooldownRemaining > 0 && !store.isRefreshInProgress
+
+            MainPanelHeaderToolButton(
+                helpText: store.isRefreshInProgress
+                    ? "Refreshing Data"
+                    : (isCoolingDown ? "Refresh unavailable during cooldown" : "Refresh Data"),
+                accessibilityText: "Refresh data",
+                action: store.refreshNow
+            ) { foreground in
+                RefreshStatusIcon(
+                    isRefreshing: store.isManualRefreshInProgress,
+                    foreground: foreground,
+                    reduceMotion: reduceMotion
+                )
+            }
+            .disabled(
+                store.isRebuildingUsageData
+                    || !store.hasEnabledAgents
+                    || cooldownRemaining > 0
+            )
+        }
+    }
+}
+
+private struct RefreshStatusIcon: View {
+    let isRefreshing: Bool
+    let foreground: Color
+    let reduceMotion: Bool
+
+    var body: some View {
+        TimelineView(
+            .animation(
+                minimumInterval: 1.0 / 30.0,
+                paused: !isRefreshing || reduceMotion
+            )
+        ) { context in
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(foreground)
+                .rotationEffect(.degrees(rotation(at: context.date)))
+        }
+    }
+
+    private func rotation(at date: Date) -> Double {
+        guard isRefreshing, !reduceMotion else { return 0 }
+        let cycleDuration = 0.8
+        return date.timeIntervalSinceReferenceDate
+            .truncatingRemainder(dividingBy: cycleDuration) / cycleDuration * 360
+    }
+}
+
 struct MainPanelChartButton: View {
     let chartStyle: ActivityChartStyle
     let helpText: String

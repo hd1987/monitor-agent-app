@@ -95,10 +95,15 @@ final class DatabaseManager {
                     output_tokens INTEGER NOT NULL DEFAULT 0,
                     cache_read_tokens INTEGER NOT NULL DEFAULT 0,
                     cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                    charged_cost_micros INTEGER,
+                    list_cost_micros INTEGER,
+                    discount_percent INTEGER,
                     session_id TEXT,
                     created_at INTEGER NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_logs_app_created ON request_logs(app_type, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_logs_created_request ON request_logs(created_at DESC, request_id DESC);
+                CREATE INDEX IF NOT EXISTS idx_logs_app_created_request ON request_logs(app_type, created_at DESC, request_id DESC);
                 CREATE INDEX IF NOT EXISTS idx_logs_session ON request_logs(session_id);
                 CREATE INDEX IF NOT EXISTS idx_logs_model ON request_logs(model);
 
@@ -152,13 +157,44 @@ final class DatabaseManager {
                 column: "last_total_output_tokens",
                 definition: "INTEGER NOT NULL DEFAULT 0"
             )
+            let addedChargedCost = try addColumnIfMissing(
+                db,
+                table: "request_logs",
+                column: "charged_cost_micros",
+                definition: "INTEGER"
+            )
+            let addedListCost = try addColumnIfMissing(
+                db,
+                table: "request_logs",
+                column: "list_cost_micros",
+                definition: "INTEGER"
+            )
+            let addedDiscount = try addColumnIfMissing(
+                db,
+                table: "request_logs",
+                column: "discount_percent",
+                definition: "INTEGER"
+            )
+            if addedChargedCost || addedListCost || addedDiscount {
+                try db.execute(
+                    sql: "UPDATE sync_state SET byte_offset = 0 WHERE file_path = ?",
+                    arguments: [CursorUsageService.syncStateKey]
+                )
+            }
         }
     }
 
-    private func addColumnIfMissing(_ db: Database, table: String, column: String, definition: String) throws {
+    @discardableResult
+    private func addColumnIfMissing(
+        _ db: Database,
+        table: String,
+        column: String,
+        definition: String
+    ) throws -> Bool {
         let columns = try Row.fetchAll(db, sql: "PRAGMA table_info(\(table))").map { $0["name"] as String }
-        guard !columns.contains(column) else { return }
+        guard !columns.contains(column) else { return false }
         try db.execute(sql: "ALTER TABLE \(table) ADD COLUMN \(column) \(definition)")
+        return true
     }
 
     private func migrateCursorSpendSnapshotsSchemaIfNeeded(_ db: Database) throws {
@@ -769,15 +805,31 @@ final class DatabaseManager {
         for record in records {
             try db.execute(
                 sql: """
-                    INSERT OR IGNORE INTO request_logs
+                    INSERT INTO request_logs
                     (request_id, app_type, model, input_tokens, output_tokens,
-                     cache_read_tokens, cache_creation_tokens, session_id, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     cache_read_tokens, cache_creation_tokens, session_id, created_at,
+                     charged_cost_micros, list_cost_micros, discount_percent)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(request_id) DO UPDATE SET
+                        charged_cost_micros = COALESCE(
+                            excluded.charged_cost_micros,
+                            request_logs.charged_cost_micros
+                        ),
+                        list_cost_micros = COALESCE(
+                            excluded.list_cost_micros,
+                            request_logs.list_cost_micros
+                        ),
+                        discount_percent = COALESCE(
+                            excluded.discount_percent,
+                            request_logs.discount_percent
+                        )
                     """,
                 arguments: [record.requestId, record.appType, record.model,
                             record.inputTokens, record.outputTokens,
                             record.cacheReadTokens, record.cacheCreationTokens,
-                            record.sessionId, record.createdAt]
+                            record.sessionId, record.createdAt,
+                            record.chargedCostMicros, record.listCostMicros,
+                            record.discountPercent]
             )
         }
     }
@@ -921,6 +973,103 @@ final class DatabaseManager {
     }
 
     // MARK: - Queries
+
+    func fetchRequestLogPage(
+        app: AppFilter,
+        range: TimeRange,
+        enabledAgents: Set<AgentID> = Set(AgentID.allCases),
+        after cursor: RequestPageCursor? = nil,
+        limit: Int = 100
+    ) -> RequestLogPage {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard let db = dbQueue else { return RequestLogPage(items: [], nextCursor: nil) }
+
+        let pageSize = min(max(limit, 1), 500)
+        let base = whereClause(app: app, range: range, enabledAgents: enabledAgents)
+        var whereSQL = base.sql
+        var arguments = base.args
+        if let cursor {
+            whereSQL += whereSQL.isEmpty ? "WHERE " : " AND "
+            whereSQL += "(created_at < ? OR (created_at = ? AND request_id < ?))"
+            arguments.append(cursor.createdAt)
+            arguments.append(cursor.createdAt)
+            arguments.append(cursor.requestId)
+        }
+        arguments.append(pageSize + 1)
+
+        return (try? db.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT request_id, app_type, model,
+                       input_tokens, output_tokens,
+                       cache_read_tokens, cache_creation_tokens,
+                       charged_cost_micros, list_cost_micros, discount_percent,
+                       created_at
+                FROM request_logs
+                \(whereSQL)
+                ORDER BY created_at DESC, request_id DESC
+                LIMIT ?
+                """, arguments: StatementArguments(arguments))
+            let hasMore = rows.count > pageSize
+            let visibleRows = hasMore ? rows.prefix(pageSize) : rows[...]
+            let items = visibleRows.compactMap { row -> RequestLogItem? in
+                guard let provider = AgentID(rawValue: row["app_type"] as String) else {
+                    return nil
+                }
+                return RequestLogItem(
+                    requestId: row["request_id"],
+                    provider: provider,
+                    model: row["model"],
+                    inputTokens: row["input_tokens"],
+                    outputTokens: row["output_tokens"],
+                    cacheReadTokens: row["cache_read_tokens"],
+                    cacheCreationTokens: row["cache_creation_tokens"],
+                    chargedCostMicros: row["charged_cost_micros"],
+                    listCostMicros: row["list_cost_micros"],
+                    discountPercent: row["discount_percent"],
+                    createdAt: row["created_at"]
+                )
+            }
+            let nextCursor = hasMore ? items.last.map {
+                RequestPageCursor(createdAt: $0.createdAt, requestId: $0.requestId)
+            } : nil
+            return RequestLogPage(items: items, nextCursor: nextCursor)
+        }) ?? RequestLogPage(items: [], nextCursor: nil)
+    }
+
+    func fetchRequestLogSummary(
+        app: AppFilter,
+        range: TimeRange,
+        enabledAgents: Set<AgentID> = Set(AgentID.allCases)
+    ) -> RequestLogSummary {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard let db = dbQueue else { return RequestLogSummary() }
+        let w = whereClause(app: app, range: range, enabledAgents: enabledAgents)
+
+        return (try? db.read { db in
+            guard let row = try Row.fetchOne(db, sql: """
+                SELECT COUNT(*) AS total_requests,
+                       COUNT(DISTINCT session_id) AS total_sessions,
+                       COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                       COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                       COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+                       COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens
+                FROM request_logs \(w.sql)
+                """, arguments: StatementArguments(w.args)) else {
+                return RequestLogSummary()
+            }
+            return RequestLogSummary(
+                totalRequests: row["total_requests"],
+                totalSessions: row["total_sessions"],
+                inputTokens: row["input_tokens"],
+                outputTokens: row["output_tokens"],
+                cacheReadTokens: row["cache_read_tokens"],
+                cacheCreationTokens: row["cache_creation_tokens"],
+                totalUsageMicros: nil
+            )
+        }) ?? RequestLogSummary()
+    }
 
     func fetchStats(
         app: AppFilter,

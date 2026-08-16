@@ -83,7 +83,7 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
             cancellation: cancellation
         )
         try client.checkCancellation(cancellation)
-        let records = events.compactMap(makeRecord)
+        let records = try events.compactMap { try makeRecord(event: $0) }
         let state = SyncState(
             filePath: Self.syncStateKey,
             byteOffset: endMilliseconds,
@@ -165,7 +165,7 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
         throw CursorUsageError.paginationLimitExceeded
     }
 
-    private func makeRecord(event: CursorUsageEvent) -> ParsedRecord? {
+    private func makeRecord(event: CursorUsageEvent) throws -> ParsedRecord? {
         guard let timestamp = event.timestampMilliseconds,
               let usage = event.tokenUsage,
               !event.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -197,8 +197,19 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
             cacheReadTokens: max(usage.cacheReadTokens, 0),
             cacheCreationTokens: max(usage.cacheWriteTokens, 0),
             sessionId: sessionId,
-            createdAt: Int(timestamp / 1_000)
+            createdAt: Int(timestamp / 1_000),
+            chargedCostMicros: try costMicros(fromCents: event.chargedCents),
+            listCostMicros: try costMicros(fromCents: usage.totalCents),
+            discountPercent: usage.discountPercentOff
         )
+    }
+
+    private func costMicros(fromCents cents: Double?) throws -> Int64? {
+        guard let cents else { return nil }
+        guard cents.isFinite, cents >= 0, cents <= Double(Int64.max) / 10_000 else {
+            throw CursorUsageError.invalidResponse
+        }
+        return Int64((cents * 10_000).rounded())
     }
 }
 
@@ -230,6 +241,7 @@ private struct CursorUsageEvent: Decodable {
     let kind: String?
     let conversationId: String?
     let tokenUsage: CursorTokenUsage?
+    let chargedCents: Double?
 
     private enum CodingKeys: String, CodingKey {
         case timestamp
@@ -237,6 +249,7 @@ private struct CursorUsageEvent: Decodable {
         case kind
         case conversationId
         case tokenUsage
+        case chargedCents
     }
 
     init(from decoder: Decoder) throws {
@@ -246,6 +259,7 @@ private struct CursorUsageEvent: Decodable {
         kind = try container.decodeIfPresent(String.self, forKey: .kind)
         conversationId = try container.decodeIfPresent(String.self, forKey: .conversationId)
         tokenUsage = try container.decodeIfPresent(CursorTokenUsage.self, forKey: .tokenUsage)
+        chargedCents = try container.decodeFlexibleDoubleIfPresent(forKey: .chargedCents)
     }
 }
 
@@ -254,12 +268,16 @@ private struct CursorTokenUsage: Decodable {
     let outputTokens: Int
     let cacheWriteTokens: Int
     let cacheReadTokens: Int
+    let totalCents: Double?
+    let discountPercentOff: Int?
 
     private enum CodingKeys: String, CodingKey {
         case inputTokens
         case outputTokens
         case cacheWriteTokens
         case cacheReadTokens
+        case totalCents
+        case discountPercentOff
     }
 
     init(from decoder: Decoder) throws {
@@ -268,5 +286,14 @@ private struct CursorTokenUsage: Decodable {
         outputTokens = try container.decodeFlexibleIntIfPresent(forKey: .outputTokens) ?? 0
         cacheWriteTokens = try container.decodeFlexibleIntIfPresent(forKey: .cacheWriteTokens) ?? 0
         cacheReadTokens = try container.decodeFlexibleIntIfPresent(forKey: .cacheReadTokens) ?? 0
+        totalCents = try container.decodeFlexibleDoubleIfPresent(forKey: .totalCents)
+        discountPercentOff = try container.decodeFlexibleIntIfPresent(forKey: .discountPercentOff)
+        if let discountPercentOff, !(0...100).contains(discountPercentOff) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .discountPercentOff,
+                in: container,
+                debugDescription: "Expected a percentage from 0 through 100."
+            )
+        }
     }
 }

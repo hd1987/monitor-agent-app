@@ -2,6 +2,21 @@ import XCTest
 @testable import MonitorAgent
 
 final class PanelRefreshCoordinatorTests: XCTestCase {
+    func testManualConfigurationDoesNotStartInitialOrPeriodicRefresh() {
+        let coordinator = PanelRefreshCoordinator()
+        var refreshCount = 0
+
+        coordinator.configureManualRefresh { completion in
+            refreshCount += 1
+            completion()
+        }
+
+        XCTAssertEqual(refreshCount, 0)
+        XCTAssertFalse(coordinator.isRunning)
+        XCTAssertTrue(coordinator.refreshNow())
+        XCTAssertEqual(refreshCount, 1)
+    }
+
     func testNeverRunsOneImmediateCycleWithoutStartingTimer() {
         let coordinator = PanelRefreshCoordinator()
         var refreshCount = 0

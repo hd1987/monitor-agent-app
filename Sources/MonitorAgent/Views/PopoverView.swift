@@ -5,6 +5,7 @@ struct PopoverView: View {
     @EnvironmentObject var theme: ThemeManager
     let onOpenGeneralSettings: () -> Void
     let onResetPanelPosition: () -> Void
+    let onOpenRequests: () -> Void
     @State private var activeStatCardTip: StatCardTip?
     @State private var isTimeRangePopoverPresented = false
 
@@ -16,7 +17,10 @@ struct PopoverView: View {
                 isTimeRangePopoverPresented: $isTimeRangePopoverPresented
             )
             if store.hasEnabledAgents {
-                StatCardsView(activeTip: $activeStatCardTip)
+                StatCardsView(
+                    activeTip: $activeStatCardTip,
+                    onOpenRequests: onOpenRequests
+                )
                     .zIndex(StatCardTipLayer.zIndex(for: activeStatCardTip))
                 HeatmapView()
                     .allowsHitTesting(activeStatCardTip == nil)

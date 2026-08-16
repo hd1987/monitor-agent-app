@@ -337,8 +337,16 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         let quotaSettings = QuotaSettings(defaults: defaults)
         enableAllProviders(quotaSettings)
         let quotaService = RecordingQuotaService()
+        let database = DatabaseManager(inMemory: true)
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/nonexistent/claude",
+            codexSessionsPath: "/nonexistent/codex",
+            codexArchivedSessionsPath: "/nonexistent/codex-archive"
+        )
         let store = AppStore(
-            database: DatabaseManager(inMemory: true),
+            database: database,
+            syncManager: syncManager,
             refreshSettings: refreshSettings,
             quotaService: quotaService,
             quotaSettings: quotaSettings
@@ -397,6 +405,52 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         wait(for: [refreshed], timeout: 1)
 
         store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testRequestsWindowUsesManualOnlyUnifiedRefreshLifecycle() {
+        let suiteName = "AppStoreTodayRolloverTests.requestsWindowRefresh"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let refreshSettings = RefreshSettings(defaults: defaults)
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        enableAllProviders(quotaSettings)
+        let quotaService = RecordingQuotaService()
+        let database = DatabaseManager(inMemory: true)
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/nonexistent/claude",
+            codexSessionsPath: "/nonexistent/codex",
+            codexArchivedSessionsPath: "/nonexistent/codex-archive"
+        )
+        let store = AppStore(
+            database: database,
+            syncManager: syncManager,
+            refreshSettings: refreshSettings,
+            quotaService: quotaService,
+            quotaSettings: quotaSettings
+        )
+
+        store.requestsWindowDidOpen()
+
+        XCTAssertTrue(store.isRequestsWindowVisible)
+        XCTAssertFalse(store.isPeriodicRefreshActive)
+        XCTAssertTrue(quotaService.providers.isEmpty)
+
+        store.refreshNow()
+
+        let refreshed = expectation(description: "request window unified refresh completes")
+        waitUntil(attemptsRemaining: 50) {
+            quotaService.providers.count == 2 && !store.isRefreshInProgress
+        } completion: {
+            XCTAssertEqual(quotaService.providers, [.claude, .codex])
+            XCTAssertFalse(store.isPeriodicRefreshActive)
+            refreshed.fulfill()
+        }
+        wait(for: [refreshed], timeout: 1)
+
+        store.requestsWindowDidClose()
+        XCTAssertFalse(store.isRequestsWindowVisible)
         defaults.removePersistentDomain(forName: suiteName)
     }
 
@@ -1028,6 +1082,14 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         store.panelDidOpen()
         wait(for: [refresher.started], timeout: 1)
         XCTAssertEqual(refresher.refreshCount, 1)
+
+        let allTodayRestored = expectation(description: "All restores Cursor spend snapshot")
+        waitUntil(attemptsRemaining: 100) {
+            store.appFilter == .all && store.cursorSpendSnapshot?.totalCents == 500
+        } completion: {
+            allTodayRestored.fulfill()
+        }
+        wait(for: [allTodayRestored], timeout: 1)
 
         store.appFilter = .cursor
         let todayRestored = expectation(description: "Today spend snapshot is restored")

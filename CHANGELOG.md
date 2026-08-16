@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Added
+- Open an `860 × 750` request-history detail window from every main-panel stat card with shared Provider/date controls, unified refresh button and shortcut, centered reusable summary cards, Cursor Spend-backed Total Usage, scroller-safe pagination, and authoritative discounted request cost
+
 ## [0.13.2] - 2026-08-14
 
 ### Changed

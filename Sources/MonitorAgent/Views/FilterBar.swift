@@ -3,14 +3,11 @@ import SwiftUI
 struct FilterBar: View {
     @EnvironmentObject var store: AppStore
     @EnvironmentObject var panelPresentationState: PanelPresentationState
-    @EnvironmentObject var theme: ThemeManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let onOpenGeneralSettings: () -> Void
     let onResetPanelPosition: () -> Void
 
     @Binding var isTimeRangePopoverPresented: Bool
-    @State private var calendarSelection = CalendarRangeSelection()
-    @State private var displayedMonth = Calendar.current.startOfDay(for: Date())
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,57 +33,13 @@ struct FilterBar: View {
 
     private var headerContent: some View {
         HStack(spacing: 12) {
-            // App filter (segmented)
-            HStack(spacing: 2) {
-                ForEach(store.availableAppFilters) { filter in
-                    Button {
-                        store.appFilter = filter
-                    } label: {
-                        HStack(spacing: 5) {
-                            AppIconView(icon: filter.appIcon)
-                                .overlay(alignment: .topTrailing) {
-                                    if filter == .cursor, store.hasCursorRefreshFailure {
-                                        Circle()
-                                            .fill(StatusPalette.error)
-                                            .frame(width: 4, height: 4)
-                                            .offset(x: 2, y: -2)
-                                            .accessibilityHidden(true)
-                                    }
-                                }
-
-                            if store.appFilter == filter {
-                                Text(filter.rawValue)
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .lineLimit(1)
-                                    .fixedSize(horizontal: true, vertical: false)
-                                    .transition(.opacity)
-                            }
-                        }
-                        .foregroundStyle(Color.primary)
-                        .padding(.horizontal, store.appFilter == filter ? 10 : 7)
-                        .frame(height: MainPanelDesign.headerControlItemHeight)
-                        .background(
-                            store.appFilter == filter
-                                ? theme.selectedControlSurface
-                                : Color.clear
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    }
-                    .buttonStyle(MainPanelPressButtonStyle())
-                    .help(filterHelp(for: filter))
-                    .accessibilityLabel(filterHelp(for: filter))
-                }
-            }
-            .padding(2)
-            .frame(height: MainPanelDesign.headerControlHeight)
-            .background(theme.controlSurface)
-            .clipShape(
-                RoundedRectangle(
-                    cornerRadius: MainPanelDesign.controlCornerRadius,
-                    style: .continuous
-                )
+            ProviderFilterControl(
+                filters: store.availableAppFilters,
+                selection: store.appFilter,
+                style: .compactIcons,
+                cursorFailureHelp: store.cursorRefreshFailureHelp,
+                onSelect: { store.appFilter = $0 }
             )
-            .layoutPriority(1)
 
             PanelDragArea()
                 .frame(
@@ -124,29 +77,7 @@ struct FilterBar: View {
                 )
                 .disabled(!store.hasEnabledAgents)
 
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    let cooldownRemaining = store.manualRefreshCooldownRemaining(at: context.date)
-                    let isCoolingDown = cooldownRemaining > 0 && !store.isRefreshInProgress
-
-                    MainPanelHeaderToolButton(
-                        helpText: store.isRefreshInProgress
-                            ? "Refreshing Data"
-                            : (isCoolingDown ? "Refresh unavailable during cooldown" : "Refresh Data"),
-                        accessibilityText: "Refresh data",
-                        action: store.refreshNow
-                    ) { foreground in
-                        RefreshStatusIcon(
-                            isRefreshing: store.isManualRefreshInProgress,
-                            foreground: foreground,
-                            reduceMotion: reduceMotion
-                        )
-                    }
-                    .disabled(
-                        store.isRebuildingUsageData
-                            || !store.hasEnabledAgents
-                            || cooldownRemaining > 0
-                    )
-                }
+                UnifiedRefreshButton()
 
                 MainPanelHeaderToolButton(
                     helpText: "Reset Panel Position",
@@ -171,187 +102,15 @@ struct FilterBar: View {
             .padding(2)
             .frame(height: MainPanelDesign.headerControlHeight)
 
-            Button {
-                syncCalendarSelection(from: store.timeRange)
-                isTimeRangePopoverPresented.toggle()
-            } label: {
-                HStack(spacing: 6) {
-                    Text(displayTitle(for: store.timeRange))
-                        .font(.system(size: 11, weight: .medium))
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
-                }
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 10)
-                .frame(
-                    width: 120,
-                    height: MainPanelDesign.headerControlHeight,
-                    alignment: .trailing
-                )
-            }
-            .buttonStyle(MainPanelPressButtonStyle())
-            .overlay(alignment: .trailing) {
-                Color.clear
-                    .frame(width: 1, height: 1)
-                    .padding(.trailing, 53)
-                    .offset(y: 10)
-                    .allowsHitTesting(false)
-                    .popover(isPresented: $isTimeRangePopoverPresented, arrowEdge: .top) {
-                        timeRangePopover
-                            .frame(width: 252)
-                            .padding(10)
-                    }
-            }
-        }
-    }
-
-    private func filterHelp(for filter: AppFilter) -> String {
-        guard filter == .cursor else { return filter.rawValue }
-        return store.cursorRefreshFailureHelp ?? filter.rawValue
-    }
-
-    private var timeRangePopover: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 5) {
-                ForEach(TimeRange.presets) { range in
-                    presetButton(for: range)
-                }
-            }
-
-            Divider()
-
-            calendarPicker
-        }
-    }
-
-    private func presetButton(for range: TimeRange) -> some View {
-        Button {
-            withTransaction(Transaction(animation: nil)) {
-                store.setTimeRangeFromFilter(range)
-                calendarSelection = CalendarRangeSelection()
-            }
-        } label: {
-            Text(range.title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(
-                    store.timeRange == range
-                        ? UtilityWindowDesign.selectedControlText
-                        : Color.primary
-                )
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 5)
-                .background(
-                    store.timeRange == range
-                        ? Color.accentColor
-                        : theme.controlSurface
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }
-        .buttonStyle(MainPanelPressButtonStyle())
-    }
-
-    private var calendarPicker: some View {
-        MonthCalendarView(
-            displayedMonth: $displayedMonth,
-            weekdayForeground: theme.panelSecondaryForeground,
-            appearance: calendarDayAppearance,
-            onSelect: selectCalendarDate
-        )
-    }
-
-    private func syncCalendarSelection(from range: TimeRange) {
-        if case .custom(let start, let end) = range {
-            calendarSelection = CalendarRangeSelection(start: start, end: end)
-            displayedMonth = start
-        } else {
-            let today = Calendar.current.startOfDay(for: Date())
-            calendarSelection = CalendarRangeSelection(start: today, end: today)
-            displayedMonth = today
-        }
-    }
-
-    private func selectCalendarDate(_ date: Date) {
-        calendarSelection.select(date)
-        guard let start = calendarSelection.start, let end = calendarSelection.end else { return }
-        let calendar = Calendar.current
-        withTransaction(Transaction(animation: nil)) {
-            if calendar.isDate(start, inSameDayAs: end) {
-                store.setTimeRangeFromFilter(
-                    TimeRange.singleDaySelection(for: start, calendar: calendar)
-                )
-            } else {
-                store.setTimeRangeFromFilter(.custom(start: start, end: end))
-            }
-        }
-    }
-
-    private func displayTitle(for range: TimeRange) -> String {
-        range.displayTitle(formatter: Self.displayFormatter)
-    }
-
-    private func calendarDayAppearance(for date: Date) -> MonthCalendarDayAppearance {
-        if isRangeBoundary(date) {
-            return .selected
-        }
-        if isInsideRange(date) {
-            return .inRange
-        }
-        if Calendar.current.isDateInToday(date) {
-            return .today
-        }
-        return .standard
-    }
-
-    private func isRangeBoundary(_ date: Date) -> Bool {
-        let calendar = Calendar.current
-        return calendarSelection.start.map { calendar.isDate(date, inSameDayAs: $0) } == true
-            || calendarSelection.end.map { calendar.isDate(date, inSameDayAs: $0) } == true
-    }
-
-    private func isInsideRange(_ date: Date) -> Bool {
-        guard let start = calendarSelection.start, let end = calendarSelection.end else {
-            return false
-        }
-        let day = Calendar.current.startOfDay(for: date)
-        return day > start && day < end
-    }
-
-    private static let displayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("MMM d")
-        return formatter
-    }()
-
-}
-
-private struct RefreshStatusIcon: View {
-    let isRefreshing: Bool
-    let foreground: Color
-    let reduceMotion: Bool
-
-    var body: some View {
-        TimelineView(
-            .animation(
-                minimumInterval: 1.0 / 30.0,
-                paused: !isRefreshing || reduceMotion
+            TimeRangeControl(
+                timeRange: store.timeRange,
+                style: .mainPanel,
+                onSelect: store.setTimeRangeFromFilter,
+                isPopoverPresented: $isTimeRangePopoverPresented
             )
-        ) { context in
-            Image(systemName: "arrow.clockwise")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(foreground)
-                .rotationEffect(.degrees(rotation(at: context.date)))
         }
     }
 
-    private func rotation(at date: Date) -> Double {
-        guard isRefreshing, !reduceMotion else { return 0 }
-        let cycleDuration = 0.8
-        return date.timeIntervalSinceReferenceDate
-            .truncatingRemainder(dividingBy: cycleDuration) / cycleDuration * 360
-    }
 }
 
 private struct PanelDragArea: NSViewRepresentable {

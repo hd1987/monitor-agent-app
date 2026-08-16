@@ -15,11 +15,14 @@ final class CursorUsageServiceTests: XCTestCase {
                     "model": "claude-4.5-sonnet",
                     "kind": "USAGE_EVENT_KIND_INFERENCE",
                     "conversationId": "conversation-1",
+                    "chargedCents": 1.75,
                     "tokenUsage": {
                       "inputTokens": "100",
                       "outputTokens": "200",
                       "cacheReadTokens": "300",
-                      "cacheWriteTokens": "400"
+                      "cacheWriteTokens": "400",
+                      "totalCents": 3.5,
+                      "discountPercentOff": 50
                     }
                   }]
                 }
@@ -44,6 +47,17 @@ final class CursorUsageServiceTests: XCTestCase {
         XCTAssertEqual(stats.cacheCreationTokens, 400)
         XCTAssertEqual(stats.totalTokens, 1_000)
         XCTAssertEqual(stats.cacheHitRate, 0.375, accuracy: 0.000_001)
+        let request = database.fetchRequestLogPage(
+            app: .cursor,
+            range: .allTime
+        ).items.first
+        XCTAssertEqual(request?.chargedCostMicros, 17_500)
+        XCTAssertEqual(request?.listCostMicros, 35_000)
+        XCTAssertEqual(request?.discountPercent, 50)
+        XCTAssertEqual(
+            database.fetchRequestLogSummary(app: .cursor, range: .allTime).totalUsageMicros,
+            nil
+        )
         XCTAssertEqual(database.fetchModelDistribution(app: .cursor, range: .allTime).first?.model, "claude-4.5-sonnet")
         XCTAssertTrue(transport.requests.allSatisfy {
             $0.url?.scheme == "https"

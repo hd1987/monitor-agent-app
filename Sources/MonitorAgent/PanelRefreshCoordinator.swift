@@ -49,6 +49,15 @@ final class PanelRefreshCoordinator {
         requestRefresh(minimumInterval: initialRefreshMinimumInterval)
     }
 
+    /// Keep the shared manual refresh path available without starting a timer or an initial cycle.
+    func configureManualRefresh(_ refresh: @escaping RefreshAction) {
+        cancelTimer()
+        interval = nil
+        refreshAction = refresh
+        pendingTrigger = nil
+        isRunning = false
+    }
+
     /// Start a manual refresh when the shared cooldown has elapsed.
     @discardableResult
     func refreshNow() -> Bool {
