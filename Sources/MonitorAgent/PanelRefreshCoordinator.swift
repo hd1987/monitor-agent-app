@@ -54,7 +54,6 @@ final class PanelRefreshCoordinator {
         cancelTimer()
         interval = nil
         refreshAction = refresh
-        pendingTrigger = nil
         isRunning = false
     }
 

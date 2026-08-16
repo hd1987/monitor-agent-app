@@ -17,6 +17,31 @@ final class PanelRefreshCoordinatorTests: XCTestCase {
         XCTAssertEqual(refreshCount, 1)
     }
 
+    func testManualConfigurationPreservesPendingRefreshAcrossVisibilityTransition() {
+        var now = Date(timeIntervalSince1970: 1_000)
+        let coordinator = PanelRefreshCoordinator(currentDateProvider: { now })
+        var initialCompletion: (() -> Void)?
+        var configuredRefreshCount = 0
+        let pendingRefreshStarted = expectation(description: "pending refresh starts")
+
+        coordinator.start(interval: .oneMinute) { completion in
+            initialCompletion = completion
+        }
+        now = now.addingTimeInterval(PanelRefreshCoordinator.manualRefreshCooldown)
+        XCTAssertTrue(coordinator.refreshNow())
+
+        coordinator.configureManualRefresh { completion in
+            configuredRefreshCount += 1
+            pendingRefreshStarted.fulfill()
+            completion()
+        }
+        initialCompletion?()
+
+        wait(for: [pendingRefreshStarted], timeout: 1)
+        XCTAssertEqual(configuredRefreshCount, 1)
+        XCTAssertFalse(coordinator.isRunning)
+    }
+
     func testNeverRunsOneImmediateCycleWithoutStartingTimer() {
         let coordinator = PanelRefreshCoordinator()
         var refreshCount = 0

@@ -86,7 +86,7 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
             cancellation: cancellation
         )
         try client.checkCancellation(cancellation)
-        let records = try events.map { try makeRecord(event: $0) }
+        let records = try makeRecords(events: events)
         if let startMilliseconds {
             let replacementRange = Self.createdAtRange(
                 startMilliseconds: startMilliseconds,
@@ -209,7 +209,7 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
             }
         }
 
-        let records = try events.map { try makeRecord(event: $0) }
+        let records = try makeRecords(events: events)
         let replacementRange = Self.createdAtRange(
             startMilliseconds: startMilliseconds,
             endMilliseconds: endMilliseconds
@@ -351,6 +351,14 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
             discountPercent: usage?.discountPercentOff,
             isFreeRequest: usage == nil
         )
+    }
+
+    private func makeRecords(events: [CursorUsageEvent]) throws -> [ParsedRecord] {
+        let records = try events.map { try makeRecord(event: $0) }
+        guard Set(records.map(\.requestId)).count == records.count else {
+            throw CursorUsageError.invalidResponse
+        }
+        return records
     }
 
     private static func secondStart(milliseconds: Int64) -> Int64 {

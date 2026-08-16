@@ -72,7 +72,7 @@ struct StatCardsView: View {
         }
         .buttonStyle(MainPanelPressButtonStyle())
         .help("Open request details")
-        .accessibilityLabel("Open request details")
+        .accessibilityHint("Open request details")
     }
 }
 
