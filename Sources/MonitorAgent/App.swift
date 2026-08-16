@@ -442,7 +442,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 provider: store.appFilter,
                 timeRange: store.timeRange,
                 enabledAgents: store.enabledAgents,
-                cursorSpendAccountIdentity: store.cursorSpendPresentationAccountIdentity
+                presentationContext: store.requestPresentationContext
             )
             store.requestsWindowDidOpen()
             existing.makeKeyAndOrderFront(nil)
@@ -454,7 +454,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             provider: store.appFilter,
             timeRange: store.timeRange,
             enabledAgents: store.enabledAgents,
-            cursorSpendAccountIdentity: store.cursorSpendPresentationAccountIdentity
+            presentationContext: store.requestPresentationContext
         )
         let hosting = NSHostingController(
             rootView: RequestsView(model: model)

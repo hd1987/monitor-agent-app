@@ -1446,6 +1446,60 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         store.panelDidClose()
     }
 
+    func testFailedCursorAccountReplacementExcludesOldCacheFromRequestDetail() throws {
+        let database = DatabaseManager(inMemory: true)
+        let firstAccount = cursorAuthenticatedAccount(userId: 1)
+        let secondAccount = cursorAuthenticatedAccount(userId: 2)
+        try seedCursorCache(
+            database: database,
+            identity: firstAccount.account.syncIdentity,
+            model: "account-one",
+            inputTokens: 100
+        )
+        let syncManager = SessionSyncManager(
+            database: database,
+            claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
+            codexSessionsPath: "/missing-codex-\(UUID().uuidString)",
+            codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)",
+            cursorUsageSyncer: RequestFailingCursorUsageSyncerProbe()
+        )
+        let store = AppStore(
+            database: database,
+            syncManager: syncManager,
+            cursorAccountResolver: StaticCursorAccountResolver(
+                result: .success(secondAccount)
+            ),
+            observeRefreshIntervalChanges: false
+        )
+
+        store.panelDidOpen()
+        let replacementFailed = expectation(description: "Cursor account replacement fails")
+        waitUntil(attemptsRemaining: 100) {
+            store.cursorAccountPresentationState == .mismatched(
+                secondAccount.account.syncIdentity
+            )
+        } completion: {
+            replacementFailed.fulfill()
+        }
+        wait(for: [replacementFailed], timeout: 1)
+
+        let context = store.requestPresentationContext
+        let detailSummary = database.fetchRequestLogSummary(
+            app: .all,
+            range: .allTime,
+            enabledAgents: context.enabledAgents
+        )
+        XCTAssertFalse(context.enabledAgents.contains(.cursor))
+        XCTAssertNil(context.cursorDataPresentationToken)
+        XCTAssertNil(context.cursorSpendAccountIdentity)
+        XCTAssertEqual(detailSummary.totalRequests, 0)
+        XCTAssertEqual(
+            database.fetchRequestLogSummary(app: .cursor, range: .allTime).totalRequests,
+            1
+        )
+        store.panelDidClose()
+    }
+
     func testCursorVerificationFailureKeepsCachedDataVisibleInAll() throws {
         let database = DatabaseManager(inMemory: true)
         let identity = cursorAuthenticatedAccount(userId: 1).account.syncIdentity

@@ -1,6 +1,16 @@
 import Foundation
 import SwiftUI
 
+struct RequestPresentationContext: Equatable {
+    let enabledAgents: Set<AgentID>
+    let cursorDataPresentationToken: CursorDataPresentationToken?
+    let cursorSpendAccountIdentity: String?
+
+    func isCurrent(in database: DatabaseManager) -> Bool {
+        cursorDataPresentationToken.map(database.isCursorDataPresentationTokenCurrent) ?? true
+    }
+}
+
 enum RequestDetailTotalUsageResolver {
     static func totalUsageMicros(
         database: DatabaseManager,
@@ -93,7 +103,6 @@ final class RequestsViewModel: ObservableObject {
     @Published private(set) var provider: AppFilter
     @Published private(set) var timeRange: TimeRange
     @Published private(set) var enabledAgents: Set<AgentID>
-    @Published private(set) var cursorSpendAccountIdentity: String?
     @Published private(set) var items: [RequestLogItem] = []
     @Published private(set) var summary = RequestLogSummary()
     @Published private(set) var isLoading = false
@@ -101,6 +110,7 @@ final class RequestsViewModel: ObservableObject {
 
     private let database: DatabaseManager
     private let queryScheduler = LatestRequestQueryScheduler()
+    private var presentationContext: RequestPresentationContext
     private var nextCursor: RequestPageCursor?
     private var generation = 0
 
@@ -109,13 +119,13 @@ final class RequestsViewModel: ObservableObject {
         provider: AppFilter,
         timeRange: TimeRange,
         enabledAgents: Set<AgentID>,
-        cursorSpendAccountIdentity: String?
+        presentationContext: RequestPresentationContext
     ) {
         self.database = database
         self.provider = provider
         self.timeRange = timeRange
         self.enabledAgents = enabledAgents
-        self.cursorSpendAccountIdentity = cursorSpendAccountIdentity
+        self.presentationContext = presentationContext
     }
 
     deinit {
@@ -130,12 +140,12 @@ final class RequestsViewModel: ObservableObject {
         provider: AppFilter,
         timeRange: TimeRange,
         enabledAgents: Set<AgentID>,
-        cursorSpendAccountIdentity: String?
+        presentationContext: RequestPresentationContext
     ) {
         self.enabledAgents = enabledAgents
         self.provider = AppFilter.available(for: enabledAgents).contains(provider) ? provider : .all
         self.timeRange = timeRange
-        self.cursorSpendAccountIdentity = cursorSpendAccountIdentity
+        self.presentationContext = presentationContext
         reload()
     }
 
@@ -151,9 +161,14 @@ final class RequestsViewModel: ObservableObject {
         reload()
     }
 
-    func updateEnabledAgents(_ enabledAgents: Set<AgentID>) {
-        guard self.enabledAgents != enabledAgents else { return }
+    func updateEnabledAgents(
+        _ enabledAgents: Set<AgentID>,
+        presentationContext: RequestPresentationContext
+    ) {
+        guard self.enabledAgents != enabledAgents
+                || self.presentationContext != presentationContext else { return }
         self.enabledAgents = enabledAgents
+        self.presentationContext = presentationContext
         if !availableProviders.contains(provider) {
             provider = .all
         }
@@ -161,9 +176,9 @@ final class RequestsViewModel: ObservableObject {
     }
 
     @discardableResult
-    func updateCursorSpendAccountIdentity(_ accountIdentity: String?) -> Bool {
-        guard cursorSpendAccountIdentity != accountIdentity else { return false }
-        cursorSpendAccountIdentity = accountIdentity
+    func updatePresentationContext(_ presentationContext: RequestPresentationContext) -> Bool {
+        guard self.presentationContext != presentationContext else { return false }
+        self.presentationContext = presentationContext
         return true
     }
 
@@ -172,8 +187,7 @@ final class RequestsViewModel: ObservableObject {
         let currentGeneration = generation
         let provider = provider
         let timeRange = timeRange
-        let enabledAgents = enabledAgents
-        let cursorSpendAccountIdentity = cursorSpendAccountIdentity
+        let presentationContext = presentationContext
         nextCursor = nil
         items = []
         summary = RequestLogSummary()
@@ -184,24 +198,25 @@ final class RequestsViewModel: ObservableObject {
             var summary = database.fetchRequestLogSummary(
                 app: provider,
                 range: timeRange,
-                enabledAgents: enabledAgents
+                enabledAgents: presentationContext.enabledAgents
             )
             guard !cancellation.isCancelled else { return }
             summary.totalUsageMicros = RequestDetailTotalUsageResolver.totalUsageMicros(
                 database: database,
                 provider: provider,
                 range: timeRange,
-                enabledAgents: enabledAgents,
-                accountIdentity: cursorSpendAccountIdentity
+                enabledAgents: presentationContext.enabledAgents,
+                accountIdentity: presentationContext.cursorSpendAccountIdentity
             )
             guard !cancellation.isCancelled else { return }
             let page = database.fetchRequestLogPage(
                 app: provider,
                 range: timeRange,
-                enabledAgents: enabledAgents,
+                enabledAgents: presentationContext.enabledAgents,
                 limit: Self.pageSize
             )
-            guard !cancellation.isCancelled else { return }
+            guard !cancellation.isCancelled,
+                  presentationContext.isCurrent(in: database) else { return }
             DispatchQueue.main.async {
                 guard let self, self.generation == currentGeneration else { return }
                 self.summary = summary
@@ -221,17 +236,18 @@ final class RequestsViewModel: ObservableObject {
         let currentGeneration = generation
         let provider = provider
         let timeRange = timeRange
-        let enabledAgents = enabledAgents
+        let presentationContext = presentationContext
 
         queryScheduler.submit { [weak self, database] cancellation in
             let page = database.fetchRequestLogPage(
                 app: provider,
                 range: timeRange,
-                enabledAgents: enabledAgents,
+                enabledAgents: presentationContext.enabledAgents,
                 after: cursor,
                 limit: Self.pageSize
             )
-            guard !cancellation.isCancelled else { return }
+            guard !cancellation.isCancelled,
+                  presentationContext.isCurrent(in: database) else { return }
             DispatchQueue.main.async {
                 guard let self, self.generation == currentGeneration else { return }
                 self.items.append(contentsOf: page.items)
@@ -269,27 +285,24 @@ struct RequestsView: View {
             }
         }
         .onChange(of: store.enabledAgents) { _, enabledAgents in
-            model.updateEnabledAgents(enabledAgents)
+            model.updateEnabledAgents(
+                enabledAgents,
+                presentationContext: store.requestPresentationContext
+            )
         }
         .onChange(of: store.isRefreshInProgress) { wasRefreshing, isRefreshing in
             if wasRefreshing, !isRefreshing {
-                model.updateCursorSpendAccountIdentity(
-                    store.cursorSpendPresentationAccountIdentity
-                )
+                model.updatePresentationContext(store.requestPresentationContext)
                 model.reload()
             }
         }
         .onChange(of: store.cursorAccountPresentationState) { _, _ in
-            if model.updateCursorSpendAccountIdentity(
-                store.cursorSpendPresentationAccountIdentity
-            ) {
+            if model.updatePresentationContext(store.requestPresentationContext) {
                 model.reload()
             }
         }
         .onChange(of: store.isRebuildingUsageData) { _, _ in
-            if model.updateCursorSpendAccountIdentity(
-                store.cursorSpendPresentationAccountIdentity
-            ) {
+            if model.updatePresentationContext(store.requestPresentationContext) {
                 model.reload()
             }
         }

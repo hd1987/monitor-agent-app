@@ -338,6 +338,16 @@ final class AppStore: ObservableObject {
         guard isCursorDataPresentationAvailable else { return nil }
         return cursorPresentationIdentity ?? cachedCursorIdentity
     }
+    var requestPresentationContext: RequestPresentationContext {
+        let queryContext = cursorBoundQueryContext(from: enabledAgents)
+        return RequestPresentationContext(
+            enabledAgents: queryContext.enabledAgents,
+            cursorDataPresentationToken: queryContext.token,
+            cursorSpendAccountIdentity: queryContext.enabledAgents.contains(.cursor)
+                ? cursorSpendPresentationAccountIdentity
+                : nil
+        )
+    }
     var isActivityDetailPresented: Bool {
         if case .closed = activityDetailState { return false }
         return true
@@ -685,7 +695,12 @@ final class AppStore: ObservableObject {
                     } else {
                         isPendingIdentity = false
                     }
-                    if currentIdentity != expectedCursorIdentity || isPendingIdentity {
+                    if currentIdentity != expectedCursorIdentity {
+                        self.cursorAccountPresentationState = .mismatched(expectedCursorIdentity)
+                        self.cursorSpendSnapshot = nil
+                        self.clearCursorDependentPresentation()
+                        self.reload()
+                    } else if isPendingIdentity {
                         self.cursorAccountPresentationState = .unavailable
                         self.cursorSpendSnapshot = nil
                         self.clearCursorDependentPresentation()
