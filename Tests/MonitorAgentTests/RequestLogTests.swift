@@ -392,4 +392,25 @@ final class RequestLogTests: XCTestCase {
             RequestListLayout.contentInset * 2 + RequestListLayout.scrollbarReservation
         )
     }
+
+    func testRequestListPaginationPrefetchesBeforeLastRow() {
+        XCTAssertFalse(
+            RequestListPagination.shouldPrefetch(appearingIndex: 79, itemCount: 100)
+        )
+        XCTAssertTrue(
+            RequestListPagination.shouldPrefetch(appearingIndex: 80, itemCount: 100)
+        )
+        XCTAssertTrue(
+            RequestListPagination.shouldPrefetch(appearingIndex: 99, itemCount: 100)
+        )
+        XCTAssertTrue(
+            RequestListPagination.shouldPrefetch(appearingIndex: 0, itemCount: 10)
+        )
+        XCTAssertFalse(
+            RequestListPagination.shouldPrefetch(appearingIndex: -1, itemCount: 100)
+        )
+        XCTAssertFalse(
+            RequestListPagination.shouldPrefetch(appearingIndex: 100, itemCount: 100)
+        )
+    }
 }

@@ -405,10 +405,14 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
 
     private func costMicros(fromCents cents: Double?) throws -> Int64? {
         guard let cents else { return nil }
-        guard cents.isFinite, cents >= 0, cents <= Double(Int64.max) / 10_000 else {
+        let scaledMicros = (cents * 10_000).rounded()
+        guard cents.isFinite,
+              cents >= 0,
+              scaledMicros.isFinite,
+              scaledMicros < Double(Int64.max) else {
             throw CursorUsageError.invalidResponse
         }
-        return Int64((cents * 10_000).rounded())
+        return Int64(scaledMicros)
     }
 }
 

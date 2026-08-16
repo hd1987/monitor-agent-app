@@ -648,6 +648,42 @@ final class CursorUsageServiceTests: XCTestCase {
         XCTAssertNil(request.discountPercent)
     }
 
+    func testCostAtRoundedInt64UpperBoundaryFailsClosed() {
+        let database = DatabaseManager(inMemory: true)
+        let transport = CursorTransportStub(responses: [
+            response(body: #"{"userId":42}"#),
+            response(body: """
+                {
+                  "totalUsageEventsCount": 1,
+                  "usageEventsDisplay": [{
+                    "timestamp": "1785376800000",
+                    "model": "cursor-model",
+                    "conversationId": "boundary-cost",
+                    "chargedCents": 922337203685477.6,
+                    "tokenUsage": {
+                      "inputTokens": 1,
+                      "outputTokens": 2,
+                      "cacheReadTokens": 3,
+                      "cacheWriteTokens": 4
+                    }
+                  }]
+                }
+                """),
+        ])
+        let service = CursorUsageService(
+            database: database,
+            authenticationReader: CursorAuthenticationStub(token: "token"),
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_785_377_000) }
+        )
+
+        XCTAssertThrowsError(try service.sync()) { error in
+            XCTAssertEqual(error as? CursorUsageError, .invalidResponse)
+        }
+        XCTAssertNil(database.getSyncState(for: CursorUsageService.syncStateKey))
+        XCTAssertTrue(database.fetchRequestLogPage(app: .cursor, range: .allTime).items.isEmpty)
+    }
+
     func testZeroValuedTokenUsageIsNotClassifiedAsFree() throws {
         let database = DatabaseManager(inMemory: true)
         let transport = CursorTransportStub(responses: [

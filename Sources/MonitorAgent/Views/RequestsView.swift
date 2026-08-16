@@ -243,8 +243,11 @@ final class RequestsViewModel: ObservableObject {
         }
     }
 
-    func loadMoreIfNeeded(after item: RequestLogItem) {
-        guard item.id == items.last?.id,
+    func loadMoreIfNeeded(appearingAt index: Int) {
+        guard RequestListPagination.shouldPrefetch(
+            appearingIndex: index,
+            itemCount: items.count
+        ),
               !isLoading,
               !isLoadingMore,
               let cursor = nextCursor else { return }
@@ -424,11 +427,11 @@ struct RequestsView: View {
 
                 ScrollView(.vertical) {
                     LazyVStack(spacing: 0) {
-                        ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
-                            requestListRow(item, index: index, columns: columns)
+                        ForEach(model.items.indices, id: \.self) { index in
+                            requestListRow(model.items[index], index: index, columns: columns)
                                 .padding(.leading, RequestListLayout.contentInset)
                                 .padding(.trailing, RequestListLayout.trailingInset)
-                                .onAppear { model.loadMoreIfNeeded(after: item) }
+                                .onAppear { model.loadMoreIfNeeded(appearingAt: index) }
                         }
                     }
                     .padding(.vertical, 4)
@@ -567,6 +570,17 @@ enum RequestListLayout {
     ) + 4
     static let trailingInset = contentInset + scrollbarReservation
     static let horizontalInsets = contentInset + trailingInset
+}
+
+enum RequestListPagination {
+    static let prefetchDistance = 20
+
+    static func shouldPrefetch(appearingIndex: Int, itemCount: Int) -> Bool {
+        guard itemCount > 0,
+              appearingIndex >= 0,
+              appearingIndex < itemCount else { return false }
+        return appearingIndex >= max(itemCount - prefetchDistance, 0)
+    }
 }
 
 struct RequestListColumns {
