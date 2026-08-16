@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import XCTest
 @testable import MonitorAgent
 
@@ -15,11 +16,14 @@ final class CursorUsageServiceTests: XCTestCase {
                     "model": "claude-4.5-sonnet",
                     "kind": "USAGE_EVENT_KIND_INFERENCE",
                     "conversationId": "conversation-1",
+                    "chargedCents": 1.75,
                     "tokenUsage": {
                       "inputTokens": "100",
                       "outputTokens": "200",
                       "cacheReadTokens": "300",
-                      "cacheWriteTokens": "400"
+                      "cacheWriteTokens": "400",
+                      "totalCents": 3.5,
+                      "discountPercentOff": 50
                     }
                   }]
                 }
@@ -44,6 +48,17 @@ final class CursorUsageServiceTests: XCTestCase {
         XCTAssertEqual(stats.cacheCreationTokens, 400)
         XCTAssertEqual(stats.totalTokens, 1_000)
         XCTAssertEqual(stats.cacheHitRate, 0.375, accuracy: 0.000_001)
+        let request = database.fetchRequestLogPage(
+            app: .cursor,
+            range: .allTime
+        ).items.first
+        XCTAssertEqual(request?.chargedCostMicros, 17_500)
+        XCTAssertEqual(request?.listCostMicros, 35_000)
+        XCTAssertEqual(request?.discountPercent, 50)
+        XCTAssertEqual(
+            database.fetchRequestLogSummary(app: .cursor, range: .allTime).totalUsageMicros,
+            nil
+        )
         XCTAssertEqual(database.fetchModelDistribution(app: .cursor, range: .allTime).first?.model, "claude-4.5-sonnet")
         XCTAssertTrue(transport.requests.allSatisfy {
             $0.url?.scheme == "https"
@@ -104,7 +119,7 @@ final class CursorUsageServiceTests: XCTestCase {
 
         let firstPageBody = try requestBody(transport.requests[3])
         let secondPageBody = try requestBody(transport.requests[4])
-        XCTAssertEqual(firstPageBody["startDate"] as? String, "1785376940000")
+        XCTAssertEqual(firstPageBody["startDate"] as? String, "1785373400000")
         XCTAssertEqual(firstPageBody["page"] as? Int, 1)
         XCTAssertEqual(secondPageBody["page"] as? Int, 2)
         XCTAssertEqual(
@@ -115,6 +130,641 @@ final class CursorUsageServiceTests: XCTestCase {
             database.getSyncState(for: CursorUsageService.syncStateKey)?.recordCount,
             2
         )
+    }
+
+    func testIncrementalSyncAtomicallyReplacesOneHourOverlap() throws {
+        let database = DatabaseManager(inMemory: true)
+        let transport = CursorTransportStub(responses: [
+            response(body: #"{"userId":42}"#),
+            response(body: usagePage(
+                total: 1,
+                timestamp: "1785376800000",
+                conversation: "provisional",
+                model: "provisional-model"
+            )),
+            response(body: #"{"userId":42}"#),
+            response(body: usagePage(
+                total: 1,
+                timestamp: "1785376800000",
+                conversation: "final",
+                model: "final-model"
+            )),
+        ])
+        var currentDate = Date(timeIntervalSince1970: 1_785_377_000)
+        let service = CursorUsageService(
+            database: database,
+            authenticationReader: CursorAuthenticationStub(token: "token"),
+            transport: transport,
+            now: { currentDate }
+        )
+
+        _ = try service.sync()
+        database.insertRecords([ParsedRecord(
+            requestId: "cursor:outside-overlap",
+            appType: "cursor",
+            model: "historical-model",
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            sessionId: "historical",
+            createdAt: 1_785_373_399
+        )])
+
+        currentDate = currentDate.addingTimeInterval(100)
+        _ = try service.sync()
+
+        XCTAssertEqual(database.fetchStats(app: .cursor, range: .allTime).totalRequests, 2)
+        XCTAssertEqual(
+            Set(database.fetchModelDistribution(app: .cursor, range: .allTime).map(\.model)),
+            ["historical-model", "final-model"]
+        )
+        XCTAssertEqual(
+            try requestBody(transport.requests[3])["startDate"] as? String,
+            "1785373400000"
+        )
+    }
+
+    func testIncrementalSyncCatchesUpFromOlderWatermark() throws {
+        let database = DatabaseManager(inMemory: true)
+        let transport = CursorTransportStub(responses: [
+            response(body: #"{"userId":42}"#),
+            response(body: usagePage(
+                total: 1,
+                timestamp: "1785376800000",
+                conversation: "initial"
+            )),
+            response(body: #"{"userId":42}"#),
+            response(body: usagePage(
+                total: 1,
+                timestamp: "1785549600000",
+                conversation: "caught-up"
+            )),
+        ])
+        var currentDate = Date(timeIntervalSince1970: 1_785_377_000)
+        let firstWatermarkMilliseconds = Int64(currentDate.timeIntervalSince1970 * 1_000)
+        let service = CursorUsageService(
+            database: database,
+            authenticationReader: CursorAuthenticationStub(token: "token"),
+            transport: transport,
+            now: { currentDate }
+        )
+
+        _ = try service.sync()
+        currentDate = currentDate.addingTimeInterval(2 * 86_400)
+        _ = try service.sync()
+
+        XCTAssertEqual(
+            try requestBody(transport.requests[3])["startDate"] as? String,
+            String(firstWatermarkMilliseconds - 3_600_000)
+        )
+        XCTAssertEqual(database.fetchStats(app: .cursor, range: .allTime).totalRequests, 1)
+    }
+
+    func testIncrementalSyncAdvancesIndependentHistoricalCostBackfill() throws {
+        let databaseURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("MonitorAgent-CursorBackfill-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let account = try JSONDecoder().decode(
+            CursorAccount.self,
+            from: Data(#"{"userId":42}"#.utf8)
+        )
+        let nowSeconds = 1_800_000_000
+        let watermarkMilliseconds = Int64(nowSeconds - 100) * 1_000
+        let earliestSeconds = nowSeconds - 40 * 86_400
+        let legacyDatabase = try DatabaseQueue(path: databaseURL.path)
+        try legacyDatabase.write { db in
+            try db.execute(sql: """
+                CREATE TABLE request_logs (
+                    request_id TEXT PRIMARY KEY,
+                    app_type TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    input_tokens INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                    session_id TEXT,
+                    created_at INTEGER NOT NULL
+                );
+                CREATE TABLE sync_state (
+                    file_path TEXT PRIMARY KEY,
+                    byte_offset INTEGER NOT NULL DEFAULT 0,
+                    record_count INTEGER NOT NULL DEFAULT 0,
+                    session_id TEXT,
+                    model TEXT,
+                    last_total_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    last_total_output_tokens INTEGER NOT NULL DEFAULT 0,
+                    last_modified INTEGER NOT NULL,
+                    last_synced_at INTEGER NOT NULL
+                );
+                """)
+            try db.execute(
+                sql: "INSERT INTO sync_state VALUES (?, ?, 1, ?, NULL, 0, 0, 0, 0)",
+                arguments: [
+                    CursorUsageService.syncStateKey,
+                    watermarkMilliseconds,
+                    account.syncIdentity,
+                ]
+            )
+            try db.execute(
+                sql: "INSERT INTO request_logs VALUES (?, 'cursor', 'legacy', 1, 1, 0, 0, ?, ?)",
+                arguments: ["cursor:legacy", "legacy-session", earliestSeconds]
+            )
+        }
+        let database = try DatabaseManager(path: databaseURL.path)
+        let backfillTimestamp = Int64(earliestSeconds + 60) * 1_000
+        let liveTimestamp = Int64(nowSeconds - 50) * 1_000
+        let transport = CursorTransportStub(responses: [
+            response(body: #"{"userId":42}"#),
+            response(body: usagePage(
+                total: 1,
+                timestamp: String(liveTimestamp),
+                conversation: "live"
+            )),
+            response(body: usagePage(
+                total: 1_001,
+                timestamp: String(backfillTimestamp),
+                conversation: "dense-range"
+            )),
+            response(body: usagePage(
+                total: 1,
+                timestamp: String(backfillTimestamp),
+                conversation: "backfill"
+            )),
+        ])
+        let service = CursorUsageService(
+            database: database,
+            authenticationReader: CursorAuthenticationStub(token: "token"),
+            transport: transport,
+            now: { Date(timeIntervalSince1970: TimeInterval(nowSeconds)) }
+        )
+
+        XCTAssertEqual(try service.sync().recordsSynced, 2)
+        let requestBodies = try transport.requests.dropFirst().map(requestBody)
+        XCTAssertEqual(
+            requestBodies[0]["startDate"] as? String,
+            String(watermarkMilliseconds - CursorUsageService.overlapMilliseconds)
+        )
+        XCTAssertEqual(
+            requestBodies[1]["startDate"] as? String,
+            String(Int64(earliestSeconds) * 1_000)
+        )
+        XCTAssertEqual(
+            requestBodies[1]["endDate"] as? String,
+            String(Int64(earliestSeconds) * 1_000 + 30 * 86_400_000)
+        )
+        XCTAssertEqual(
+            requestBodies[2]["endDate"] as? String,
+            String(Int64(earliestSeconds) * 1_000 + 15 * 86_400_000)
+        )
+        XCTAssertEqual(
+            database.cursorUsageCostBackfillState(
+                accountIdentity: account.syncIdentity
+            )?.nextStartMilliseconds,
+            Int64(earliestSeconds) * 1_000 + 15 * 86_400_000
+        )
+        XCTAssertEqual(
+            database.getSyncState(for: CursorUsageService.syncStateKey)?.byteOffset,
+            Int64(nowSeconds) * 1_000
+        )
+    }
+
+    func testHistoricalCostBackfillEnforcesPageBudgetAndAlignedDenseSplits() throws {
+        let databaseURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("MonitorAgent-CursorPageBudget-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let account = try JSONDecoder().decode(
+            CursorAccount.self,
+            from: Data(#"{"userId":42}"#.utf8)
+        )
+        let nowSeconds = 1_800_000_000
+        let watermarkMilliseconds = Int64(nowSeconds - 100) * 1_000
+        let earliestSeconds = nowSeconds - 40 * 86_400
+        let legacyDatabase = try DatabaseQueue(path: databaseURL.path)
+        try legacyDatabase.write { db in
+            try db.execute(sql: """
+                CREATE TABLE request_logs (
+                    request_id TEXT PRIMARY KEY,
+                    app_type TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    input_tokens INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                    session_id TEXT,
+                    created_at INTEGER NOT NULL
+                );
+                CREATE TABLE sync_state (
+                    file_path TEXT PRIMARY KEY,
+                    byte_offset INTEGER NOT NULL DEFAULT 0,
+                    record_count INTEGER NOT NULL DEFAULT 0,
+                    session_id TEXT,
+                    model TEXT,
+                    last_total_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    last_total_output_tokens INTEGER NOT NULL DEFAULT 0,
+                    last_modified INTEGER NOT NULL,
+                    last_synced_at INTEGER NOT NULL
+                );
+                """)
+            try db.execute(
+                sql: "INSERT INTO sync_state VALUES (?, ?, 1, ?, NULL, 0, 0, 0, 0)",
+                arguments: [
+                    CursorUsageService.syncStateKey,
+                    watermarkMilliseconds,
+                    account.syncIdentity,
+                ]
+            )
+            try db.execute(
+                sql: "INSERT INTO request_logs VALUES (?, 'cursor', 'legacy', 1, 1, 0, 0, ?, ?)",
+                arguments: ["cursor:legacy", "legacy-session", earliestSeconds]
+            )
+        }
+        let database = try DatabaseManager(path: databaseURL.path)
+        let backfillTimestamp = Int64(earliestSeconds + 60) * 1_000
+        let liveTimestamp = Int64(nowSeconds - 50) * 1_000
+        var responses = [
+            response(body: #"{"userId":42}"#),
+            response(body: usagePage(
+                total: 1,
+                timestamp: String(liveTimestamp),
+                conversation: "live"
+            )),
+        ]
+        responses.append(contentsOf: (0..<10).map { page in
+            response(body: usagePage(
+                total: 11,
+                timestamp: String(backfillTimestamp + Int64(page) * 1_000),
+                conversation: "sparse-page-\(page)"
+            ))
+        })
+        responses.append(contentsOf: (0..<8).map { attempt in
+            response(body: usagePage(
+                total: 1_001,
+                timestamp: String(backfillTimestamp),
+                conversation: "dense-range-\(attempt)"
+            ))
+        })
+        responses.append(response(body: usagePage(
+            total: 1,
+            timestamp: String(backfillTimestamp),
+            conversation: "reduced-range"
+        )))
+        let transport = CursorTransportStub(responses: responses)
+        let service = CursorUsageService(
+            database: database,
+            authenticationReader: CursorAuthenticationStub(token: "token"),
+            transport: transport,
+            now: { Date(timeIntervalSince1970: TimeInterval(nowSeconds)) }
+        )
+
+        XCTAssertEqual(try service.sync().recordsSynced, 2)
+        let requestBodies = try transport.requests.dropFirst().map(requestBody)
+        XCTAssertEqual(requestBodies.count, 20)
+        XCTAssertEqual(requestBodies[10]["page"] as? Int, 10)
+        XCTAssertEqual(requestBodies[11]["page"] as? Int, 1)
+        XCTAssertEqual(
+            requestBodies[11]["endDate"] as? String,
+            String(Int64(earliestSeconds) * 1_000 + 15 * 86_400_000)
+        )
+        let backfillStartMilliseconds = Int64(earliestSeconds) * 1_000
+        var expectedEndMilliseconds = backfillStartMilliseconds + 30 * 86_400_000
+        for _ in 0..<9 {
+            let reducedSpan = (expectedEndMilliseconds - backfillStartMilliseconds) / 2
+            expectedEndMilliseconds = backfillStartMilliseconds + reducedSpan
+            expectedEndMilliseconds -= expectedEndMilliseconds % 1_000
+        }
+        XCTAssertEqual(
+            requestBodies[19]["endDate"] as? String,
+            String(expectedEndMilliseconds)
+        )
+        XCTAssertEqual(expectedEndMilliseconds % 1_000, 0)
+        XCTAssertEqual(
+            database.cursorUsageCostBackfillState(
+                accountIdentity: account.syncIdentity
+            )?.nextStartMilliseconds,
+            expectedEndMilliseconds
+        )
+    }
+
+    func testFailedIncrementalResponsePreservesRangeAndWatermark() throws {
+        let database = DatabaseManager(inMemory: true)
+        let transport = CursorTransportStub(responses: [
+            response(body: #"{"userId":42}"#),
+            response(body: usagePage(
+                total: 1,
+                timestamp: "1785376800000",
+                conversation: "preserved"
+            )),
+            response(body: #"{"userId":42}"#),
+            response(body: #"{"metadata":{}}"#),
+        ])
+        var currentDate = Date(timeIntervalSince1970: 1_785_377_000)
+        let service = CursorUsageService(
+            database: database,
+            authenticationReader: CursorAuthenticationStub(token: "token"),
+            transport: transport,
+            now: { currentDate }
+        )
+
+        _ = try service.sync()
+        let initialWatermark = database.getSyncState(
+            for: CursorUsageService.syncStateKey
+        )?.byteOffset
+        currentDate = currentDate.addingTimeInterval(100)
+
+        XCTAssertThrowsError(try service.sync())
+        XCTAssertEqual(database.fetchStats(app: .cursor, range: .allTime).totalRequests, 1)
+        XCTAssertEqual(
+            database.getSyncState(for: CursorUsageService.syncStateKey)?.byteOffset,
+            initialWatermark
+        )
+    }
+
+    func testPrematureEmptyUsagePagePreservesRangeAndWatermark() throws {
+        let database = DatabaseManager(inMemory: true)
+        let transport = CursorTransportStub(responses: [
+            response(body: #"{"userId":42}"#),
+            response(body: usagePage(
+                total: 1,
+                timestamp: "1785376800000",
+                conversation: "preserved"
+            )),
+            response(body: #"{"userId":42}"#),
+            response(body: usagePage(
+                total: 2,
+                timestamp: "1785376800000",
+                conversation: "partial"
+            )),
+            response(body: #"{"totalUsageEventsCount":2,"usageEventsDisplay":[]}"#),
+        ])
+        var currentDate = Date(timeIntervalSince1970: 1_785_377_000)
+        let service = CursorUsageService(
+            database: database,
+            authenticationReader: CursorAuthenticationStub(token: "token"),
+            transport: transport,
+            now: { currentDate }
+        )
+
+        _ = try service.sync()
+        let initialWatermark = database.getSyncState(
+            for: CursorUsageService.syncStateKey
+        )?.byteOffset
+        currentDate = currentDate.addingTimeInterval(100)
+
+        XCTAssertThrowsError(try service.sync()) { error in
+            XCTAssertEqual(error as? CursorUsageError, .invalidResponse)
+        }
+        let requests = database.fetchRequestLogPage(app: .cursor, range: .allTime).items
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.model, "cursor-model")
+        XCTAssertEqual(
+            database.getSyncState(for: CursorUsageService.syncStateKey)?.byteOffset,
+            initialWatermark
+        )
+    }
+
+    func testDuplicateUsageIdentityAcrossPagesPreservesRangeAndWatermark() throws {
+        let database = DatabaseManager(inMemory: true)
+        let duplicatePage = usagePage(
+            total: 2,
+            timestamp: "1785376800000",
+            conversation: "duplicate"
+        )
+        let transport = CursorTransportStub(responses: [
+            response(body: #"{"userId":42}"#),
+            response(body: usagePage(
+                total: 1,
+                timestamp: "1785376800000",
+                conversation: "preserved"
+            )),
+            response(body: #"{"userId":42}"#),
+            response(body: duplicatePage),
+            response(body: duplicatePage),
+        ])
+        var currentDate = Date(timeIntervalSince1970: 1_785_377_000)
+        let service = CursorUsageService(
+            database: database,
+            authenticationReader: CursorAuthenticationStub(token: "token"),
+            transport: transport,
+            now: { currentDate }
+        )
+
+        _ = try service.sync()
+        let initialWatermark = database.getSyncState(
+            for: CursorUsageService.syncStateKey
+        )?.byteOffset
+        currentDate = currentDate.addingTimeInterval(100)
+
+        XCTAssertThrowsError(try service.sync()) { error in
+            XCTAssertEqual(error as? CursorUsageError, .invalidResponse)
+        }
+        let requests = database.fetchRequestLogPage(app: .cursor, range: .allTime).items
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.model, "cursor-model")
+        XCTAssertEqual(
+            database.getSyncState(for: CursorUsageService.syncStateKey)?.byteOffset,
+            initialWatermark
+        )
+    }
+
+    func testMalformedUsageEventPreservesRangeAndWatermark() throws {
+        let malformedPages = [
+            #"{"totalUsageEventsCount":1,"usageEventsDisplay":[{"model":"cursor-model"}]}"#,
+            #"{"totalUsageEventsCount":1,"usageEventsDisplay":[{"timestamp":"1785376800000","model":" "}]}"#,
+        ]
+
+        for malformedPage in malformedPages {
+            let database = DatabaseManager(inMemory: true)
+            let transport = CursorTransportStub(responses: [
+                response(body: #"{"userId":42}"#),
+                response(body: usagePage(
+                    total: 1,
+                    timestamp: "1785376800000",
+                    conversation: "preserved"
+                )),
+                response(body: #"{"userId":42}"#),
+                response(body: malformedPage),
+            ])
+            var currentDate = Date(timeIntervalSince1970: 1_785_377_000)
+            let service = CursorUsageService(
+                database: database,
+                authenticationReader: CursorAuthenticationStub(token: "token"),
+                transport: transport,
+                now: { currentDate }
+            )
+
+            _ = try service.sync()
+            let initialWatermark = database.getSyncState(
+                for: CursorUsageService.syncStateKey
+            )?.byteOffset
+            currentDate = currentDate.addingTimeInterval(100)
+
+            XCTAssertThrowsError(try service.sync()) { error in
+                XCTAssertEqual(error as? CursorUsageError, .invalidResponse)
+            }
+            XCTAssertEqual(
+                database.fetchRequestLogPage(app: .cursor, range: .allTime).items.count,
+                1
+            )
+            XCTAssertEqual(
+                database.getSyncState(for: CursorUsageService.syncStateKey)?.byteOffset,
+                initialWatermark
+            )
+        }
+    }
+
+    func testSyncRetainsTokenlessFreeRequest() throws {
+        let database = DatabaseManager(inMemory: true)
+        let transport = CursorTransportStub(responses: [
+            response(body: #"{"userId":42}"#),
+            response(body: """
+                {
+                  "totalUsageEventsCount": 1,
+                  "usageEventsDisplay": [{
+                    "timestamp": "1785376800000",
+                    "model": "cursor-model",
+                    "kind": "USAGE_EVENT_KIND_INCLUDED_IN_BUSINESS",
+                    "conversationId": "free-conversation",
+                    "chargedCents": 0
+                  }]
+                }
+                """),
+        ])
+        let service = CursorUsageService(
+            database: database,
+            authenticationReader: CursorAuthenticationStub(token: "token"),
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_785_377_000) }
+        )
+
+        XCTAssertEqual(try service.sync().recordsSynced, 1)
+        let request = try XCTUnwrap(
+            database.fetchRequestLogPage(app: .cursor, range: .allTime).items.first
+        )
+        XCTAssertTrue(request.isFreeCursorRequest)
+        XCTAssertEqual(request.totalTokens, 0)
+        XCTAssertEqual(request.chargedCostMicros, 0)
+        XCTAssertNil(request.listCostMicros)
+        XCTAssertNil(request.discountPercent)
+    }
+
+    func testCostAtRoundedInt64UpperBoundaryFailsClosed() {
+        let database = DatabaseManager(inMemory: true)
+        let transport = CursorTransportStub(responses: [
+            response(body: #"{"userId":42}"#),
+            response(body: """
+                {
+                  "totalUsageEventsCount": 1,
+                  "usageEventsDisplay": [{
+                    "timestamp": "1785376800000",
+                    "model": "cursor-model",
+                    "conversationId": "boundary-cost",
+                    "chargedCents": 922337203685477.6,
+                    "tokenUsage": {
+                      "inputTokens": 1,
+                      "outputTokens": 2,
+                      "cacheReadTokens": 3,
+                      "cacheWriteTokens": 4
+                    }
+                  }]
+                }
+                """),
+        ])
+        let service = CursorUsageService(
+            database: database,
+            authenticationReader: CursorAuthenticationStub(token: "token"),
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_785_377_000) }
+        )
+
+        XCTAssertThrowsError(try service.sync()) { error in
+            XCTAssertEqual(error as? CursorUsageError, .invalidResponse)
+        }
+        XCTAssertNil(database.getSyncState(for: CursorUsageService.syncStateKey))
+        XCTAssertTrue(database.fetchRequestLogPage(app: .cursor, range: .allTime).items.isEmpty)
+    }
+
+    func testInvalidTokenTotalsFailClosed() {
+        let invalidTokenSets = [
+            (-1, 0, 0, 0),
+            (Int.max, 1, 0, 0),
+        ]
+
+        for tokens in invalidTokenSets {
+            let database = DatabaseManager(inMemory: true)
+            let transport = CursorTransportStub(responses: [
+                response(body: #"{"userId":42}"#),
+                response(body: """
+                    {
+                      "totalUsageEventsCount": 1,
+                      "usageEventsDisplay": [{
+                        "timestamp": "1785376800000",
+                        "model": "cursor-model",
+                        "conversationId": "invalid-tokens",
+                        "tokenUsage": {
+                          "inputTokens": \(tokens.0),
+                          "outputTokens": \(tokens.1),
+                          "cacheReadTokens": \(tokens.2),
+                          "cacheWriteTokens": \(tokens.3)
+                        }
+                      }]
+                    }
+                    """),
+            ])
+            let service = CursorUsageService(
+                database: database,
+                authenticationReader: CursorAuthenticationStub(token: "token"),
+                transport: transport,
+                now: { Date(timeIntervalSince1970: 1_785_377_000) }
+            )
+
+            XCTAssertThrowsError(try service.sync()) { error in
+                XCTAssertEqual(error as? CursorUsageError, .invalidResponse)
+            }
+            XCTAssertNil(database.getSyncState(for: CursorUsageService.syncStateKey))
+            XCTAssertTrue(
+                database.fetchRequestLogPage(app: .cursor, range: .allTime).items.isEmpty
+            )
+        }
+    }
+
+    func testZeroValuedTokenUsageIsNotClassifiedAsFree() throws {
+        let database = DatabaseManager(inMemory: true)
+        let transport = CursorTransportStub(responses: [
+            response(body: #"{"userId":42}"#),
+            response(body: """
+                {
+                  "totalUsageEventsCount": 1,
+                  "usageEventsDisplay": [{
+                    "timestamp": "1785376800000",
+                    "model": "cursor-model",
+                    "kind": "USAGE_EVENT_KIND_INFERENCE",
+                    "conversationId": "zero-conversation",
+                    "chargedCents": 0,
+                    "tokenUsage": {
+                      "inputTokens": 0,
+                      "outputTokens": 0,
+                      "cacheReadTokens": 0,
+                      "cacheWriteTokens": 0
+                    }
+                  }]
+                }
+                """),
+        ])
+        let service = CursorUsageService(
+            database: database,
+            authenticationReader: CursorAuthenticationStub(token: "token"),
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_785_377_000) }
+        )
+
+        _ = try service.sync()
+        let request = try XCTUnwrap(
+            database.fetchRequestLogPage(app: .cursor, range: .allTime).items.first
+        )
+        XCTAssertFalse(request.isFreeCursorRequest)
+        XCTAssertEqual(request.totalTokens, 0)
+        XCTAssertEqual(request.chargedCostMicros, 0)
     }
 
     func testRepeatedEventIsDeduplicatedByStableRequestIdentifier() throws {
@@ -179,6 +829,55 @@ final class CursorUsageServiceTests: XCTestCase {
         XCTAssertNil(try requestBody(transport.requests[3])["startDate"])
     }
 
+    func testAccountChangeRejectsOutOfRangeEventWithoutReplacingCache() throws {
+        for invalidTimestamp in ["-1", "1785377010001"] {
+            let database = DatabaseManager(inMemory: true)
+            let transport = CursorTransportStub(responses: [
+                response(body: #"{"userId":1}"#),
+                response(body: usagePage(
+                    total: 1,
+                    timestamp: "1785376800000",
+                    conversation: "account-one",
+                    model: "model-one"
+                )),
+                response(body: #"{"userId":2}"#),
+                response(body: usagePage(
+                    total: 1,
+                    timestamp: invalidTimestamp,
+                    conversation: "account-two",
+                    model: "model-two"
+                )),
+            ])
+            var currentDate = Date(timeIntervalSince1970: 1_785_377_000)
+            let service = CursorUsageService(
+                database: database,
+                authenticationReader: CursorAuthenticationStub(token: "token"),
+                transport: transport,
+                now: { currentDate }
+            )
+
+            _ = try service.sync()
+            let initialState = database.getSyncState(for: CursorUsageService.syncStateKey)
+            currentDate = currentDate.addingTimeInterval(10)
+
+            XCTAssertThrowsError(try service.sync()) { error in
+                XCTAssertEqual(error as? CursorUsageError, .invalidResponse)
+            }
+            XCTAssertEqual(
+                database.fetchModelDistribution(app: .cursor, range: .allTime).map(\.model),
+                ["model-one"]
+            )
+            XCTAssertEqual(
+                database.getSyncState(for: CursorUsageService.syncStateKey)?.sessionId,
+                initialState?.sessionId
+            )
+            XCTAssertEqual(
+                database.getSyncState(for: CursorUsageService.syncStateKey)?.byteOffset,
+                initialState?.byteOffset
+            )
+        }
+    }
+
     func testSuccessfulEmptySyncAdvancesIncrementalWatermark() throws {
         let database = DatabaseManager(inMemory: true)
         let transport = CursorTransportStub(responses: [
@@ -204,11 +903,12 @@ final class CursorUsageServiceTests: XCTestCase {
         _ = try service.sync()
 
         let thirdUsageBody = try requestBody(transport.requests[5])
-        XCTAssertEqual(thirdUsageBody["startDate"] as? String, "1785377040000")
+        XCTAssertEqual(thirdUsageBody["startDate"] as? String, "1785373500000")
         XCTAssertEqual(
             database.getSyncState(for: CursorUsageService.syncStateKey)?.byteOffset,
             1_785_377_200_000
         )
+        XCTAssertEqual(database.fetchStats(app: .cursor, range: .allTime).totalRequests, 0)
     }
 
     func testNonemptyUsageResponseMissingRequiredFieldsStillFails() {

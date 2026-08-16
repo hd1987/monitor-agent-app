@@ -462,6 +462,22 @@ final class CursorDashboardClient {
 }
 
 extension KeyedDecodingContainer {
+    func decodeFlexibleDoubleIfPresent(forKey key: Key) throws -> Double? {
+        guard contains(key), try !decodeNil(forKey: key) else { return nil }
+        if let value = try? decode(Double.self, forKey: key) {
+            return value
+        }
+        let value = try decode(String.self, forKey: key)
+        guard let result = Double(value) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: key,
+                in: self,
+                debugDescription: "Expected a floating-point number."
+            )
+        }
+        return result
+    }
+
     func decodeFlexibleInt(forKey key: Key) throws -> Int {
         if let value = try? decode(Int.self, forKey: key) {
             return value

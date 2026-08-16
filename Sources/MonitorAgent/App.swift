@@ -104,11 +104,46 @@ struct MonitorAgentApp: App {
     }
 }
 
+private final class RequestsWindowDelegate: NSObject, NSWindowDelegate {
+    private let onClose: () -> Void
+
+    init(onClose: @escaping () -> Void) {
+        self.onClose = onClose
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        onClose()
+    }
+}
+
+final class RequestsWindow: NSWindow {
+    var onRefreshData: (() -> Void)?
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown,
+           PanelShortcutEventMatcher.matches(.refreshData, event: event) {
+            if !event.isARepeat {
+                onRefreshData?()
+            }
+            return
+        }
+        super.sendEvent(event)
+    }
+}
+
+enum RequestsWindowLayout {
+    static let initialSize = NSSize(width: 860, height: 750)
+    static let minimumSize = NSSize(width: 860, height: 600)
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var panel: FloatingPanel!
     private var settingsPanel: NSWindow?
     private var aboutPanel: NSWindow?
+    private var requestsPanel: NSWindow?
+    private var requestsViewModel: RequestsViewModel?
+    private var requestsWindowDelegate: RequestsWindowDelegate?
     private var statusMenu: NSMenu!
     private var rightClickHandled = false
     private let store = AppStore(
@@ -173,6 +208,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.openSettings(category: .general)
             } onResetPanelPosition: { [weak self] in
                 self?.resetPanelPosition()
+            } onOpenRequests: { [weak self] in
+                self?.openRequests()
             }
                 .environmentObject(store)
                 .environmentObject(panelPresentationState)
@@ -259,6 +296,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Update already-open windows
         settingsPanel?.appearance = themeManager.nsAppearance
         aboutPanel?.appearance = themeManager.nsAppearance
+        requestsPanel?.appearance = themeManager.nsAppearance
         UpdateChecker.shared.applyTheme()
     }
 
@@ -396,6 +434,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak w] in
             SettingsWindowToolbar.revealAfterPresentation(w)
         }
+    }
+
+    private func openRequests() {
+        if let existing = requestsPanel, let model = requestsViewModel {
+            model.reset(
+                provider: store.appFilter,
+                timeRange: store.timeRange,
+                enabledAgents: store.enabledAgents,
+                presentationContext: store.requestPresentationContext
+            )
+            store.requestsWindowDidOpen()
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let model = RequestsViewModel(
+            provider: store.appFilter,
+            timeRange: store.timeRange,
+            enabledAgents: store.enabledAgents,
+            presentationContext: store.requestPresentationContext
+        )
+        let hosting = NSHostingController(
+            rootView: RequestsView(model: model)
+                .environmentObject(store)
+                .environmentObject(themeManager)
+        )
+        let window = RequestsWindow(
+            contentRect: NSRect(origin: .zero, size: RequestsWindowLayout.initialSize),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = ""
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
+        window.isReleasedWhenClosed = false
+        window.level = .normal
+        window.hidesOnDeactivate = false
+        window.appearance = themeManager.nsAppearance
+        window.contentViewController = hosting
+        window.minSize = RequestsWindowLayout.minimumSize
+        window.setContentSize(RequestsWindowLayout.initialSize)
+        window.onRefreshData = { [weak self] in
+            self?.store.refreshNow()
+        }
+        let windowDelegate = RequestsWindowDelegate { [weak self] in
+            self?.store.requestsWindowDidClose()
+        }
+        window.delegate = windowDelegate
+        window.center()
+        store.requestsWindowDidOpen()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        requestsViewModel = model
+        requestsPanel = window
+        requestsWindowDelegate = windowDelegate
     }
 
     /// Swallow mouse events landing on the settings sidebar divider so it can
@@ -625,52 +721,38 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     }
 
     private func handlePanelShortcut(_ event: NSEvent) -> Bool {
-        let settings = PanelShortcutSettings.shared
-        let modifiers = event.modifierFlags
-            .intersection(.deviceIndependentFlagsMask)
-            .intersection(GlobalShortcut.supportedModifiers)
-
-        if let binding = settings.binding(for: .togglePin),
-           binding.matches(keyCode: event.keyCode, modifiers: modifiers) {
+        if PanelShortcutEventMatcher.matches(.togglePin, event: event) {
             onTogglePin?()
             return true
         }
-        if let binding = settings.binding(for: .toggleActivityChart),
-           binding.matches(keyCode: event.keyCode, modifiers: modifiers) {
+        if PanelShortcutEventMatcher.matches(.toggleActivityChart, event: event) {
             if !event.isARepeat {
                 onToggleActivityChart?()
             }
             return true
         }
-        if let binding = settings.binding(for: .refreshData),
-           binding.matches(keyCode: event.keyCode, modifiers: modifiers) {
+        if PanelShortcutEventMatcher.matches(.refreshData, event: event) {
             if !event.isARepeat {
                 onRefreshData?()
             }
             return true
         }
-        if let binding = settings.binding(for: .hidePanel),
-           binding.matches(keyCode: event.keyCode, modifiers: modifiers) {
+        if PanelShortcutEventMatcher.matches(.hidePanel, event: event) {
             orderOut(nil)
             return true
         }
-        if let binding = settings.binding(for: .resetPosition),
-           binding.matches(keyCode: event.keyCode, modifiers: modifiers) {
+        if PanelShortcutEventMatcher.matches(.resetPosition, event: event) {
             onResetPosition?()
             return true
         }
-        if let binding = settings.binding(for: .cycleFilter) {
-            if binding.matches(keyCode: event.keyCode, modifiers: modifiers) {
-                onCycleAppFilter?(false)
-                return true
-            }
-            // Shift reverses the cycle when the base binding has no Shift of its own.
-            if !binding.modifiers.contains(.shift),
-               UInt32(event.keyCode) == binding.keyCode,
-               modifiers == binding.modifiers.union(.shift) {
-                onCycleAppFilter?(true)
-                return true
-            }
+        if PanelShortcutEventMatcher.matches(.cycleFilter, event: event) {
+            onCycleAppFilter?(false)
+            return true
+        }
+        // Shift reverses the cycle when the base binding has no Shift of its own.
+        if PanelShortcutEventMatcher.matchesReverseFilterCycle(event: event) {
+            onCycleAppFilter?(true)
+            return true
         }
         return false
     }

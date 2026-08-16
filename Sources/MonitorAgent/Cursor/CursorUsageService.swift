@@ -14,7 +14,10 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
 
     private static let pageSize = 100
     private static let maximumPages = 1_000
-    private static let overlapMilliseconds: Int64 = 60_000
+    private static let maximumBackfillPages = 10
+    private static let maximumBackfillWindowMilliseconds: Int64 = 30 * 86_400_000
+    private static let minimumBackfillWindowMilliseconds: Int64 = 60_000
+    static let overlapMilliseconds: Int64 = 3_600_000
 
     private let database: DatabaseManager
     private let accountSession: CursorAccountResolving
@@ -73,7 +76,7 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
         let accountChanged = existingState?.sessionId != accountIdentity
         let endMilliseconds = Int64(currentDate.timeIntervalSince1970 * 1_000)
         let startMilliseconds = accountChanged ? nil : existingState.map {
-            max($0.byteOffset - Self.overlapMilliseconds, 0)
+            Self.secondStart(milliseconds: max($0.byteOffset - Self.overlapMilliseconds, 0))
         }
         let events = try fetchEvents(
             token: token,
@@ -83,7 +86,27 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
             cancellation: cancellation
         )
         try client.checkCancellation(cancellation)
-        let records = events.compactMap(makeRecord)
+        let records = try makeRecords(
+            events: events,
+            startMilliseconds: startMilliseconds,
+            endMilliseconds: endMilliseconds
+        )
+        if let startMilliseconds {
+            let replacementRange = Self.createdAtRange(
+                startMilliseconds: startMilliseconds,
+                endMilliseconds: endMilliseconds
+            )
+            guard records.allSatisfy({ replacementRange.contains($0.createdAt) }) else {
+                throw CursorUsageError.invalidResponse
+            }
+        }
+        let costBackfill = try accountChanged ? nil : fetchCostBackfill(
+            token: token,
+            account: account,
+            accountIdentity: accountIdentity,
+            currentSeconds: currentSeconds,
+            cancellation: cancellation
+        )
         let state = SyncState(
             filePath: Self.syncStateKey,
             byteOffset: endMilliseconds,
@@ -95,20 +118,40 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
         )
         if let cancellation {
             guard try cancellation.withActiveCursor(perform: {
-                try commit(records: records, state: state, accountChanged: accountChanged)
+                try commit(
+                    records: records,
+                    state: state,
+                    accountChanged: accountChanged,
+                    startMilliseconds: startMilliseconds,
+                    endMilliseconds: endMilliseconds,
+                    costBackfill: costBackfill
+                )
             }) != nil else {
                 throw CursorUsageError.cancelled
             }
         } else {
-            try commit(records: records, state: state, accountChanged: accountChanged)
+            try commit(
+                records: records,
+                state: state,
+                accountChanged: accountChanged,
+                startMilliseconds: startMilliseconds,
+                endMilliseconds: endMilliseconds,
+                costBackfill: costBackfill
+            )
         }
-        return SessionSyncResult(filesSynced: 1, recordsSynced: records.count)
+        return SessionSyncResult(
+            filesSynced: 1,
+            recordsSynced: records.count + (costBackfill?.records.count ?? 0)
+        )
     }
 
     private func commit(
         records: [ParsedRecord],
         state: SyncState,
-        accountChanged: Bool
+        accountChanged: Bool,
+        startMilliseconds: Int64?,
+        endMilliseconds: Int64,
+        costBackfill: CursorUsageCostBackfillCommit?
     ) throws {
         if accountChanged {
             try database.replaceAppRecords(
@@ -117,8 +160,89 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
                 state: state
             )
         } else {
-            try database.commitSync(records: records, state: state)
+            guard let startMilliseconds else { throw CursorUsageError.invalidResponse }
+            try database.replaceAppRecords(
+                appType: AgentID.cursor.appType,
+                records: records,
+                state: state,
+                createdAtRange: Self.createdAtRange(
+                    startMilliseconds: startMilliseconds,
+                    endMilliseconds: endMilliseconds
+                ),
+                costBackfill: costBackfill
+            )
         }
+    }
+
+    private func fetchCostBackfill(
+        token: String,
+        account: CursorAccount,
+        accountIdentity: String,
+        currentSeconds: Int,
+        cancellation: CursorOperationCancellation?
+    ) throws -> CursorUsageCostBackfillCommit? {
+        guard let state = database.cursorUsageCostBackfillState(
+            accountIdentity: accountIdentity
+        ), state.nextStartMilliseconds < state.targetEndMilliseconds else {
+            return nil
+        }
+
+        let startMilliseconds = Self.secondStart(
+            milliseconds: state.nextStartMilliseconds
+        )
+        var endMilliseconds = min(
+            startMilliseconds + Self.maximumBackfillWindowMilliseconds,
+            state.targetEndMilliseconds
+        )
+        var events: [CursorUsageEvent] = []
+        while true {
+            do {
+                events = try fetchEvents(
+                    token: token,
+                    account: account,
+                    startMilliseconds: startMilliseconds,
+                    endMilliseconds: endMilliseconds,
+                    cancellation: cancellation,
+                    reportsDenseRange: true
+                )
+                break
+            } catch CursorUsageFetchError.rangeTooDense {
+                let reducedSpan = (endMilliseconds - startMilliseconds) / 2
+                let reducedEndMilliseconds = Self.secondStart(
+                    milliseconds: startMilliseconds + reducedSpan
+                )
+                guard reducedEndMilliseconds - startMilliseconds
+                        >= Self.minimumBackfillWindowMilliseconds else {
+                    throw CursorUsageError.paginationLimitExceeded
+                }
+                endMilliseconds = reducedEndMilliseconds
+            }
+        }
+
+        let records = try makeRecords(
+            events: events,
+            startMilliseconds: startMilliseconds,
+            endMilliseconds: endMilliseconds
+        )
+        let replacementRange = Self.createdAtRange(
+            startMilliseconds: startMilliseconds,
+            endMilliseconds: endMilliseconds
+        )
+        guard records.allSatisfy({ replacementRange.contains($0.createdAt) }) else {
+            throw CursorUsageError.invalidResponse
+        }
+        let nextState = endMilliseconds >= state.targetEndMilliseconds ? nil :
+            CursorUsageCostBackfillState(
+                accountIdentity: accountIdentity,
+                nextStartMilliseconds: endMilliseconds,
+                targetEndMilliseconds: state.targetEndMilliseconds,
+                lastSyncedAt: currentSeconds
+            )
+        return CursorUsageCostBackfillCommit(
+            records: records,
+            createdAtRange: replacementRange,
+            nextState: nextState
+        )
     }
 
     private func fetchEvents(
@@ -126,13 +250,18 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
         account: CursorAccount,
         startMilliseconds: Int64?,
         endMilliseconds: Int64,
-        cancellation: CursorOperationCancellation?
+        cancellation: CursorOperationCancellation?,
+        reportsDenseRange: Bool = false
     ) throws -> [CursorUsageEvent] {
         var events: [CursorUsageEvent] = []
         var page = 1
+        var expectedEventCount: Int?
 
         while page <= Self.maximumPages {
             try client.checkCancellation(cancellation)
+            if reportsDenseRange, page > Self.maximumBackfillPages {
+                throw CursorUsageFetchError.rangeTooDense
+            }
             var body: [String: Any] = [
                 "userId": account.userId,
                 "endDate": String(endMilliseconds),
@@ -153,10 +282,35 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
                 cancellation: cancellation
             )
             let response = try JSONDecoder().decode(CursorUsagePage.self, from: data)
+            guard response.totalUsageEventsCount >= 0 else {
+                throw CursorUsageError.invalidResponse
+            }
+            if let expectedEventCount {
+                guard response.totalUsageEventsCount == expectedEventCount else {
+                    throw CursorUsageError.invalidResponse
+                }
+            } else {
+                expectedEventCount = response.totalUsageEventsCount
+            }
+            if reportsDenseRange,
+               page == 1,
+               response.totalUsageEventsCount > Self.pageSize * Self.maximumBackfillPages {
+                throw CursorUsageFetchError.rangeTooDense
+            }
+            if response.totalUsageEventsCount == 0 {
+                guard page == 1, response.usageEventsDisplay.isEmpty else {
+                    throw CursorUsageError.invalidResponse
+                }
+                return events
+            }
+            guard !response.usageEventsDisplay.isEmpty else {
+                throw CursorUsageError.invalidResponse
+            }
             events.append(contentsOf: response.usageEventsDisplay)
-
-            if events.count >= response.totalUsageEventsCount
-                || response.usageEventsDisplay.isEmpty {
+            guard events.count <= response.totalUsageEventsCount else {
+                throw CursorUsageError.invalidResponse
+            }
+            if events.count == response.totalUsageEventsCount {
                 return events
             }
             page += 1
@@ -165,24 +319,38 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
         throw CursorUsageError.paginationLimitExceeded
     }
 
-    private func makeRecord(event: CursorUsageEvent) -> ParsedRecord? {
+    private func makeRecord(event: CursorUsageEvent) throws -> ParsedRecord {
         guard let timestamp = event.timestampMilliseconds,
-              let usage = event.tokenUsage,
               !event.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return nil
+            throw CursorUsageError.invalidResponse
         }
 
-        let identity = [
+        let usage = event.tokenUsage
+        if usage == nil, event.chargedCents != 0 {
+            throw CursorUsageError.invalidResponse
+        }
+        if let usage {
+            try validateTokenUsage(usage)
+        }
+
+        var identity = [
             String(timestamp),
             event.conversationId ?? "",
             event.model,
             event.kind ?? "",
-            String(usage.inputTokens),
-            String(usage.outputTokens),
-            String(usage.cacheReadTokens),
-            String(usage.cacheWriteTokens),
-        ].joined(separator: "|")
-        let digest = SHA256.hash(data: Data(identity.utf8))
+        ]
+        if let usage {
+            identity.append(contentsOf: [
+                String(usage.inputTokens),
+                String(usage.outputTokens),
+                String(usage.cacheReadTokens),
+                String(usage.cacheWriteTokens),
+            ])
+        } else {
+            identity.append("free")
+        }
+        let identityValue = identity.joined(separator: "|")
+        let digest = SHA256.hash(data: Data(identityValue.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
         let requestId = "cursor:\(digest)"
@@ -192,14 +360,82 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
             requestId: requestId,
             appType: "cursor",
             model: event.model,
-            inputTokens: max(usage.inputTokens, 0),
-            outputTokens: max(usage.outputTokens, 0),
-            cacheReadTokens: max(usage.cacheReadTokens, 0),
-            cacheCreationTokens: max(usage.cacheWriteTokens, 0),
+            inputTokens: usage?.inputTokens ?? 0,
+            outputTokens: usage?.outputTokens ?? 0,
+            cacheReadTokens: usage?.cacheReadTokens ?? 0,
+            cacheCreationTokens: usage?.cacheWriteTokens ?? 0,
             sessionId: sessionId,
-            createdAt: Int(timestamp / 1_000)
+            createdAt: Int(timestamp / 1_000),
+            chargedCostMicros: try costMicros(fromCents: event.chargedCents),
+            listCostMicros: try costMicros(fromCents: usage?.totalCents),
+            discountPercent: usage?.discountPercentOff,
+            isFreeRequest: usage == nil
         )
     }
+
+    private func validateTokenUsage(_ usage: CursorTokenUsage) throws {
+        var total = 0
+        for value in [
+            usage.inputTokens,
+            usage.outputTokens,
+            usage.cacheReadTokens,
+            usage.cacheWriteTokens,
+        ] {
+            guard value >= 0 else { throw CursorUsageError.invalidResponse }
+            let addition = total.addingReportingOverflow(value)
+            guard !addition.overflow else { throw CursorUsageError.invalidResponse }
+            total = addition.partialValue
+        }
+    }
+
+    private func makeRecords(
+        events: [CursorUsageEvent],
+        startMilliseconds: Int64?,
+        endMilliseconds: Int64
+    ) throws -> [ParsedRecord] {
+        let lowerBound = startMilliseconds ?? 0
+        guard lowerBound <= endMilliseconds,
+              events.allSatisfy({ event in
+                  guard let timestamp = event.timestampMilliseconds else { return false }
+                  return lowerBound <= timestamp && timestamp <= endMilliseconds
+              }) else {
+            throw CursorUsageError.invalidResponse
+        }
+        let records = try events.map { try makeRecord(event: $0) }
+        guard Set(records.map(\.requestId)).count == records.count else {
+            throw CursorUsageError.invalidResponse
+        }
+        return records
+    }
+
+    private static func secondStart(milliseconds: Int64) -> Int64 {
+        milliseconds - (milliseconds % 1_000)
+    }
+
+    private static func createdAtRange(
+        startMilliseconds: Int64,
+        endMilliseconds: Int64
+    ) -> Range<Int> {
+        let startSeconds = Int(startMilliseconds / 1_000)
+        let endSeconds = Int(endMilliseconds / 1_000) + 1
+        return startSeconds..<endSeconds
+    }
+
+    private func costMicros(fromCents cents: Double?) throws -> Int64? {
+        guard let cents else { return nil }
+        let scaledMicros = (cents * 10_000).rounded()
+        guard cents.isFinite,
+              cents >= 0,
+              scaledMicros.isFinite,
+              scaledMicros < Double(Int64.max) else {
+            throw CursorUsageError.invalidResponse
+        }
+        return Int64(scaledMicros)
+    }
+}
+
+private enum CursorUsageFetchError: Error {
+    case rangeTooDense
 }
 
 private struct CursorUsagePage: Decodable {
@@ -230,6 +466,7 @@ private struct CursorUsageEvent: Decodable {
     let kind: String?
     let conversationId: String?
     let tokenUsage: CursorTokenUsage?
+    let chargedCents: Double?
 
     private enum CodingKeys: String, CodingKey {
         case timestamp
@@ -237,6 +474,7 @@ private struct CursorUsageEvent: Decodable {
         case kind
         case conversationId
         case tokenUsage
+        case chargedCents
     }
 
     init(from decoder: Decoder) throws {
@@ -246,6 +484,7 @@ private struct CursorUsageEvent: Decodable {
         kind = try container.decodeIfPresent(String.self, forKey: .kind)
         conversationId = try container.decodeIfPresent(String.self, forKey: .conversationId)
         tokenUsage = try container.decodeIfPresent(CursorTokenUsage.self, forKey: .tokenUsage)
+        chargedCents = try container.decodeFlexibleDoubleIfPresent(forKey: .chargedCents)
     }
 }
 
@@ -254,12 +493,16 @@ private struct CursorTokenUsage: Decodable {
     let outputTokens: Int
     let cacheWriteTokens: Int
     let cacheReadTokens: Int
+    let totalCents: Double?
+    let discountPercentOff: Int?
 
     private enum CodingKeys: String, CodingKey {
         case inputTokens
         case outputTokens
         case cacheWriteTokens
         case cacheReadTokens
+        case totalCents
+        case discountPercentOff
     }
 
     init(from decoder: Decoder) throws {
@@ -268,5 +511,14 @@ private struct CursorTokenUsage: Decodable {
         outputTokens = try container.decodeFlexibleIntIfPresent(forKey: .outputTokens) ?? 0
         cacheWriteTokens = try container.decodeFlexibleIntIfPresent(forKey: .cacheWriteTokens) ?? 0
         cacheReadTokens = try container.decodeFlexibleIntIfPresent(forKey: .cacheReadTokens) ?? 0
+        totalCents = try container.decodeFlexibleDoubleIfPresent(forKey: .totalCents)
+        discountPercentOff = try container.decodeFlexibleIntIfPresent(forKey: .discountPercentOff)
+        if let discountPercentOff, !(0...100).contains(discountPercentOff) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .discountPercentOff,
+                in: container,
+                debugDescription: "Expected a percentage from 0 through 100."
+            )
+        }
     }
 }

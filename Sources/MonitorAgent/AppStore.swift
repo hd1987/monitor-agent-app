@@ -165,7 +165,11 @@ final class AppStore: ObservableObject {
     private var reloadGeneration = 0
     private var activityLoadGeneration = 0
     private(set) var isPanelVisible = false
+    private(set) var isRequestsWindowVisible = false
     var isPeriodicRefreshActive: Bool { refreshCoordinator.isRunning }
+    private var isRefreshSurfaceVisible: Bool {
+        isPanelVisible || isRequestsWindowVisible
+    }
     var quotaSnapshots: [QuotaProviderID: QuotaSnapshot] {
         quotaCardStates.compactMapValues(\.snapshot)
     }
@@ -330,6 +334,20 @@ final class AppStore: ObservableObject {
             return cachedIdentity
         }
     }
+    var cursorSpendPresentationAccountIdentity: String? {
+        guard isCursorDataPresentationAvailable else { return nil }
+        return cursorPresentationIdentity ?? cachedCursorIdentity
+    }
+    var requestPresentationContext: RequestPresentationContext {
+        let queryContext = cursorBoundQueryContext(from: enabledAgents)
+        return RequestPresentationContext(
+            enabledAgents: queryContext.enabledAgents,
+            cursorDataPresentationToken: queryContext.token,
+            cursorSpendAccountIdentity: queryContext.enabledAgents.contains(.cursor)
+                ? cursorSpendPresentationAccountIdentity
+                : nil
+        )
+    }
     var isActivityDetailPresented: Bool {
         if case .closed = activityDetailState { return false }
         return true
@@ -401,8 +419,17 @@ final class AppStore: ObservableObject {
         enabledAgents requestedEnabledAgents: Set<AgentID>? = nil
     ) {
         let enabledAgents = requestedEnabledAgents ?? self.enabledAgents
-        guard isPanelVisible, !isRebuildingUsageData, !enabledAgents.isEmpty else {
+        guard !isRebuildingUsageData, !enabledAgents.isEmpty else {
             refreshCoordinator.stop()
+            return
+        }
+
+        guard isPanelVisible else {
+            if isRequestsWindowVisible {
+                configureRequestsWindowRefresh(enabledAgents: enabledAgents)
+            } else {
+                refreshCoordinator.stop()
+            }
             return
         }
 
@@ -412,6 +439,20 @@ final class AppStore: ObservableObject {
                 ? interval.effectiveInterval
                 : nil
         ) { [weak self] completion in
+            guard let self else {
+                completion()
+                return
+            }
+            self.manualRefreshAvailableAt = self.refreshCoordinator.manualRefreshAvailableAt
+            self.performRefreshCycle(
+                enabledAgents: enabledAgents,
+                completion: completion
+            )
+        }
+    }
+
+    private func configureRequestsWindowRefresh(enabledAgents: Set<AgentID>) {
+        refreshCoordinator.configureManualRefresh { [weak self] completion in
             guard let self else {
                 completion()
                 return
@@ -454,7 +495,7 @@ final class AppStore: ObservableObject {
                 completion()
                 return
             }
-            guard isAccepted, self.isPanelVisible else {
+            guard isAccepted, self.isRefreshSurfaceVisible else {
                 completion()
                 return
             }
@@ -522,14 +563,14 @@ final class AppStore: ObservableObject {
             expectedCursorIdentity: expectedCursorIdentity,
             onLocalComplete: { [weak self] in
                 DispatchQueue.main.async {
-                    guard let self, self.isPanelVisible else { return }
+                    guard let self, self.isRefreshSurfaceVisible else { return }
                     self.reload()
                 }
             },
             onCursorComplete: { [weak self] in
                 deferredCursorSpendParticipant?.markSourceSucceeded()
                 DispatchQueue.main.async {
-                    guard let self, self.isPanelVisible else {
+                    guard let self, self.isRefreshSurfaceVisible else {
                         deferredCursorSpendParticipant?.finish()
                         return
                     }
@@ -581,7 +622,7 @@ final class AppStore: ObservableObject {
                     guard let self,
                           let cursorUsageGeneration,
                           self.cursorUsageRefreshGeneration == cursorUsageGeneration,
-                          self.isPanelVisible,
+                          self.isRefreshSurfaceVisible,
                           self.enabledAgents.contains(.cursor),
                           syncCancellation.isEnabled(.cursor) else {
                         return
@@ -654,7 +695,12 @@ final class AppStore: ObservableObject {
                     } else {
                         isPendingIdentity = false
                     }
-                    if currentIdentity != expectedCursorIdentity || isPendingIdentity {
+                    if currentIdentity != expectedCursorIdentity {
+                        self.cursorAccountPresentationState = .mismatched(expectedCursorIdentity)
+                        self.cursorSpendSnapshot = nil
+                        self.clearCursorDependentPresentation()
+                        self.reload()
+                    } else if isPendingIdentity {
                         self.cursorAccountPresentationState = .unavailable
                         self.cursorSpendSnapshot = nil
                         self.clearCursorDependentPresentation()
@@ -678,15 +724,42 @@ final class AppStore: ObservableObject {
     /// Stop periodic refreshing when the panel is hidden.
     func panelDidClose() {
         isPanelVisible = false
+        if isRequestsWindowVisible {
+            applyRefreshInterval(refreshSettings.interval)
+        } else {
+            invalidateHiddenRefreshPresentation()
+            refreshCoordinator.stop()
+        }
+    }
+
+    /// Keep unified manual refresh available while the request-history window is visible.
+    func requestsWindowDidOpen() {
+        guard !isRequestsWindowVisible else { return }
+        isRequestsWindowVisible = true
+        if !isPanelVisible {
+            applyRefreshInterval(refreshSettings.interval)
+        }
+    }
+
+    /// Remove the manual-only refresh participant when the request-history window closes.
+    func requestsWindowDidClose() {
+        guard isRequestsWindowVisible else { return }
+        isRequestsWindowVisible = false
+        if !isPanelVisible {
+            invalidateHiddenRefreshPresentation()
+            refreshCoordinator.stop()
+        }
+    }
+
+    private func invalidateHiddenRefreshPresentation() {
         cursorAccountVerificationGeneration += 1
         invalidateCursorSpendSnapshotRestore()
         cursorSpendRefreshGeneration += 1
-        refreshCoordinator.stop()
     }
 
     /// Start a unified manual refresh and reset the next automatic interval.
     func refreshNow() {
-        guard isPanelVisible, !isRebuildingUsageData, hasEnabledAgents else { return }
+        guard isRefreshSurfaceVisible, !isRebuildingUsageData, hasEnabledAgents else { return }
         refreshCoordinator.refreshNow()
     }
 
@@ -1072,7 +1145,7 @@ final class AppStore: ObservableObject {
                 let identity = try? result.get().account.syncIdentity
                 let isAccepted = self.cursorAccountVerificationGeneration == generation
                     && self.enabledAgents.contains(.cursor)
-                    && self.isPanelVisible
+                    && self.isRefreshSurfaceVisible
                     && !self.isRebuildingUsageData
                 if isAccepted {
                     if let identity {
@@ -1190,7 +1263,7 @@ final class AppStore: ObservableObject {
     private func restoreCursorSpendSnapshotForSelection() {
         invalidateCursorSpendSnapshotRestore()
         let generation = cursorSpendSnapshotRestoreGeneration
-        guard appFilter == .cursor,
+        guard appFilter == .all || appFilter == .cursor,
               enabledAgents.contains(.cursor),
               isCursorDataPresentationAvailable else {
             cursorSpendSnapshot = nil
@@ -1210,7 +1283,7 @@ final class AppStore: ObservableObject {
             DispatchQueue.main.async {
                 guard let self,
                       self.cursorSpendSnapshotRestoreGeneration == generation,
-                      self.appFilter == .cursor,
+                      self.appFilter == .all || self.appFilter == .cursor,
                       self.isCursorDataPresentationAvailable,
                       (self.cursorPresentationIdentity ?? self.cachedCursorIdentity) == accountIdentity,
                       CursorSpendRange(
@@ -1236,7 +1309,7 @@ final class AppStore: ObservableObject {
     ) {
         guard let cursorSpendRefresher,
               enabledAgents.contains(.cursor),
-              isPanelVisible,
+              isRefreshSurfaceVisible,
               isCursorRefreshAvailable else {
             completion()
             return
@@ -1256,7 +1329,7 @@ final class AppStore: ObservableObject {
             defer { completion() }
             guard let self,
                   self.cursorSpendRefreshGeneration == generation,
-                  self.isPanelVisible,
+                  self.isRefreshSurfaceVisible,
                   self.enabledAgents.contains(.cursor),
                   self.isCursorRefreshAvailable else {
                 return

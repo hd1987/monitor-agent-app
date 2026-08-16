@@ -31,4 +31,11 @@ final class StatCardsFormattingTests: XCTestCase {
         XCTAssertEqual(formatCursorSpend(0), "$0")
         XCTAssertEqual(formatCursorSpend(22_481), "$224.81")
     }
+
+    func testTotalUsageDisplaysCursorSpendOnlyForAllAndCursorFilters() {
+        XCTAssertEqual(formatTotalUsage(3_039, for: .all), "$30.39")
+        XCTAssertEqual(formatTotalUsage(3_039, for: .cursor), "$30.39")
+        XCTAssertEqual(formatTotalUsage(3_039, for: .claude), "—")
+        XCTAssertEqual(formatTotalUsage(3_039, for: .codex), "—")
+    }
 }

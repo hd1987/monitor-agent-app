@@ -17,6 +17,7 @@ final class StatCardsLayoutTests: XCTestCase {
             StatCardLayout.availableWidth
         )
         XCTAssertEqual(TokenBreakdownTipLayout.itemSpacing, 8)
+        XCTAssertEqual(StatCardLayout.visibleCardCount, 5)
     }
 
     func testAnyActiveStatCardTipRaisesTheWholeCardRow() {

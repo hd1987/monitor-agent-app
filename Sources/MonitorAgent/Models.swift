@@ -385,6 +385,107 @@ struct ParsedRecord {
     let cacheCreationTokens: Int
     let sessionId: String
     let createdAt: Int          // Unix seconds
+    let chargedCostMicros: Int64?
+    let listCostMicros: Int64?
+    let discountPercent: Int?
+    let isFreeRequest: Bool
+
+    init(
+        requestId: String,
+        appType: String,
+        model: String,
+        inputTokens: Int,
+        outputTokens: Int,
+        cacheReadTokens: Int,
+        cacheCreationTokens: Int,
+        sessionId: String,
+        createdAt: Int,
+        chargedCostMicros: Int64? = nil,
+        listCostMicros: Int64? = nil,
+        discountPercent: Int? = nil,
+        isFreeRequest: Bool = false
+    ) {
+        self.requestId = requestId
+        self.appType = appType
+        self.model = model
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheCreationTokens = cacheCreationTokens
+        self.sessionId = sessionId
+        self.createdAt = createdAt
+        self.chargedCostMicros = chargedCostMicros
+        self.listCostMicros = listCostMicros
+        self.discountPercent = discountPercent
+        self.isFreeRequest = isFreeRequest
+    }
+}
+
+struct RequestLogItem: Identifiable, Equatable {
+    let requestId: String
+    let provider: AgentID
+    let model: String
+    let inputTokens: Int64
+    let outputTokens: Int64
+    let cacheReadTokens: Int64
+    let cacheCreationTokens: Int64
+    let chargedCostMicros: Int64?
+    let listCostMicros: Int64?
+    let discountPercent: Int?
+    let isFreeRequest: Bool
+    let createdAt: Int
+
+    var id: String { requestId }
+    var totalTokens: Int64 {
+        inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens
+    }
+
+    var isFreeCursorRequest: Bool {
+        provider == .cursor && isFreeRequest
+    }
+}
+
+struct CursorUsageCostBackfillState: Equatable {
+    let accountIdentity: String
+    let nextStartMilliseconds: Int64
+    let targetEndMilliseconds: Int64
+    let lastSyncedAt: Int
+}
+
+struct CursorUsageCostBackfillCommit {
+    let records: [ParsedRecord]
+    let createdAtRange: Range<Int>
+    let nextState: CursorUsageCostBackfillState?
+}
+
+struct RequestPageCursor: Equatable {
+    let createdAt: Int
+    let requestId: String
+}
+
+struct RequestLogPage: Equatable {
+    let items: [RequestLogItem]
+    let nextCursor: RequestPageCursor?
+}
+
+struct RequestLogSummary: Equatable {
+    var totalRequests: Int = 0
+    var totalSessions: Int = 0
+    var inputTokens: Int64 = 0
+    var outputTokens: Int64 = 0
+    var cacheReadTokens: Int64 = 0
+    var cacheCreationTokens: Int64 = 0
+    var totalUsageMicros: Int64?
+
+    var totalTokens: Int64 {
+        inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens
+    }
+
+    var cacheHitRate: Double {
+        let denominator = Double(inputTokens + cacheReadTokens + cacheCreationTokens)
+        guard denominator > 0 else { return 0 }
+        return Double(cacheReadTokens) / denominator
+    }
 }
 
 struct SyncState {

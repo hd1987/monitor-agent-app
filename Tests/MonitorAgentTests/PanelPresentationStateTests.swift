@@ -143,6 +143,47 @@ final class PanelPresentationStateTests: XCTestCase {
         XCTAssertEqual(refreshCount, 1)
     }
 
+    func testRequestsWindowReusesRefreshShortcutAndConsumesRepeats() {
+        let window = RequestsWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        var refreshCount = 0
+        window.onRefreshData = { refreshCount += 1 }
+
+        let refresh = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "r",
+            charactersIgnoringModifiers: "r",
+            isARepeat: false,
+            keyCode: UInt16(kVK_ANSI_R)
+        )!
+        let repeatedRefresh = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "r",
+            charactersIgnoringModifiers: "r",
+            isARepeat: true,
+            keyCode: UInt16(kVK_ANSI_R)
+        )!
+
+        window.sendEvent(refresh)
+        window.sendEvent(repeatedRefresh)
+
+        XCTAssertEqual(refreshCount, 1)
+    }
+
     func testActivityChartShortcutInvokesToggleOnceAndConsumesRepeats() {
         let panel = FloatingPanel()
         var toggleCount = 0

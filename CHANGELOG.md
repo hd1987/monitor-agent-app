@@ -6,6 +6,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-16
+
+### Added
+- Open an `860 × 750` request-history detail window from every main-panel stat card with shared Provider/date controls, unified refresh button and shortcut, centered reusable summary cards, Cursor Spend-backed Total Usage, scroller-safe pagination, and authoritative discounted request cost
+- Bind request-history queries to the main panel's Cursor account presentation context so a failed account replacement cannot leave the previous account's requests visible
+
+### Fixed
+- Reject negative or overflowing Cursor token totals and preserve valid subsecond Usage watermarks during request-cost migration
+- Reject Cursor Cost values outside the persisted micro-dollar range and prefetch request-history pages without eagerly copying every loaded row
+- Replace Cursor Usage inside its one-hour incremental overlap so withdrawn events disappear while token-less Free requests remain visible
+- Preserve the normal Cursor Usage watermark during request-cost schema upgrades and recover historical Cost in bounded, independently resumable ranges
+- Persist Cursor Free-request semantics explicitly so zero-valued token usage is not mislabeled as Free
+- Skip superseded request-detail queries so rapid Provider and date changes do not wait behind obsolete local aggregation work
+- Reject incomplete Cursor Usage pagination and malformed required event fields before range replacement, and publish request-detail results under the account revision lock
+- Reject duplicate Cursor request identities before range replacement, preserve coalesced refreshes across visibility changes, and retain distinct stat-card accessibility semantics
+- Reject out-of-range Cursor events, enforce the actual historical Cost page budget, and show unavailable detail metrics during confirmed account mismatch
+- Align dense historical Cost backfill splits to whole seconds so adjacent range replacements cannot discard subsecond boundary events
+
 ## [0.13.2] - 2026-08-14
 
 ### Changed

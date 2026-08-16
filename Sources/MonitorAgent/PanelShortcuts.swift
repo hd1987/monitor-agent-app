@@ -62,6 +62,29 @@ enum PanelShortcutAction: String, CaseIterable, Identifiable {
     }
 }
 
+enum PanelShortcutEventMatcher {
+    static func matches(_ action: PanelShortcutAction, event: NSEvent) -> Bool {
+        guard let binding = PanelShortcutSettings.shared.binding(for: action) else { return false }
+        return binding.matches(
+            keyCode: event.keyCode,
+            modifiers: normalizedModifiers(for: event)
+        )
+    }
+
+    static func matchesReverseFilterCycle(event: NSEvent) -> Bool {
+        guard let binding = PanelShortcutSettings.shared.binding(for: .cycleFilter),
+              !binding.modifiers.contains(.shift) else { return false }
+        return UInt32(event.keyCode) == binding.keyCode
+            && normalizedModifiers(for: event) == binding.modifiers.union(.shift)
+    }
+
+    private static func normalizedModifiers(for event: NSEvent) -> NSEvent.ModifierFlags {
+        event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .intersection(GlobalShortcut.supportedModifiers)
+    }
+}
+
 /// One persisted assignment. A `nil` binding means the user explicitly cleared the action;
 /// an action absent from storage falls back to its default (forward-compatible with new actions).
 private struct PanelShortcutEntry: Codable {
