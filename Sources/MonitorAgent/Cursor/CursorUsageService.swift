@@ -187,7 +187,9 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
             return nil
         }
 
-        let startMilliseconds = state.nextStartMilliseconds
+        let startMilliseconds = Self.secondStart(
+            milliseconds: state.nextStartMilliseconds
+        )
         var endMilliseconds = min(
             startMilliseconds + Self.maximumBackfillWindowMilliseconds,
             state.targetEndMilliseconds
@@ -206,10 +208,14 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
                 break
             } catch CursorUsageFetchError.rangeTooDense {
                 let reducedSpan = (endMilliseconds - startMilliseconds) / 2
-                guard reducedSpan >= Self.minimumBackfillWindowMilliseconds else {
+                let reducedEndMilliseconds = Self.secondStart(
+                    milliseconds: startMilliseconds + reducedSpan
+                )
+                guard reducedEndMilliseconds - startMilliseconds
+                        >= Self.minimumBackfillWindowMilliseconds else {
                     throw CursorUsageError.paginationLimitExceeded
                 }
-                endMilliseconds = startMilliseconds + reducedSpan
+                endMilliseconds = reducedEndMilliseconds
             }
         }
 

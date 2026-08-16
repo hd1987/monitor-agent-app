@@ -329,7 +329,7 @@ final class CursorUsageServiceTests: XCTestCase {
         )
     }
 
-    func testHistoricalCostBackfillEnforcesActualTenPageBudget() throws {
+    func testHistoricalCostBackfillEnforcesPageBudgetAndAlignedDenseSplits() throws {
         let databaseURL = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("MonitorAgent-CursorPageBudget-\(UUID().uuidString).sqlite")
         defer { try? FileManager.default.removeItem(at: databaseURL) }
@@ -397,6 +397,13 @@ final class CursorUsageServiceTests: XCTestCase {
                 conversation: "sparse-page-\(page)"
             ))
         })
+        responses.append(contentsOf: (0..<8).map { attempt in
+            response(body: usagePage(
+                total: 1_001,
+                timestamp: String(backfillTimestamp),
+                conversation: "dense-range-\(attempt)"
+            ))
+        })
         responses.append(response(body: usagePage(
             total: 1,
             timestamp: String(backfillTimestamp),
@@ -412,12 +419,30 @@ final class CursorUsageServiceTests: XCTestCase {
 
         XCTAssertEqual(try service.sync().recordsSynced, 2)
         let requestBodies = try transport.requests.dropFirst().map(requestBody)
-        XCTAssertEqual(requestBodies.count, 12)
+        XCTAssertEqual(requestBodies.count, 20)
         XCTAssertEqual(requestBodies[10]["page"] as? Int, 10)
         XCTAssertEqual(requestBodies[11]["page"] as? Int, 1)
         XCTAssertEqual(
             requestBodies[11]["endDate"] as? String,
             String(Int64(earliestSeconds) * 1_000 + 15 * 86_400_000)
+        )
+        let backfillStartMilliseconds = Int64(earliestSeconds) * 1_000
+        var expectedEndMilliseconds = backfillStartMilliseconds + 30 * 86_400_000
+        for _ in 0..<9 {
+            let reducedSpan = (expectedEndMilliseconds - backfillStartMilliseconds) / 2
+            expectedEndMilliseconds = backfillStartMilliseconds + reducedSpan
+            expectedEndMilliseconds -= expectedEndMilliseconds % 1_000
+        }
+        XCTAssertEqual(
+            requestBodies[19]["endDate"] as? String,
+            String(expectedEndMilliseconds)
+        )
+        XCTAssertEqual(expectedEndMilliseconds % 1_000, 0)
+        XCTAssertEqual(
+            database.cursorUsageCostBackfillState(
+                accountIdentity: account.syncIdentity
+            )?.nextStartMilliseconds,
+            expectedEndMilliseconds
         )
     }
 
