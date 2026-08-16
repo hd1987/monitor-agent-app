@@ -435,6 +435,13 @@ struct RequestLogItem: Identifiable, Equatable {
     var totalTokens: Int64 {
         inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens
     }
+
+    var isFreeCursorRequest: Bool {
+        provider == .cursor
+            && totalTokens == 0
+            && chargedCostMicros == 0
+            && listCostMicros == nil
+    }
 }
 
 struct RequestPageCursor: Equatable {

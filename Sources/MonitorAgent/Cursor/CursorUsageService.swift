@@ -14,7 +14,7 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
 
     private static let pageSize = 100
     private static let maximumPages = 1_000
-    private static let overlapMilliseconds: Int64 = 60_000
+    private static let overlapMilliseconds: Int64 = 3_600_000
 
     private let database: DatabaseManager
     private let accountSession: CursorAccountResolving
@@ -73,7 +73,7 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
         let accountChanged = existingState?.sessionId != accountIdentity
         let endMilliseconds = Int64(currentDate.timeIntervalSince1970 * 1_000)
         let startMilliseconds = accountChanged ? nil : existingState.map {
-            max($0.byteOffset - Self.overlapMilliseconds, 0)
+            Self.secondStart(milliseconds: max($0.byteOffset - Self.overlapMilliseconds, 0))
         }
         let events = try fetchEvents(
             token: token,
@@ -84,6 +84,15 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
         )
         try client.checkCancellation(cancellation)
         let records = try events.compactMap { try makeRecord(event: $0) }
+        if let startMilliseconds {
+            let replacementRange = Self.createdAtRange(
+                startMilliseconds: startMilliseconds,
+                endMilliseconds: endMilliseconds
+            )
+            guard records.allSatisfy({ replacementRange.contains($0.createdAt) }) else {
+                throw CursorUsageError.invalidResponse
+            }
+        }
         let state = SyncState(
             filePath: Self.syncStateKey,
             byteOffset: endMilliseconds,
@@ -95,12 +104,24 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
         )
         if let cancellation {
             guard try cancellation.withActiveCursor(perform: {
-                try commit(records: records, state: state, accountChanged: accountChanged)
+                try commit(
+                    records: records,
+                    state: state,
+                    accountChanged: accountChanged,
+                    startMilliseconds: startMilliseconds,
+                    endMilliseconds: endMilliseconds
+                )
             }) != nil else {
                 throw CursorUsageError.cancelled
             }
         } else {
-            try commit(records: records, state: state, accountChanged: accountChanged)
+            try commit(
+                records: records,
+                state: state,
+                accountChanged: accountChanged,
+                startMilliseconds: startMilliseconds,
+                endMilliseconds: endMilliseconds
+            )
         }
         return SessionSyncResult(filesSynced: 1, recordsSynced: records.count)
     }
@@ -108,7 +129,9 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
     private func commit(
         records: [ParsedRecord],
         state: SyncState,
-        accountChanged: Bool
+        accountChanged: Bool,
+        startMilliseconds: Int64?,
+        endMilliseconds: Int64
     ) throws {
         if accountChanged {
             try database.replaceAppRecords(
@@ -117,7 +140,16 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
                 state: state
             )
         } else {
-            try database.commitSync(records: records, state: state)
+            guard let startMilliseconds else { throw CursorUsageError.invalidResponse }
+            try database.replaceAppRecords(
+                appType: AgentID.cursor.appType,
+                records: records,
+                state: state,
+                createdAtRange: Self.createdAtRange(
+                    startMilliseconds: startMilliseconds,
+                    endMilliseconds: endMilliseconds
+                )
+            )
         }
     }
 
@@ -167,22 +199,33 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
 
     private func makeRecord(event: CursorUsageEvent) throws -> ParsedRecord? {
         guard let timestamp = event.timestampMilliseconds,
-              let usage = event.tokenUsage,
               !event.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }
 
-        let identity = [
+        let usage = event.tokenUsage
+        if usage == nil, event.chargedCents != 0 {
+            throw CursorUsageError.invalidResponse
+        }
+
+        var identity = [
             String(timestamp),
             event.conversationId ?? "",
             event.model,
             event.kind ?? "",
-            String(usage.inputTokens),
-            String(usage.outputTokens),
-            String(usage.cacheReadTokens),
-            String(usage.cacheWriteTokens),
-        ].joined(separator: "|")
-        let digest = SHA256.hash(data: Data(identity.utf8))
+        ]
+        if let usage {
+            identity.append(contentsOf: [
+                String(usage.inputTokens),
+                String(usage.outputTokens),
+                String(usage.cacheReadTokens),
+                String(usage.cacheWriteTokens),
+            ])
+        } else {
+            identity.append("free")
+        }
+        let identityValue = identity.joined(separator: "|")
+        let digest = SHA256.hash(data: Data(identityValue.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
         let requestId = "cursor:\(digest)"
@@ -192,16 +235,29 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
             requestId: requestId,
             appType: "cursor",
             model: event.model,
-            inputTokens: max(usage.inputTokens, 0),
-            outputTokens: max(usage.outputTokens, 0),
-            cacheReadTokens: max(usage.cacheReadTokens, 0),
-            cacheCreationTokens: max(usage.cacheWriteTokens, 0),
+            inputTokens: max(usage?.inputTokens ?? 0, 0),
+            outputTokens: max(usage?.outputTokens ?? 0, 0),
+            cacheReadTokens: max(usage?.cacheReadTokens ?? 0, 0),
+            cacheCreationTokens: max(usage?.cacheWriteTokens ?? 0, 0),
             sessionId: sessionId,
             createdAt: Int(timestamp / 1_000),
             chargedCostMicros: try costMicros(fromCents: event.chargedCents),
-            listCostMicros: try costMicros(fromCents: usage.totalCents),
-            discountPercent: usage.discountPercentOff
+            listCostMicros: try costMicros(fromCents: usage?.totalCents),
+            discountPercent: usage?.discountPercentOff
         )
+    }
+
+    private static func secondStart(milliseconds: Int64) -> Int64 {
+        milliseconds - (milliseconds % 1_000)
+    }
+
+    private static func createdAtRange(
+        startMilliseconds: Int64,
+        endMilliseconds: Int64
+    ) -> Range<Int> {
+        let startSeconds = Int(startMilliseconds / 1_000)
+        let endSeconds = Int(endMilliseconds / 1_000) + 1
+        return startSeconds..<endSeconds
     }
 
     private func costMicros(fromCents cents: Double?) throws -> Int64? {

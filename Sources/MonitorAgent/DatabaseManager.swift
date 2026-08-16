@@ -369,6 +369,33 @@ final class DatabaseManager {
         }
     }
 
+    func replaceAppRecords(
+        appType: String,
+        records: [ParsedRecord],
+        state: SyncState,
+        createdAtRange: Range<Int>
+    ) throws {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard let db = dbQueue else { throw DatabaseManagerError.unavailable }
+        try db.write { db in
+            try db.execute(
+                sql: """
+                    DELETE FROM request_logs
+                    WHERE app_type = ?
+                      AND created_at >= ?
+                      AND created_at < ?
+                    """,
+                arguments: [appType, createdAtRange.lowerBound, createdAtRange.upperBound]
+            )
+            try insertRecords(records, in: db)
+            try upsertSyncState(state, in: db)
+        }
+        if appType == AgentID.cursor.appType {
+            cursorDataRevision &+= 1
+        }
+    }
+
     func cursorDataPresentationToken(
         matching accountIdentity: String
     ) -> CursorDataPresentationToken? {

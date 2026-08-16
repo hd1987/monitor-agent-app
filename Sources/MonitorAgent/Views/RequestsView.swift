@@ -409,7 +409,7 @@ struct RequestsView: View {
                 .frame(width: columns.model, alignment: .leading)
                 .help(item.model)
 
-            Text(formatTokenDetail(item.totalTokens))
+            Text(item.isFreeCursorRequest ? "—" : formatTokenDetail(item.totalTokens))
                 .monospacedDigit()
                 .lineLimit(1)
                 .frame(width: columns.tokens, alignment: .trailing)
@@ -429,17 +429,21 @@ struct RequestsView: View {
 
     @ViewBuilder
     private func requestCost(_ item: RequestLogItem) -> some View {
-        HStack(spacing: 6) {
-            Text(formatCurrencyMicros(item.chargedCostMicros))
-                .monospacedDigit()
-            if item.chargedCostMicros != nil,
-               let discountPercent = item.discountPercent,
-               discountPercent > 0 {
-                Text("\(discountPercent)% off")
-                    .foregroundStyle(theme.panelTertiaryForeground)
+        if item.isFreeCursorRequest {
+            Text("Free")
+        } else {
+            HStack(spacing: 6) {
+                Text(formatCurrencyMicros(item.chargedCostMicros))
+                    .monospacedDigit()
+                if item.chargedCostMicros != nil,
+                   let discountPercent = item.discountPercent,
+                   discountPercent > 0 {
+                    Text("\(discountPercent)% off")
+                        .foregroundStyle(theme.panelTertiaryForeground)
+                }
             }
+            .lineLimit(1)
         }
-        .lineLimit(1)
     }
 
     private func formatCurrencyMicros(_ micros: Int64?, compactZero: Bool = false) -> String {
