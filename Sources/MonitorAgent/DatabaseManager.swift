@@ -98,6 +98,7 @@ final class DatabaseManager {
                     charged_cost_micros INTEGER,
                     list_cost_micros INTEGER,
                     discount_percent INTEGER,
+                    is_free_request INTEGER NOT NULL DEFAULT 0,
                     session_id TEXT,
                     created_at INTEGER NOT NULL
                 );
@@ -143,6 +144,13 @@ final class DatabaseManager {
                     synced_through_ms INTEGER NOT NULL,
                     last_synced_at INTEGER NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS cursor_usage_cost_backfill_state (
+                    account_identity TEXT PRIMARY KEY,
+                    next_start_ms INTEGER NOT NULL,
+                    target_end_ms INTEGER NOT NULL,
+                    last_synced_at INTEGER NOT NULL
+                );
                 """)
             try migrateCursorSpendSnapshotsSchemaIfNeeded(db)
             try addColumnIfMissing(
@@ -175,13 +183,59 @@ final class DatabaseManager {
                 column: "discount_percent",
                 definition: "INTEGER"
             )
-            if addedChargedCost || addedListCost || addedDiscount {
-                try db.execute(
-                    sql: "UPDATE sync_state SET byte_offset = 0 WHERE file_path = ?",
-                    arguments: [CursorUsageService.syncStateKey]
-                )
+            let addedFreeRequest = try addColumnIfMissing(
+                db,
+                table: "request_logs",
+                column: "is_free_request",
+                definition: "INTEGER NOT NULL DEFAULT 0"
+            )
+            if addedChargedCost || addedListCost || addedDiscount || addedFreeRequest {
+                try prepareCursorUsageCostBackfillIfNeeded(db)
             }
         }
+    }
+
+    private func prepareCursorUsageCostBackfillIfNeeded(_ db: Database) throws {
+        guard let state = try Row.fetchOne(
+            db,
+            sql: "SELECT byte_offset, session_id FROM sync_state WHERE file_path = ?",
+            arguments: [CursorUsageService.syncStateKey]
+        ), let accountIdentity: String = state["session_id"],
+        let bounds = try Row.fetchOne(
+            db,
+            sql: """
+                SELECT MIN(created_at) AS earliest, MAX(created_at) AS latest
+                FROM request_logs WHERE app_type = ?
+                """,
+            arguments: [AgentID.cursor.appType]
+        ), let earliestSeconds: Int64 = bounds["earliest"],
+        let latestSeconds: Int64 = bounds["latest"] else {
+            return
+        }
+
+        let storedWatermark: Int64 = state["byte_offset"]
+        let recoveredWatermark = max(storedWatermark, (latestSeconds + 1) * 1_000)
+        if recoveredWatermark != storedWatermark {
+            try db.execute(
+                sql: "UPDATE sync_state SET byte_offset = ? WHERE file_path = ?",
+                arguments: [recoveredWatermark, CursorUsageService.syncStateKey]
+            )
+        }
+
+        let earliestMilliseconds = earliestSeconds * 1_000
+        let targetEndMilliseconds = max(
+            earliestMilliseconds,
+            recoveredWatermark - CursorUsageService.overlapMilliseconds
+        )
+        guard earliestMilliseconds < targetEndMilliseconds else { return }
+        try db.execute(
+            sql: """
+                INSERT OR REPLACE INTO cursor_usage_cost_backfill_state (
+                    account_identity, next_start_ms, target_end_ms, last_synced_at
+                ) VALUES (?, ?, ?, 0)
+                """,
+            arguments: [accountIdentity, earliestMilliseconds, targetEndMilliseconds]
+        )
     }
 
     @discardableResult
@@ -342,6 +396,7 @@ final class DatabaseManager {
                 arguments: [appType]
             )
             if appType == AgentID.cursor.appType {
+                try db.execute(sql: "DELETE FROM cursor_usage_cost_backfill_state")
                 if let accountIdentity = state.sessionId {
                     try db.execute(
                         sql: "DELETE FROM cursor_spend_snapshots WHERE account_identity <> ?",
@@ -373,7 +428,8 @@ final class DatabaseManager {
         appType: String,
         records: [ParsedRecord],
         state: SyncState,
-        createdAtRange: Range<Int>
+        createdAtRange: Range<Int>,
+        costBackfill: CursorUsageCostBackfillCommit? = nil
     ) throws {
         lifecycleLock.lock()
         defer { lifecycleLock.unlock() }
@@ -388,12 +444,81 @@ final class DatabaseManager {
                     """,
                 arguments: [appType, createdAtRange.lowerBound, createdAtRange.upperBound]
             )
-            try insertRecords(records, in: db)
+            if let costBackfill {
+                try db.execute(
+                    sql: """
+                        DELETE FROM request_logs
+                        WHERE app_type = ?
+                          AND created_at >= ?
+                          AND created_at < ?
+                        """,
+                    arguments: [
+                        appType,
+                        costBackfill.createdAtRange.lowerBound,
+                        costBackfill.createdAtRange.upperBound,
+                    ]
+                )
+            }
+            try insertRecords(records + (costBackfill?.records ?? []), in: db)
             try upsertSyncState(state, in: db)
+            if let costBackfill {
+                if let nextState = costBackfill.nextState {
+                    try upsertCursorUsageCostBackfillState(nextState, in: db)
+                } else {
+                    try db.execute(
+                        sql: "DELETE FROM cursor_usage_cost_backfill_state WHERE account_identity = ?",
+                        arguments: [state.sessionId]
+                    )
+                }
+            }
         }
         if appType == AgentID.cursor.appType {
             cursorDataRevision &+= 1
         }
+    }
+
+    func cursorUsageCostBackfillState(
+        accountIdentity: String
+    ) -> CursorUsageCostBackfillState? {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard let db = dbQueue else { return nil }
+        return try? db.read { db in
+            guard let row = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT account_identity, next_start_ms, target_end_ms, last_synced_at
+                    FROM cursor_usage_cost_backfill_state
+                    WHERE account_identity = ?
+                    """,
+                arguments: [accountIdentity]
+            ) else { return nil }
+            return CursorUsageCostBackfillState(
+                accountIdentity: row["account_identity"],
+                nextStartMilliseconds: row["next_start_ms"],
+                targetEndMilliseconds: row["target_end_ms"],
+                lastSyncedAt: row["last_synced_at"]
+            )
+        }
+    }
+
+    private func upsertCursorUsageCostBackfillState(
+        _ state: CursorUsageCostBackfillState,
+        in db: Database
+    ) throws {
+        try db.execute(
+            sql: """
+                INSERT OR REPLACE INTO cursor_usage_cost_backfill_state (
+                    account_identity, next_start_ms, target_end_ms, last_synced_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+            arguments: [
+                state.accountIdentity,
+                state.nextStartMilliseconds,
+                state.targetEndMilliseconds,
+                state.lastSyncedAt,
+            ]
+        )
     }
 
     func cursorDataPresentationToken(
@@ -835,8 +960,9 @@ final class DatabaseManager {
                     INSERT INTO request_logs
                     (request_id, app_type, model, input_tokens, output_tokens,
                      cache_read_tokens, cache_creation_tokens, session_id, created_at,
-                     charged_cost_micros, list_cost_micros, discount_percent)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     charged_cost_micros, list_cost_micros, discount_percent,
+                     is_free_request)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(request_id) DO UPDATE SET
                         charged_cost_micros = COALESCE(
                             excluded.charged_cost_micros,
@@ -849,14 +975,15 @@ final class DatabaseManager {
                         discount_percent = COALESCE(
                             excluded.discount_percent,
                             request_logs.discount_percent
-                        )
+                        ),
+                        is_free_request = excluded.is_free_request
                     """,
                 arguments: [record.requestId, record.appType, record.model,
                             record.inputTokens, record.outputTokens,
                             record.cacheReadTokens, record.cacheCreationTokens,
                             record.sessionId, record.createdAt,
                             record.chargedCostMicros, record.listCostMicros,
-                            record.discountPercent]
+                            record.discountPercent, record.isFreeRequest]
             )
         }
     }
@@ -1031,6 +1158,7 @@ final class DatabaseManager {
                        input_tokens, output_tokens,
                        cache_read_tokens, cache_creation_tokens,
                        charged_cost_micros, list_cost_micros, discount_percent,
+                       is_free_request,
                        created_at
                 FROM request_logs
                 \(whereSQL)
@@ -1054,6 +1182,7 @@ final class DatabaseManager {
                     chargedCostMicros: row["charged_cost_micros"],
                     listCostMicros: row["list_cost_micros"],
                     discountPercent: row["discount_percent"],
+                    isFreeRequest: row["is_free_request"],
                     createdAt: row["created_at"]
                 )
             }

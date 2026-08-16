@@ -388,6 +388,7 @@ struct ParsedRecord {
     let chargedCostMicros: Int64?
     let listCostMicros: Int64?
     let discountPercent: Int?
+    let isFreeRequest: Bool
 
     init(
         requestId: String,
@@ -401,7 +402,8 @@ struct ParsedRecord {
         createdAt: Int,
         chargedCostMicros: Int64? = nil,
         listCostMicros: Int64? = nil,
-        discountPercent: Int? = nil
+        discountPercent: Int? = nil,
+        isFreeRequest: Bool = false
     ) {
         self.requestId = requestId
         self.appType = appType
@@ -415,6 +417,7 @@ struct ParsedRecord {
         self.chargedCostMicros = chargedCostMicros
         self.listCostMicros = listCostMicros
         self.discountPercent = discountPercent
+        self.isFreeRequest = isFreeRequest
     }
 }
 
@@ -429,6 +432,7 @@ struct RequestLogItem: Identifiable, Equatable {
     let chargedCostMicros: Int64?
     let listCostMicros: Int64?
     let discountPercent: Int?
+    let isFreeRequest: Bool
     let createdAt: Int
 
     var id: String { requestId }
@@ -437,11 +441,21 @@ struct RequestLogItem: Identifiable, Equatable {
     }
 
     var isFreeCursorRequest: Bool {
-        provider == .cursor
-            && totalTokens == 0
-            && chargedCostMicros == 0
-            && listCostMicros == nil
+        provider == .cursor && isFreeRequest
     }
+}
+
+struct CursorUsageCostBackfillState: Equatable {
+    let accountIdentity: String
+    let nextStartMilliseconds: Int64
+    let targetEndMilliseconds: Int64
+    let lastSyncedAt: Int
+}
+
+struct CursorUsageCostBackfillCommit {
+    let records: [ParsedRecord]
+    let createdAtRange: Range<Int>
+    let nextState: CursorUsageCostBackfillState?
 }
 
 struct RequestPageCursor: Equatable {

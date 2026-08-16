@@ -14,7 +14,10 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
 
     private static let pageSize = 100
     private static let maximumPages = 1_000
-    private static let overlapMilliseconds: Int64 = 3_600_000
+    private static let maximumBackfillPages = 10
+    private static let maximumBackfillWindowMilliseconds: Int64 = 30 * 86_400_000
+    private static let minimumBackfillWindowMilliseconds: Int64 = 60_000
+    static let overlapMilliseconds: Int64 = 3_600_000
 
     private let database: DatabaseManager
     private let accountSession: CursorAccountResolving
@@ -93,6 +96,13 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
                 throw CursorUsageError.invalidResponse
             }
         }
+        let costBackfill = try accountChanged ? nil : fetchCostBackfill(
+            token: token,
+            account: account,
+            accountIdentity: accountIdentity,
+            currentSeconds: currentSeconds,
+            cancellation: cancellation
+        )
         let state = SyncState(
             filePath: Self.syncStateKey,
             byteOffset: endMilliseconds,
@@ -109,7 +119,8 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
                     state: state,
                     accountChanged: accountChanged,
                     startMilliseconds: startMilliseconds,
-                    endMilliseconds: endMilliseconds
+                    endMilliseconds: endMilliseconds,
+                    costBackfill: costBackfill
                 )
             }) != nil else {
                 throw CursorUsageError.cancelled
@@ -120,10 +131,14 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
                 state: state,
                 accountChanged: accountChanged,
                 startMilliseconds: startMilliseconds,
-                endMilliseconds: endMilliseconds
+                endMilliseconds: endMilliseconds,
+                costBackfill: costBackfill
             )
         }
-        return SessionSyncResult(filesSynced: 1, recordsSynced: records.count)
+        return SessionSyncResult(
+            filesSynced: 1,
+            recordsSynced: records.count + (costBackfill?.records.count ?? 0)
+        )
     }
 
     private func commit(
@@ -131,7 +146,8 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
         state: SyncState,
         accountChanged: Bool,
         startMilliseconds: Int64?,
-        endMilliseconds: Int64
+        endMilliseconds: Int64,
+        costBackfill: CursorUsageCostBackfillCommit?
     ) throws {
         if accountChanged {
             try database.replaceAppRecords(
@@ -148,9 +164,71 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
                 createdAtRange: Self.createdAtRange(
                     startMilliseconds: startMilliseconds,
                     endMilliseconds: endMilliseconds
-                )
+                ),
+                costBackfill: costBackfill
             )
         }
+    }
+
+    private func fetchCostBackfill(
+        token: String,
+        account: CursorAccount,
+        accountIdentity: String,
+        currentSeconds: Int,
+        cancellation: CursorOperationCancellation?
+    ) throws -> CursorUsageCostBackfillCommit? {
+        guard let state = database.cursorUsageCostBackfillState(
+            accountIdentity: accountIdentity
+        ), state.nextStartMilliseconds < state.targetEndMilliseconds else {
+            return nil
+        }
+
+        let startMilliseconds = state.nextStartMilliseconds
+        var endMilliseconds = min(
+            startMilliseconds + Self.maximumBackfillWindowMilliseconds,
+            state.targetEndMilliseconds
+        )
+        var events: [CursorUsageEvent] = []
+        while true {
+            do {
+                events = try fetchEvents(
+                    token: token,
+                    account: account,
+                    startMilliseconds: startMilliseconds,
+                    endMilliseconds: endMilliseconds,
+                    cancellation: cancellation,
+                    reportsDenseRange: true
+                )
+                break
+            } catch CursorUsageFetchError.rangeTooDense {
+                let reducedSpan = (endMilliseconds - startMilliseconds) / 2
+                guard reducedSpan >= Self.minimumBackfillWindowMilliseconds else {
+                    throw CursorUsageError.paginationLimitExceeded
+                }
+                endMilliseconds = startMilliseconds + reducedSpan
+            }
+        }
+
+        let records = try events.compactMap { try makeRecord(event: $0) }
+        let replacementRange = Self.createdAtRange(
+            startMilliseconds: startMilliseconds,
+            endMilliseconds: endMilliseconds
+        )
+        guard records.allSatisfy({ replacementRange.contains($0.createdAt) }) else {
+            throw CursorUsageError.invalidResponse
+        }
+        let nextState = endMilliseconds >= state.targetEndMilliseconds ? nil :
+            CursorUsageCostBackfillState(
+                accountIdentity: accountIdentity,
+                nextStartMilliseconds: endMilliseconds,
+                targetEndMilliseconds: state.targetEndMilliseconds,
+                lastSyncedAt: currentSeconds
+            )
+        return CursorUsageCostBackfillCommit(
+            records: records,
+            createdAtRange: replacementRange,
+            nextState: nextState
+        )
     }
 
     private func fetchEvents(
@@ -158,7 +236,8 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
         account: CursorAccount,
         startMilliseconds: Int64?,
         endMilliseconds: Int64,
-        cancellation: CursorOperationCancellation?
+        cancellation: CursorOperationCancellation?,
+        reportsDenseRange: Bool = false
     ) throws -> [CursorUsageEvent] {
         var events: [CursorUsageEvent] = []
         var page = 1
@@ -185,6 +264,11 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
                 cancellation: cancellation
             )
             let response = try JSONDecoder().decode(CursorUsagePage.self, from: data)
+            if reportsDenseRange,
+               page == 1,
+               response.totalUsageEventsCount > Self.pageSize * Self.maximumBackfillPages {
+                throw CursorUsageFetchError.rangeTooDense
+            }
             events.append(contentsOf: response.usageEventsDisplay)
 
             if events.count >= response.totalUsageEventsCount
@@ -243,7 +327,8 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
             createdAt: Int(timestamp / 1_000),
             chargedCostMicros: try costMicros(fromCents: event.chargedCents),
             listCostMicros: try costMicros(fromCents: usage?.totalCents),
-            discountPercent: usage?.discountPercentOff
+            discountPercent: usage?.discountPercentOff,
+            isFreeRequest: usage == nil
         )
     }
 
@@ -267,6 +352,10 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
         }
         return Int64((cents * 10_000).rounded())
     }
+}
+
+private enum CursorUsageFetchError: Error {
+    case rangeTooDense
 }
 
 private struct CursorUsagePage: Decodable {

@@ -66,7 +66,7 @@ final class RequestLogTests: XCTestCase {
         )
     }
 
-    func testCostSchemaMigrationRetainsCursorIdentityAndResetsOnlyWatermark() throws {
+    func testCostSchemaMigrationPreservesUsageWatermarkAndCreatesBackfillState() throws {
         let databaseURL = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("MonitorAgent-Requests-\(UUID().uuidString).sqlite")
         defer { try? FileManager.default.removeItem(at: databaseURL) }
@@ -96,14 +96,21 @@ final class RequestLogTests: XCTestCase {
                     last_synced_at INTEGER NOT NULL
                 );
                 INSERT INTO sync_state VALUES (
-                    'cursor://usage-events', 123456, 1,
+                    'cursor://usage-events', 1800000000000, 1,
                     'cursor-account:identity', NULL, 0, 0, 10, 10
+                );
+                INSERT INTO request_logs VALUES (
+                    'cursor:legacy', 'cursor', 'cursor-model', 1, 2, 3, 4,
+                    'cursor-session', 1790000000
                 );
                 """)
         }
 
         let database = try DatabaseManager(path: databaseURL.path)
         let state = try XCTUnwrap(database.getSyncState(for: CursorUsageService.syncStateKey))
+        let backfill = try XCTUnwrap(database.cursorUsageCostBackfillState(
+            accountIdentity: "cursor-account:identity"
+        ))
         let migratedDatabase = try DatabaseQueue(path: databaseURL.path)
         let columns = try migratedDatabase.read { db in
             try Row.fetchAll(db, sql: "PRAGMA table_info(request_logs)")
@@ -111,10 +118,46 @@ final class RequestLogTests: XCTestCase {
         }
 
         XCTAssertEqual(state.sessionId, "cursor-account:identity")
-        XCTAssertEqual(state.byteOffset, 0)
+        XCTAssertEqual(state.byteOffset, 1_800_000_000_000)
+        XCTAssertEqual(backfill.nextStartMilliseconds, 1_790_000_000_000)
+        XCTAssertEqual(backfill.targetEndMilliseconds, 1_799_996_400_000)
         XCTAssertTrue(columns.contains("charged_cost_micros"))
         XCTAssertTrue(columns.contains("list_cost_micros"))
         XCTAssertTrue(columns.contains("discount_percent"))
+        XCTAssertTrue(columns.contains("is_free_request"))
+    }
+
+    func testLatestRequestQuerySchedulerSkipsSupersededQueuedWork() {
+        let scheduler = LatestRequestQueryScheduler(label: "requests-query-test")
+        let blockerStarted = expectation(description: "blocker started")
+        let latestFinished = expectation(description: "latest finished")
+        let releaseBlocker = DispatchSemaphore(value: 0)
+        let lock = NSLock()
+        var executed: [String] = []
+
+        scheduler.submit { _ in
+            blockerStarted.fulfill()
+            releaseBlocker.wait()
+        }
+        wait(for: [blockerStarted], timeout: 1)
+        scheduler.submit { _ in
+            lock.lock()
+            executed.append("obsolete")
+            lock.unlock()
+        }
+        scheduler.submit { _ in
+            lock.lock()
+            executed.append("latest")
+            lock.unlock()
+            latestFinished.fulfill()
+        }
+        releaseBlocker.signal()
+
+        wait(for: [latestFinished], timeout: 1)
+        lock.lock()
+        let result = executed
+        lock.unlock()
+        XCTAssertEqual(result, ["latest"])
     }
 
     func testRequestPagesUseStableKeysetOrderWithoutDuplicates() {

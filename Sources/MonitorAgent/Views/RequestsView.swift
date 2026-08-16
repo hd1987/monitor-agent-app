@@ -26,6 +26,67 @@ enum RequestDetailTotalUsageResolver {
     }
 }
 
+final class RequestQueryCancellation {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
+    }
+}
+
+final class LatestRequestQueryScheduler {
+    typealias Operation = (RequestQueryCancellation) -> Void
+
+    private let queue: DispatchQueue
+    private let lock = NSLock()
+    private var currentCancellation: RequestQueryCancellation?
+
+    init(
+        label: String = "com.hd1987.monitor-agent.requests-query",
+        qos: DispatchQoS = .userInitiated
+    ) {
+        queue = DispatchQueue(label: label, qos: qos)
+    }
+
+    func submit(_ operation: @escaping Operation) {
+        let cancellation = RequestQueryCancellation()
+        lock.lock()
+        currentCancellation?.cancel()
+        currentCancellation = cancellation
+        lock.unlock()
+
+        queue.async { [weak self] in
+            guard !cancellation.isCancelled else { return }
+            operation(cancellation)
+            self?.finish(cancellation)
+        }
+    }
+
+    func cancel() {
+        lock.lock()
+        currentCancellation?.cancel()
+        currentCancellation = nil
+        lock.unlock()
+    }
+
+    private func finish(_ cancellation: RequestQueryCancellation) {
+        lock.lock()
+        if currentCancellation === cancellation {
+            currentCancellation = nil
+        }
+        lock.unlock()
+    }
+}
+
 final class RequestsViewModel: ObservableObject {
     static let pageSize = 100
 
@@ -39,10 +100,7 @@ final class RequestsViewModel: ObservableObject {
     @Published private(set) var isLoadingMore = false
 
     private let database: DatabaseManager
-    private let queryQueue = DispatchQueue(
-        label: "com.hd1987.monitor-agent.requests-query",
-        qos: .userInitiated
-    )
+    private let queryScheduler = LatestRequestQueryScheduler()
     private var nextCursor: RequestPageCursor?
     private var generation = 0
 
@@ -58,6 +116,10 @@ final class RequestsViewModel: ObservableObject {
         self.timeRange = timeRange
         self.enabledAgents = enabledAgents
         self.cursorSpendAccountIdentity = cursorSpendAccountIdentity
+    }
+
+    deinit {
+        queryScheduler.cancel()
     }
 
     var availableProviders: [AppFilter] {
@@ -118,12 +180,13 @@ final class RequestsViewModel: ObservableObject {
         isLoading = true
         isLoadingMore = false
 
-        queryQueue.async { [weak self, database] in
+        queryScheduler.submit { [weak self, database] cancellation in
             var summary = database.fetchRequestLogSummary(
                 app: provider,
                 range: timeRange,
                 enabledAgents: enabledAgents
             )
+            guard !cancellation.isCancelled else { return }
             summary.totalUsageMicros = RequestDetailTotalUsageResolver.totalUsageMicros(
                 database: database,
                 provider: provider,
@@ -131,12 +194,14 @@ final class RequestsViewModel: ObservableObject {
                 enabledAgents: enabledAgents,
                 accountIdentity: cursorSpendAccountIdentity
             )
+            guard !cancellation.isCancelled else { return }
             let page = database.fetchRequestLogPage(
                 app: provider,
                 range: timeRange,
                 enabledAgents: enabledAgents,
                 limit: Self.pageSize
             )
+            guard !cancellation.isCancelled else { return }
             DispatchQueue.main.async {
                 guard let self, self.generation == currentGeneration else { return }
                 self.summary = summary
@@ -158,7 +223,7 @@ final class RequestsViewModel: ObservableObject {
         let timeRange = timeRange
         let enabledAgents = enabledAgents
 
-        queryQueue.async { [weak self, database] in
+        queryScheduler.submit { [weak self, database] cancellation in
             let page = database.fetchRequestLogPage(
                 app: provider,
                 range: timeRange,
@@ -166,6 +231,7 @@ final class RequestsViewModel: ObservableObject {
                 after: cursor,
                 limit: Self.pageSize
             )
+            guard !cancellation.isCancelled else { return }
             DispatchQueue.main.async {
                 guard let self, self.generation == currentGeneration else { return }
                 self.items.append(contentsOf: page.items)
