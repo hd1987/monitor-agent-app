@@ -6,8 +6,19 @@ struct RequestPresentationContext: Equatable {
     let cursorDataPresentationToken: CursorDataPresentationToken?
     let cursorSpendAccountIdentity: String?
 
-    func isCurrent(in database: DatabaseManager) -> Bool {
-        cursorDataPresentationToken.map(database.isCursorDataPresentationTokenCurrent) ?? true
+    @discardableResult
+    func performIfCurrent(
+        in database: DatabaseManager,
+        operation: () -> Void
+    ) -> Bool {
+        guard let cursorDataPresentationToken else {
+            operation()
+            return true
+        }
+        return database.performIfCursorDataPresentationTokenCurrent(
+            cursorDataPresentationToken,
+            operation: operation
+        )
     }
 }
 
@@ -215,14 +226,15 @@ final class RequestsViewModel: ObservableObject {
                 enabledAgents: presentationContext.enabledAgents,
                 limit: Self.pageSize
             )
-            guard !cancellation.isCancelled,
-                  presentationContext.isCurrent(in: database) else { return }
+            guard !cancellation.isCancelled else { return }
             DispatchQueue.main.async {
                 guard let self, self.generation == currentGeneration else { return }
-                self.summary = summary
-                self.items = page.items
-                self.nextCursor = page.nextCursor
-                self.isLoading = false
+                presentationContext.performIfCurrent(in: database) {
+                    self.summary = summary
+                    self.items = page.items
+                    self.nextCursor = page.nextCursor
+                    self.isLoading = false
+                }
             }
         }
     }
@@ -246,13 +258,14 @@ final class RequestsViewModel: ObservableObject {
                 after: cursor,
                 limit: Self.pageSize
             )
-            guard !cancellation.isCancelled,
-                  presentationContext.isCurrent(in: database) else { return }
+            guard !cancellation.isCancelled else { return }
             DispatchQueue.main.async {
                 guard let self, self.generation == currentGeneration else { return }
-                self.items.append(contentsOf: page.items)
-                self.nextCursor = page.nextCursor
-                self.isLoadingMore = false
+                presentationContext.performIfCurrent(in: database) {
+                    self.items.append(contentsOf: page.items)
+                    self.nextCursor = page.nextCursor
+                    self.isLoadingMore = false
+                }
             }
         }
     }

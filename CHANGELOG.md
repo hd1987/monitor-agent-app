@@ -15,6 +15,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 - Preserve the normal Cursor Usage watermark during request-cost schema upgrades and recover historical Cost in bounded, independently resumable ranges
 - Persist Cursor Free-request semantics explicitly so zero-valued token usage is not mislabeled as Free
 - Skip superseded request-detail queries so rapid Provider and date changes do not wait behind obsolete local aggregation work
+- Reject incomplete Cursor Usage pagination and malformed required event fields before range replacement, and publish request-detail results under the account revision lock
 
 ## [0.13.2] - 2026-08-14
 

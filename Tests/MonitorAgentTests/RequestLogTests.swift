@@ -160,6 +160,67 @@ final class RequestLogTests: XCTestCase {
         XCTAssertEqual(result, ["latest"])
     }
 
+    func testRequestPresentationPublicationBlocksCursorReplacement() throws {
+        let database = DatabaseManager(inMemory: true)
+        let firstIdentity = "cursor-account:first"
+        try database.replaceAppRecords(
+            appType: AgentID.cursor.appType,
+            records: [],
+            state: SyncState(
+                filePath: CursorUsageService.syncStateKey,
+                byteOffset: 1,
+                recordCount: 0,
+                sessionId: firstIdentity,
+                model: nil,
+                lastModified: 1,
+                lastSyncedAt: 1
+            )
+        )
+        let context = RequestPresentationContext(
+            enabledAgents: Set(AgentID.allCases),
+            cursorDataPresentationToken: try XCTUnwrap(
+                database.cursorDataPresentationToken(matching: firstIdentity)
+            ),
+            cursorSpendAccountIdentity: firstIdentity
+        )
+        let publicationStarted = DispatchSemaphore(value: 0)
+        let releasePublication = DispatchSemaphore(value: 0)
+        let publicationFinished = DispatchSemaphore(value: 0)
+        let replacementFinished = DispatchSemaphore(value: 0)
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            context.performIfCurrent(in: database) {
+                publicationStarted.signal()
+                releasePublication.wait()
+            }
+            publicationFinished.signal()
+        }
+        XCTAssertEqual(publicationStarted.wait(timeout: .now() + 1), .success)
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            try? database.replaceAppRecords(
+                appType: AgentID.cursor.appType,
+                records: [],
+                state: SyncState(
+                    filePath: CursorUsageService.syncStateKey,
+                    byteOffset: 2,
+                    recordCount: 0,
+                    sessionId: "cursor-account:second",
+                    model: nil,
+                    lastModified: 2,
+                    lastSyncedAt: 2
+                )
+            )
+            replacementFinished.signal()
+        }
+        XCTAssertEqual(replacementFinished.wait(timeout: .now() + 0.05), .timedOut)
+
+        releasePublication.signal()
+        XCTAssertEqual(publicationFinished.wait(timeout: .now() + 1), .success)
+        XCTAssertEqual(replacementFinished.wait(timeout: .now() + 1), .success)
+        XCTAssertNil(database.cursorDataPresentationToken(matching: firstIdentity))
+    }
+
     func testRequestPagesUseStableKeysetOrderWithoutDuplicates() {
         let database = DatabaseManager(inMemory: true)
         database.insertRecords((0..<205).map { index in

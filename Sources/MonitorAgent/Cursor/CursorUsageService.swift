@@ -86,7 +86,7 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
             cancellation: cancellation
         )
         try client.checkCancellation(cancellation)
-        let records = try events.compactMap { try makeRecord(event: $0) }
+        let records = try events.map { try makeRecord(event: $0) }
         if let startMilliseconds {
             let replacementRange = Self.createdAtRange(
                 startMilliseconds: startMilliseconds,
@@ -209,7 +209,7 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
             }
         }
 
-        let records = try events.compactMap { try makeRecord(event: $0) }
+        let records = try events.map { try makeRecord(event: $0) }
         let replacementRange = Self.createdAtRange(
             startMilliseconds: startMilliseconds,
             endMilliseconds: endMilliseconds
@@ -241,6 +241,7 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
     ) throws -> [CursorUsageEvent] {
         var events: [CursorUsageEvent] = []
         var page = 1
+        var expectedEventCount: Int?
 
         while page <= Self.maximumPages {
             try client.checkCancellation(cancellation)
@@ -264,15 +265,35 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
                 cancellation: cancellation
             )
             let response = try JSONDecoder().decode(CursorUsagePage.self, from: data)
+            guard response.totalUsageEventsCount >= 0 else {
+                throw CursorUsageError.invalidResponse
+            }
+            if let expectedEventCount {
+                guard response.totalUsageEventsCount == expectedEventCount else {
+                    throw CursorUsageError.invalidResponse
+                }
+            } else {
+                expectedEventCount = response.totalUsageEventsCount
+            }
             if reportsDenseRange,
                page == 1,
                response.totalUsageEventsCount > Self.pageSize * Self.maximumBackfillPages {
                 throw CursorUsageFetchError.rangeTooDense
             }
+            if response.totalUsageEventsCount == 0 {
+                guard page == 1, response.usageEventsDisplay.isEmpty else {
+                    throw CursorUsageError.invalidResponse
+                }
+                return events
+            }
+            guard !response.usageEventsDisplay.isEmpty else {
+                throw CursorUsageError.invalidResponse
+            }
             events.append(contentsOf: response.usageEventsDisplay)
-
-            if events.count >= response.totalUsageEventsCount
-                || response.usageEventsDisplay.isEmpty {
+            guard events.count <= response.totalUsageEventsCount else {
+                throw CursorUsageError.invalidResponse
+            }
+            if events.count == response.totalUsageEventsCount {
                 return events
             }
             page += 1
@@ -281,10 +302,10 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
         throw CursorUsageError.paginationLimitExceeded
     }
 
-    private func makeRecord(event: CursorUsageEvent) throws -> ParsedRecord? {
+    private func makeRecord(event: CursorUsageEvent) throws -> ParsedRecord {
         guard let timestamp = event.timestampMilliseconds,
               !event.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return nil
+            throw CursorUsageError.invalidResponse
         }
 
         let usage = event.tokenUsage
