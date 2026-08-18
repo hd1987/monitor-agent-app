@@ -3,6 +3,35 @@ import XCTest
 @testable import MonitorAgent
 
 final class RequestLogTests: XCTestCase {
+    func testStatusMenuPlacesRequestsAfterAbout() {
+        let target = NSObject()
+        let action = NSSelectorFromString("performAction:")
+        let menu = StatusMenuFactory.make(
+            target: target,
+            actions: StatusMenuActions(
+                openRequests: action,
+                openAbout: action,
+                openGeneral: action,
+                openShortcuts: action,
+                openExtensions: action,
+                openConfig: action,
+                openPrompt: action,
+                checkForUpdates: action,
+                quit: action
+            )
+        )
+        let aboutItem = menu.items.first
+        let separator = menu.items.dropFirst().first
+        let requestsItem = menu.items.dropFirst(2).first
+
+        XCTAssertEqual(aboutItem?.title, "About MonitorAgent")
+        XCTAssertEqual(separator?.isSeparatorItem, true)
+        XCTAssertEqual(requestsItem?.title, "Requests")
+        XCTAssertEqual(requestsItem?.action, action)
+        XCTAssertTrue(requestsItem?.target === target)
+        XCTAssertEqual(menu.items.dropFirst(3).first?.isSeparatorItem, true)
+    }
+
     func testRequestsWindowUsesRequestedInitialContentSize() {
         XCTAssertEqual(RequestsWindowLayout.initialSize.width, 860)
         XCTAssertEqual(RequestsWindowLayout.initialSize.height, 750)

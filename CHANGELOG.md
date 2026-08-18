@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-18
+
+### Added
+- Open the request-history window directly from the menu bar icon's right-click menu
+
 ## [0.14.0] - 2026-08-16
 
 ### Added
