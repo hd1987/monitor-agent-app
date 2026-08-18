@@ -136,6 +136,45 @@ enum RequestsWindowLayout {
     static let minimumSize = NSSize(width: 860, height: 600)
 }
 
+struct StatusMenuActions {
+    let openRequests: Selector
+    let openAbout: Selector
+    let openGeneral: Selector
+    let openShortcuts: Selector
+    let openExtensions: Selector
+    let openConfig: Selector
+    let openPrompt: Selector
+    let checkForUpdates: Selector
+    let quit: Selector
+}
+
+enum StatusMenuFactory {
+    static func make(target: AnyObject, actions: StatusMenuActions) -> NSMenu {
+        let menu = NSMenu()
+
+        func addItem(_ title: String, action: Selector, keyEquivalent: String = "") {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
+            item.target = target
+            menu.addItem(item)
+        }
+
+        addItem("About MonitorAgent", action: actions.openAbout)
+        menu.addItem(.separator())
+        addItem("Requests", action: actions.openRequests)
+        menu.addItem(.separator())
+        addItem("General", action: actions.openGeneral, keyEquivalent: ",")
+        addItem("Shortcuts", action: actions.openShortcuts)
+        addItem("MCP & Skill", action: actions.openExtensions)
+        addItem("Config", action: actions.openConfig)
+        addItem("Prompt", action: actions.openPrompt)
+        menu.addItem(.separator())
+        addItem("Check for Updates...", action: actions.checkForUpdates)
+        menu.addItem(.separator())
+        addItem("Quit", action: actions.quit, keyEquivalent: "q")
+        return menu
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var panel: FloatingPanel!
@@ -170,38 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.sendAction(on: [.leftMouseUp])
         }
 
-        // Right-click context menu
-        let menu = NSMenu()
-        let aboutItem = NSMenuItem(title: "About MonitorAgent", action: #selector(openAbout(_:)), keyEquivalent: "")
-        aboutItem.target = self
-
-        let generalItem = NSMenuItem(title: "General", action: #selector(openSettingsGeneral(_:)), keyEquivalent: ",")
-        generalItem.target = self
-        let shortcutsItem = NSMenuItem(title: "Shortcuts", action: #selector(openSettingsShortcuts(_:)), keyEquivalent: "")
-        shortcutsItem.target = self
-        let extensionsItem = NSMenuItem(title: "MCP & Skill", action: #selector(openSettingsExtensions(_:)), keyEquivalent: "")
-        extensionsItem.target = self
-        let configItem = NSMenuItem(title: "Config", action: #selector(openSettingsConfig(_:)), keyEquivalent: "")
-        configItem.target = self
-        let promptItem = NSMenuItem(title: "Prompt", action: #selector(openSettingsPrompt(_:)), keyEquivalent: "")
-        promptItem.target = self
-
-        let updateItem = NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
-        updateItem.target = self
-        let quitItem = NSMenuItem(title: "Quit", action: #selector(quitApp(_:)), keyEquivalent: "q")
-        quitItem.target = self
-        menu.addItem(aboutItem)
-        menu.addItem(.separator())
-        menu.addItem(generalItem)
-        menu.addItem(shortcutsItem)
-        menu.addItem(extensionsItem)
-        menu.addItem(configItem)
-        menu.addItem(promptItem)
-        menu.addItem(.separator())
-        menu.addItem(updateItem)
-        menu.addItem(.separator())
-        menu.addItem(quitItem)
-        statusMenu = menu
+        statusMenu = makeStatusMenu()
 
         let hostingView = NSHostingView(
             rootView: PopoverView { [weak self] in
@@ -280,6 +288,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Auto-check for updates on launch (silent, 24h throttle)
         UpdateChecker.shared.checkOnLaunch()
+    }
+
+    private func makeStatusMenu() -> NSMenu {
+        StatusMenuFactory.make(
+            target: self,
+            actions: StatusMenuActions(
+                openRequests: #selector(openRequestsFromMenu(_:)),
+                openAbout: #selector(openAbout(_:)),
+                openGeneral: #selector(openSettingsGeneral(_:)),
+                openShortcuts: #selector(openSettingsShortcuts(_:)),
+                openExtensions: #selector(openSettingsExtensions(_:)),
+                openConfig: #selector(openSettingsConfig(_:)),
+                openPrompt: #selector(openSettingsPrompt(_:)),
+                checkForUpdates: #selector(checkForUpdates(_:)),
+                quit: #selector(quitApp(_:))
+            )
+        )
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
@@ -492,6 +517,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         requestsViewModel = model
         requestsPanel = window
         requestsWindowDelegate = windowDelegate
+    }
+
+    @objc private func openRequestsFromMenu(_ sender: AnyObject?) {
+        openRequests()
     }
 
     /// Swallow mouse events landing on the settings sidebar divider so it can
