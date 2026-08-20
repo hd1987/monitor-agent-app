@@ -99,6 +99,7 @@ final class DatabaseManager {
                     list_cost_micros INTEGER,
                     discount_percent INTEGER,
                     is_free_request INTEGER NOT NULL DEFAULT 0,
+                    cursor_billing_type TEXT,
                     session_id TEXT,
                     created_at INTEGER NOT NULL
                 );
@@ -189,7 +190,14 @@ final class DatabaseManager {
                 column: "is_free_request",
                 definition: "INTEGER NOT NULL DEFAULT 0"
             )
-            if addedChargedCost || addedListCost || addedDiscount || addedFreeRequest {
+            let addedCursorBillingType = try addColumnIfMissing(
+                db,
+                table: "request_logs",
+                column: "cursor_billing_type",
+                definition: "TEXT"
+            )
+            if addedChargedCost || addedListCost || addedDiscount || addedFreeRequest
+                || addedCursorBillingType {
                 try prepareCursorUsageCostBackfillIfNeeded(db)
             }
         }
@@ -961,8 +969,8 @@ final class DatabaseManager {
                     (request_id, app_type, model, input_tokens, output_tokens,
                      cache_read_tokens, cache_creation_tokens, session_id, created_at,
                      charged_cost_micros, list_cost_micros, discount_percent,
-                     is_free_request)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     is_free_request, cursor_billing_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(request_id) DO UPDATE SET
                         charged_cost_micros = COALESCE(
                             excluded.charged_cost_micros,
@@ -976,14 +984,19 @@ final class DatabaseManager {
                             excluded.discount_percent,
                             request_logs.discount_percent
                         ),
-                        is_free_request = excluded.is_free_request
+                        is_free_request = excluded.is_free_request,
+                        cursor_billing_type = COALESCE(
+                            excluded.cursor_billing_type,
+                            request_logs.cursor_billing_type
+                        )
                     """,
                 arguments: [record.requestId, record.appType, record.model,
                             record.inputTokens, record.outputTokens,
                             record.cacheReadTokens, record.cacheCreationTokens,
                             record.sessionId, record.createdAt,
                             record.chargedCostMicros, record.listCostMicros,
-                            record.discountPercent, record.isFreeRequest]
+                            record.discountPercent, record.isFreeRequest,
+                            record.cursorBillingType?.rawValue]
             )
         }
     }
@@ -1158,7 +1171,7 @@ final class DatabaseManager {
                        input_tokens, output_tokens,
                        cache_read_tokens, cache_creation_tokens,
                        charged_cost_micros, list_cost_micros, discount_percent,
-                       is_free_request,
+                       is_free_request, cursor_billing_type,
                        created_at
                 FROM request_logs
                 \(whereSQL)
@@ -1183,6 +1196,8 @@ final class DatabaseManager {
                     listCostMicros: row["list_cost_micros"],
                     discountPercent: row["discount_percent"],
                     isFreeRequest: row["is_free_request"],
+                    cursorBillingType: (row["cursor_billing_type"] as String?)
+                        .flatMap(CursorBillingType.init(rawValue:)),
                     createdAt: row["created_at"]
                 )
             }

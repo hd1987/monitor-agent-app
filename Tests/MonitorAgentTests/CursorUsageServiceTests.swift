@@ -4,6 +4,32 @@ import XCTest
 @testable import MonitorAgent
 
 final class CursorUsageServiceTests: XCTestCase {
+    func testBillingTypeMapsOnlySupportedCursorUsageKinds() {
+        XCTAssertEqual(
+            CursorBillingType(usageEventKind: "USAGE_EVENT_KIND_USAGE_BASED"),
+            .onDemand
+        )
+        for kind in [
+            "USAGE_EVENT_KIND_INCLUDED_IN_PRO",
+            "USAGE_EVENT_KIND_INCLUDED_IN_BUSINESS",
+            "USAGE_EVENT_KIND_INCLUDED_IN_PRO_PLUS",
+            "USAGE_EVENT_KIND_INCLUDED_IN_ULTRA",
+        ] {
+            XCTAssertEqual(CursorBillingType(usageEventKind: kind), .included)
+        }
+        for kind in [
+            nil,
+            "USAGE_EVENT_KIND_UNSPECIFIED",
+            "USAGE_EVENT_KIND_USER_API_KEY",
+            "USAGE_EVENT_KIND_FREE_CREDIT",
+            "USAGE_EVENT_KIND_CUSTOM_SUBSCRIPTION",
+            "USAGE_EVENT_KIND_ERRORED_NOT_CHARGED",
+            "USAGE_EVENT_KIND_ABORTED_NOT_CHARGED",
+        ] {
+            XCTAssertNil(CursorBillingType(usageEventKind: kind))
+        }
+    }
+
     func testSyncMapsExactCursorUsageIntoExistingMetrics() throws {
         let database = DatabaseManager(inMemory: true)
         let transport = CursorTransportStub(responses: [
@@ -14,7 +40,7 @@ final class CursorUsageServiceTests: XCTestCase {
                   "usageEventsDisplay": [{
                     "timestamp": "1785376800000",
                     "model": "claude-4.5-sonnet",
-                    "kind": "USAGE_EVENT_KIND_INFERENCE",
+                    "kind": "USAGE_EVENT_KIND_USAGE_BASED",
                     "conversationId": "conversation-1",
                     "chargedCents": 1.75,
                     "tokenUsage": {
@@ -55,6 +81,8 @@ final class CursorUsageServiceTests: XCTestCase {
         XCTAssertEqual(request?.chargedCostMicros, 17_500)
         XCTAssertEqual(request?.listCostMicros, 35_000)
         XCTAssertEqual(request?.discountPercent, 50)
+        XCTAssertEqual(request?.cursorBillingType, .onDemand)
+        XCTAssertEqual(request?.isOnDemandCursorRequest, true)
         XCTAssertEqual(
             database.fetchRequestLogSummary(app: .cursor, range: .allTime).totalUsageMicros,
             nil
@@ -646,6 +674,8 @@ final class CursorUsageServiceTests: XCTestCase {
         XCTAssertEqual(request.chargedCostMicros, 0)
         XCTAssertNil(request.listCostMicros)
         XCTAssertNil(request.discountPercent)
+        XCTAssertEqual(request.cursorBillingType, .included)
+        XCTAssertFalse(request.isOnDemandCursorRequest)
     }
 
     func testCostAtRoundedInt64UpperBoundaryFailsClosed() {
