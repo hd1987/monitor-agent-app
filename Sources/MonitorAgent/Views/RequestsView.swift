@@ -503,8 +503,7 @@ struct RequestsView: View {
             .frame(width: columns.provider, alignment: .leading)
 
             Text(item.model)
-                .lineLimit(1)
-                .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(width: columns.model, alignment: .leading)
                 .help(item.model)
 
@@ -538,6 +537,12 @@ struct RequestsView: View {
                    let discountPercent = item.discountPercent,
                    discountPercent > 0 {
                     Text("\(discountPercent)% off")
+                        .font(.system(size: RequestListLayout.costSupplementaryFontSize))
+                        .foregroundStyle(theme.panelTertiaryForeground)
+                }
+                if item.isOnDemandCursorRequest {
+                    Text("On-Demand")
+                        .font(.system(size: RequestListLayout.costSupplementaryFontSize))
                         .foregroundStyle(theme.panelTertiaryForeground)
                 }
             }
@@ -564,6 +569,11 @@ struct RequestsView: View {
 
 enum RequestListLayout {
     static let contentInset: CGFloat = 8
+    static let costSupplementaryFontSize: CGFloat = 11
+    static let dateWidth: CGFloat = 150
+    static let providerWidth: CGFloat = 120
+    static let tokensWidth: CGFloat = 80
+    static let costWidth: CGFloat = 190
     static let scrollbarReservation = NSScroller.scrollerWidth(
         for: .regular,
         scrollerStyle: .overlay
@@ -591,10 +601,17 @@ struct RequestListColumns {
     let cost: CGFloat
 
     init(totalWidth: CGFloat) {
-        date = totalWidth * 0.20
-        provider = totalWidth * 0.17
-        model = totalWidth * 0.29
-        tokens = totalWidth * 0.14
-        cost = totalWidth * 0.20
+        let availableWidth = max(0, totalWidth)
+        let fixedTrackWidth = RequestListLayout.dateWidth
+            + RequestListLayout.providerWidth
+            + RequestListLayout.tokensWidth
+            + RequestListLayout.costWidth
+        let fixedTrackScale = min(1, availableWidth / fixedTrackWidth)
+
+        date = RequestListLayout.dateWidth * fixedTrackScale
+        provider = RequestListLayout.providerWidth * fixedTrackScale
+        tokens = RequestListLayout.tokensWidth * fixedTrackScale
+        cost = RequestListLayout.costWidth * fixedTrackScale
+        model = max(0, availableWidth - date - provider - tokens - cost)
     }
 }

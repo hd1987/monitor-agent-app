@@ -375,6 +375,25 @@ struct ModelShare: Identifiable {
 
 // MARK: - Sync Data
 
+enum CursorBillingType: String, Equatable {
+    case included
+    case onDemand = "on_demand"
+
+    init?(usageEventKind: String?) {
+        switch usageEventKind {
+        case "USAGE_EVENT_KIND_USAGE_BASED":
+            self = .onDemand
+        case "USAGE_EVENT_KIND_INCLUDED_IN_PRO",
+             "USAGE_EVENT_KIND_INCLUDED_IN_BUSINESS",
+             "USAGE_EVENT_KIND_INCLUDED_IN_PRO_PLUS",
+             "USAGE_EVENT_KIND_INCLUDED_IN_ULTRA":
+            self = .included
+        default:
+            return nil
+        }
+    }
+}
+
 struct ParsedRecord {
     let requestId: String       // unique key, e.g. "session:msg_01xxx", "codex:sid:3", or "cursor:<hash>"
     let appType: String         // "claude", "codex", or "cursor"
@@ -389,6 +408,7 @@ struct ParsedRecord {
     let listCostMicros: Int64?
     let discountPercent: Int?
     let isFreeRequest: Bool
+    let cursorBillingType: CursorBillingType?
 
     init(
         requestId: String,
@@ -403,7 +423,8 @@ struct ParsedRecord {
         chargedCostMicros: Int64? = nil,
         listCostMicros: Int64? = nil,
         discountPercent: Int? = nil,
-        isFreeRequest: Bool = false
+        isFreeRequest: Bool = false,
+        cursorBillingType: CursorBillingType? = nil
     ) {
         self.requestId = requestId
         self.appType = appType
@@ -418,6 +439,7 @@ struct ParsedRecord {
         self.listCostMicros = listCostMicros
         self.discountPercent = discountPercent
         self.isFreeRequest = isFreeRequest
+        self.cursorBillingType = cursorBillingType
     }
 }
 
@@ -433,6 +455,7 @@ struct RequestLogItem: Identifiable, Equatable {
     let listCostMicros: Int64?
     let discountPercent: Int?
     let isFreeRequest: Bool
+    let cursorBillingType: CursorBillingType?
     let createdAt: Int
 
     var id: String { requestId }
@@ -442,6 +465,10 @@ struct RequestLogItem: Identifiable, Equatable {
 
     var isFreeCursorRequest: Bool {
         provider == .cursor && isFreeRequest
+    }
+
+    var isOnDemandCursorRequest: Bool {
+        provider == .cursor && cursorBillingType == .onDemand
     }
 }
 

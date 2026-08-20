@@ -186,6 +186,69 @@ final class RequestLogTests: XCTestCase {
         XCTAssertTrue(columns.contains("list_cost_micros"))
         XCTAssertTrue(columns.contains("discount_percent"))
         XCTAssertTrue(columns.contains("is_free_request"))
+        XCTAssertTrue(columns.contains("cursor_billing_type"))
+    }
+
+    func testBillingTypeMigrationRestartsCompletedHistoricalBackfill() throws {
+        let databaseURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("MonitorAgent-BillingType-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let legacyDatabase = try DatabaseQueue(path: databaseURL.path)
+        try legacyDatabase.write { db in
+            try db.execute(sql: """
+                CREATE TABLE request_logs (
+                    request_id TEXT PRIMARY KEY,
+                    app_type TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    input_tokens INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                    charged_cost_micros INTEGER,
+                    list_cost_micros INTEGER,
+                    discount_percent INTEGER,
+                    is_free_request INTEGER NOT NULL DEFAULT 0,
+                    session_id TEXT,
+                    created_at INTEGER NOT NULL
+                );
+                CREATE TABLE sync_state (
+                    file_path TEXT PRIMARY KEY,
+                    byte_offset INTEGER NOT NULL DEFAULT 0,
+                    record_count INTEGER NOT NULL DEFAULT 0,
+                    session_id TEXT,
+                    model TEXT,
+                    last_total_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    last_total_output_tokens INTEGER NOT NULL DEFAULT 0,
+                    last_modified INTEGER NOT NULL,
+                    last_synced_at INTEGER NOT NULL
+                );
+                INSERT INTO sync_state VALUES (
+                    'cursor://usage-events', 1800000000500, 2,
+                    'cursor-account:identity', NULL, 0, 0, 10, 10
+                );
+                INSERT INTO request_logs (
+                    request_id, app_type, model, input_tokens, output_tokens,
+                    cache_read_tokens, cache_creation_tokens, session_id, created_at
+                ) VALUES (
+                    'cursor:legacy', 'cursor', 'cursor-model', 1, 2, 3, 4,
+                    'cursor-session', 1790000000
+                );
+                """)
+        }
+
+        let database = try DatabaseManager(path: databaseURL.path)
+        let backfill = try XCTUnwrap(database.cursorUsageCostBackfillState(
+            accountIdentity: "cursor-account:identity"
+        ))
+        let migratedDatabase = try DatabaseQueue(path: databaseURL.path)
+        let columns = try migratedDatabase.read { db in
+            try Row.fetchAll(db, sql: "PRAGMA table_info(request_logs)")
+                .map { $0["name"] as String }
+        }
+
+        XCTAssertEqual(backfill.nextStartMilliseconds, 1_790_000_000_000)
+        XCTAssertEqual(backfill.targetEndMilliseconds, 1_799_996_400_500)
+        XCTAssertTrue(columns.contains("cursor_billing_type"))
     }
 
     func testLatestRequestQuerySchedulerSkipsSupersededQueuedWork() {
@@ -414,11 +477,30 @@ final class RequestLogTests: XCTestCase {
             1_000,
             accuracy: 0.001
         )
-        XCTAssertEqual(columns.tokens, 140, accuracy: 0.001)
-        XCTAssertEqual(columns.cost, 200, accuracy: 0.001)
+        XCTAssertEqual(columns.date, 150, accuracy: 0.001)
+        XCTAssertEqual(columns.provider, 120, accuracy: 0.001)
+        XCTAssertEqual(columns.model, 460, accuracy: 0.001)
+        XCTAssertEqual(columns.tokens, 80, accuracy: 0.001)
+        XCTAssertEqual(columns.cost, 190, accuracy: 0.001)
+    }
+
+    func testRequestListColumnsCompressFixedTracksWithoutOverflow() {
+        let columns = RequestListColumns(totalWidth: 270)
+
+        XCTAssertEqual(
+            columns.date + columns.provider + columns.model + columns.tokens + columns.cost,
+            270,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(columns.date, 75, accuracy: 0.001)
+        XCTAssertEqual(columns.provider, 60, accuracy: 0.001)
+        XCTAssertEqual(columns.model, 0, accuracy: 0.001)
+        XCTAssertEqual(columns.tokens, 40, accuracy: 0.001)
+        XCTAssertEqual(columns.cost, 95, accuracy: 0.001)
     }
 
     func testRequestListReservesTrailingSpaceForOverlayScroller() {
+        XCTAssertEqual(RequestListLayout.costSupplementaryFontSize, 11)
         XCTAssertGreaterThan(RequestListLayout.scrollbarReservation, 0)
         XCTAssertEqual(
             RequestListLayout.horizontalInsets,

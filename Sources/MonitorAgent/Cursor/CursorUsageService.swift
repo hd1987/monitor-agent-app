@@ -369,7 +369,8 @@ final class CursorUsageService: CancellableCursorUsageSyncing {
             chargedCostMicros: try costMicros(fromCents: event.chargedCents),
             listCostMicros: try costMicros(fromCents: usage?.totalCents),
             discountPercent: usage?.discountPercentOff,
-            isFreeRequest: usage == nil
+            isFreeRequest: usage == nil,
+            cursorBillingType: CursorBillingType(usageEventKind: event.kind)
         )
     }
 
