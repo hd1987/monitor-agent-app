@@ -570,10 +570,6 @@ struct RequestsView: View {
 enum RequestListLayout {
     static let contentInset: CGFloat = 8
     static let costSupplementaryFontSize: CGFloat = 11
-    static let dateWidth: CGFloat = 150
-    static let providerWidth: CGFloat = 120
-    static let tokensWidth: CGFloat = 80
-    static let costWidth: CGFloat = 190
     static let scrollbarReservation = NSScroller.scrollerWidth(
         for: .regular,
         scrollerStyle: .overlay
@@ -602,16 +598,10 @@ struct RequestListColumns {
 
     init(totalWidth: CGFloat) {
         let availableWidth = max(0, totalWidth)
-        let fixedTrackWidth = RequestListLayout.dateWidth
-            + RequestListLayout.providerWidth
-            + RequestListLayout.tokensWidth
-            + RequestListLayout.costWidth
-        let fixedTrackScale = min(1, availableWidth / fixedTrackWidth)
-
-        date = RequestListLayout.dateWidth * fixedTrackScale
-        provider = RequestListLayout.providerWidth * fixedTrackScale
-        tokens = RequestListLayout.tokensWidth * fixedTrackScale
-        cost = RequestListLayout.costWidth * fixedTrackScale
-        model = max(0, availableWidth - date - provider - tokens - cost)
+        date = availableWidth * 0.19
+        provider = availableWidth * 0.15
+        model = availableWidth * 0.32
+        tokens = availableWidth * 0.10
+        cost = availableWidth * 0.24
     }
 }

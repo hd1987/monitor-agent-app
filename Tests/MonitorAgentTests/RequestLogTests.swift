@@ -477,14 +477,14 @@ final class RequestLogTests: XCTestCase {
             1_000,
             accuracy: 0.001
         )
-        XCTAssertEqual(columns.date, 150, accuracy: 0.001)
-        XCTAssertEqual(columns.provider, 120, accuracy: 0.001)
-        XCTAssertEqual(columns.model, 460, accuracy: 0.001)
-        XCTAssertEqual(columns.tokens, 80, accuracy: 0.001)
-        XCTAssertEqual(columns.cost, 190, accuracy: 0.001)
+        XCTAssertEqual(columns.date, 190, accuracy: 0.001)
+        XCTAssertEqual(columns.provider, 150, accuracy: 0.001)
+        XCTAssertEqual(columns.model, 320, accuracy: 0.001)
+        XCTAssertEqual(columns.tokens, 100, accuracy: 0.001)
+        XCTAssertEqual(columns.cost, 240, accuracy: 0.001)
     }
 
-    func testRequestListColumnsCompressFixedTracksWithoutOverflow() {
+    func testRequestListColumnsScaleProportionallyAtNarrowWidth() {
         let columns = RequestListColumns(totalWidth: 270)
 
         XCTAssertEqual(
@@ -492,11 +492,11 @@ final class RequestLogTests: XCTestCase {
             270,
             accuracy: 0.001
         )
-        XCTAssertEqual(columns.date, 75, accuracy: 0.001)
-        XCTAssertEqual(columns.provider, 60, accuracy: 0.001)
-        XCTAssertEqual(columns.model, 0, accuracy: 0.001)
-        XCTAssertEqual(columns.tokens, 40, accuracy: 0.001)
-        XCTAssertEqual(columns.cost, 95, accuracy: 0.001)
+        XCTAssertEqual(columns.date, 51.3, accuracy: 0.001)
+        XCTAssertEqual(columns.provider, 40.5, accuracy: 0.001)
+        XCTAssertEqual(columns.model, 86.4, accuracy: 0.001)
+        XCTAssertEqual(columns.tokens, 27, accuracy: 0.001)
+        XCTAssertEqual(columns.cost, 64.8, accuracy: 0.001)
     }
 
     func testRequestListReservesTrailingSpaceForOverlayScroller() {

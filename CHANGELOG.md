@@ -7,7 +7,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 ## [Unreleased]
 
 ### Added
-- Show `On-Demand` beside the Cost of Cursor usage-based requests, reduce supplementary Cost text, replace proportional request-list columns with a flexible wrapping Model track, and backfill the billing classification for existing history
+- Show `On-Demand` beside the Cost of Cursor usage-based requests, reduce supplementary Cost text, use proportional request-list columns with a wrapping Model track, and backfill the billing classification for existing history
 
 ## [0.15.0] - 2026-08-18
 
