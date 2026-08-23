@@ -577,12 +577,12 @@ private struct QuotaDetailsTip: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: QuotaCardLayout.detailsTipSectionSpacing) {
-            if !presentation.usageWindows.isEmpty {
-                usageLimitsSection
-            }
             if let resetCredits = presentation.resetCredits {
-                if !presentation.usageWindows.isEmpty { sectionDivider }
                 resetCreditsSection(resetCredits)
+            }
+            if !presentation.usageWindows.isEmpty {
+                if presentation.resetCredits != nil { sectionDivider }
+                usageLimitsSection
             }
             if let subscription = presentation.subscription {
                 if !presentation.usageWindows.isEmpty || presentation.resetCredits != nil { sectionDivider }
