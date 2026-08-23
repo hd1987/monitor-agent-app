@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-08-23
+
 ### Changed
 - Show Usage limit resets before Usage limits in quota details tips
 
