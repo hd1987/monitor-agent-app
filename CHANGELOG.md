@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.15.3] - 2026-08-24
+
 ### Changed
 - Color quota reset countdowns by actual time remaining and present quota details in a shared three-column, 80%-opaque tooltip
 
