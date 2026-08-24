@@ -18,7 +18,11 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(QuotaCardLayout.contentSpacing, 16)
         XCTAssertEqual(QuotaCardLayout.metricSpacing, 28)
         XCTAssertLessThan(QuotaCardLayout.metricHeight, QuotaCardLayout.cardHeight)
-        XCTAssertEqual(QuotaCardLayout.detailsTipWidth, 280)
+        XCTAssertEqual(QuotaCardLayout.detailsTipWidth, 320)
+        XCTAssertEqual(QuotaCardLayout.detailsTipHorizontalPadding, 10)
+        XCTAssertEqual(QuotaCardLayout.detailsTipPrimaryColumnWidth, 112)
+        XCTAssertEqual(QuotaCardLayout.detailsTipSecondaryColumnWidth, 58)
+        XCTAssertEqual(QuotaCardLayout.detailsTipColumnSpacing, 8)
         XCTAssertEqual(QuotaCardLayout.detailsTipSectionSpacing, 10)
         XCTAssertEqual(QuotaCardLayout.detailsTipItemSpacing, 8)
         XCTAssertEqual(QuotaCardLayout.tipHoverBridgeHeight, 6)
@@ -200,15 +204,129 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(QuotaRemaining.status(for: 9.99), .critical)
     }
 
-    func testResetCreditsCopyUsesExpirationColumnHeading() {
-        XCTAssertEqual(ResetCreditsCopy.expiresTitle, "Expires")
+    func testQuotaWindowResetStatusUsesActualTimeRemaining() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+        func status(
+            remaining: TimeInterval?,
+            durationSeconds: Int?,
+            fallbackLabel: String
+        ) -> QuotaStatus {
+            QuotaWindowResetStatus.status(
+                for: QuotaWindow(
+                    remainingPercent: 99,
+                    resetsAt: remaining.map { now.addingTimeInterval($0) },
+                    durationSeconds: durationSeconds
+                ),
+                fallbackLabel: fallbackLabel,
+                now: now
+            )
+        }
+
+        XCTAssertEqual(status(remaining: nil, durationSeconds: nil, fallbackLabel: "5h"), .unknown)
+        XCTAssertEqual(status(remaining: 60 * 60, durationSeconds: nil, fallbackLabel: "5h"), .critical)
+        XCTAssertEqual(status(remaining: 60 * 60 + 1, durationSeconds: nil, fallbackLabel: "5h"), .warning)
+        XCTAssertEqual(status(remaining: 3 * 60 * 60, durationSeconds: nil, fallbackLabel: "5h"), .warning)
+        XCTAssertEqual(status(remaining: 3 * 60 * 60 + 1, durationSeconds: nil, fallbackLabel: "5h"), .healthy)
+        XCTAssertEqual(status(remaining: 24 * 60 * 60, durationSeconds: 604_800, fallbackLabel: "5h"), .critical)
+        XCTAssertEqual(status(remaining: 24 * 60 * 60 + 1, durationSeconds: 604_800, fallbackLabel: "5h"), .warning)
+        XCTAssertEqual(status(remaining: 3 * 24 * 60 * 60, durationSeconds: nil, fallbackLabel: "Opus"), .warning)
+        XCTAssertEqual(status(remaining: 3 * 24 * 60 * 60 + 1, durationSeconds: nil, fallbackLabel: "1w"), .healthy)
     }
 
     func testQuotaDetailsTipUsesCompactColumnHeadings() {
         XCTAssertEqual(SubscriptionExpirationCopy.subscriptionTitle, "Subscription")
-        XCTAssertEqual(SubscriptionExpirationCopy.expiresTitle, "Expires")
-        XCTAssertEqual(QuotaDetailsCopy.usageLimitsTitle, "Usage limits")
-        XCTAssertEqual(QuotaDetailsCopy.resetsAtTitle, "Resets at")
+        XCTAssertEqual(QuotaDetailsCopy.itemTitle, "Item")
+        XCTAssertEqual(QuotaDetailsCopy.remainingTitle, "Remaining")
+        XCTAssertEqual(QuotaDetailsCopy.dateTitle, "Date")
+    }
+
+    func testQuotaStatusProvidesAccessibleTextForEveryState() {
+        XCTAssertEqual(QuotaStatus.healthy.accessibilityLabel, "Healthy")
+        XCTAssertEqual(QuotaStatus.warning.accessibilityLabel, "Warning")
+        XCTAssertEqual(QuotaStatus.critical.accessibilityLabel, "Critical")
+        XCTAssertEqual(QuotaStatus.unknown.accessibilityLabel, "Unknown")
+        XCTAssertEqual(QuotaAccessibility.resetStatus(for: .healthy), "Healthy reset status")
+        XCTAssertEqual(QuotaAccessibility.resetStatus(for: .warning), "Warning reset status")
+        XCTAssertEqual(QuotaAccessibility.resetStatus(for: .critical), "Critical reset status")
+        XCTAssertEqual(QuotaAccessibility.resetStatus(for: .unknown), "Unknown reset status")
+    }
+
+    func testQuotaDetailsTipRendersAllSectionsWithinFixedWidth() throws {
+        let presentation = QuotaDetailsPresentation(
+            usageWindows: [
+                QuotaWindowPresentation(
+                    label: "5h",
+                    remainingPercent: 80,
+                    countdownText: "3h 1m",
+                    absoluteResetText: "Aug 31, 10:07",
+                    status: .healthy
+                ),
+                QuotaWindowPresentation(
+                    label: "1w",
+                    remainingPercent: 40,
+                    countdownText: "1d 1h",
+                    absoluteResetText: "Sep 6, 10:07",
+                    status: .warning
+                ),
+                QuotaWindowPresentation(
+                    label: "Opus",
+                    remainingPercent: 10,
+                    countdownText: "1h",
+                    absoluteResetText: "Sep 6, 10:07",
+                    status: .critical
+                )
+            ],
+            resetCredits: QuotaResetCreditsPresentation(
+                count: 2,
+                items: [
+                    QuotaResetCreditPresentation(
+                        countdownText: "28d",
+                        absoluteExpirationText: "Sep 21, 2026",
+                        status: .healthy
+                    ),
+                    QuotaResetCreditPresentation(
+                        countdownText: "Today",
+                        absoluteExpirationText: "Aug 24, 2026",
+                        status: .critical
+                    )
+                ],
+                status: .critical
+            ),
+            subscription: QuotaSubscriptionPresentation(
+                distanceText: "Expired 2d",
+                expirationText: "Aug 22, 2026",
+                status: .critical
+            ),
+            refreshFailure: QuotaRefreshPresentation.Failure(
+                label: "Sign-in expired",
+                attemptedAt: Date(timeIntervalSince1970: 1_800_000_000)
+            )
+        )
+        let hostingView = NSHostingView(
+            rootView: QuotaDetailsTip(presentation: presentation)
+                .environmentObject(ThemeManager.shared)
+        )
+        hostingView.layoutSubtreeIfNeeded()
+        let fittingSize = hostingView.fittingSize
+        let tertiaryColumnWidth = QuotaCardLayout.detailsTipWidth
+            - (QuotaCardLayout.detailsTipHorizontalPadding * 2)
+            - QuotaCardLayout.detailsTipPrimaryColumnWidth
+            - QuotaCardLayout.detailsTipSecondaryColumnWidth
+            - (QuotaCardLayout.detailsTipColumnSpacing * 2)
+
+        XCTAssertEqual(fittingSize.width, QuotaCardLayout.detailsTipWidth, accuracy: 0.5)
+        XCTAssertGreaterThan(fittingSize.height, 100)
+        XCTAssertGreaterThanOrEqual(tertiaryColumnWidth, 100)
+
+        hostingView.frame = NSRect(origin: .zero, size: fittingSize)
+        hostingView.layoutSubtreeIfNeeded()
+        let image = try XCTUnwrap(
+            hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds)
+        )
+        hostingView.cacheDisplay(in: hostingView.bounds, to: image)
+        XCTAssertGreaterThan(image.pixelsWide, 0)
+        XCTAssertGreaterThan(image.pixelsHigh, 0)
     }
 
     func testQuotaResetCountdownUsesCompactRoundedUnits() {
@@ -291,6 +409,7 @@ final class QuotaFeatureTests: XCTestCase {
 
         XCTAssertEqual(presentation.usageWindows.map(\.label), ["5h", "1w", "Opus"])
         XCTAssertEqual(presentation.usageWindows.map(\.countdownText), ["2h", "3d", "4d"])
+        XCTAssertEqual(presentation.usageWindows.map(\.status), [.warning, .warning, .healthy])
         XCTAssertEqual(
             presentation.usageWindows.map(\.absoluteResetText),
             [snapshot.fiveHour, snapshot.weekly, snapshot.opusWeekly].map {
@@ -337,8 +456,8 @@ final class QuotaFeatureTests: XCTestCase {
 
         XCTAssertEqual(presentation.usageWindows.map(\.label), ["5h"])
         XCTAssertEqual(presentation.resetCredits?.count, 1)
-        XCTAssertEqual(presentation.resetCredits?.items.first?.countdownText, "2 days")
-        XCTAssertEqual(presentation.subscription?.distanceText, "10 days")
+        XCTAssertEqual(presentation.resetCredits?.items.first?.countdownText, "2d")
+        XCTAssertEqual(presentation.subscription?.distanceText, "10d")
         XCTAssertEqual(presentation.refreshFailure?.label, "Refresh failed")
         XCTAssertTrue(presentation.hasContent)
     }
@@ -502,30 +621,30 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertFalse(QuotaSettings(defaults: defaults).isEnabled(.claude))
     }
 
-    func testSubscriptionExpirationUsesCalendarDayDistance() {
+    func testQuotaExpirationCountdownUsesCompactCalendarDayDistance() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = Date(timeIntervalSince1970: 1_783_756_800)
 
         XCTAssertEqual(
-            SubscriptionExpiration.distanceText(
+            QuotaExpirationCountdown.text(
                 to: now.addingTimeInterval(3 * 24 * 60 * 60),
                 now: now,
                 calendar: calendar
             ),
-            "3 days"
+            "3d"
         )
         XCTAssertEqual(
-            SubscriptionExpiration.distanceText(to: now, now: now, calendar: calendar),
+            QuotaExpirationCountdown.text(to: now, now: now, calendar: calendar),
             "Today"
         )
         XCTAssertEqual(
-            SubscriptionExpiration.distanceText(
+            QuotaExpirationCountdown.text(
                 to: now.addingTimeInterval(-24 * 60 * 60),
                 now: now,
                 calendar: calendar
             ),
-            "1 day ago"
+            "Expired 1d"
         )
         XCTAssertFalse(SubscriptionExpiration.isExpired(now, now: now, calendar: calendar))
         XCTAssertTrue(SubscriptionExpiration.isExpired(

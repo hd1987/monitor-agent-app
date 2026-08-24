@@ -120,8 +120,9 @@ final class ThemeManager: ObservableObject {
 
     var tooltipBackground: Color {
         isDark
-            ? Color(red: 0.22, green: 0.22, blue: 0.24).opacity(0.75)
-            : Color.black.opacity(0.75)
+            ? Color(red: 0.22, green: 0.22, blue: 0.24)
+                .opacity(MainPanelTooltipDesign.backgroundOpacity)
+            : Color.black.opacity(MainPanelTooltipDesign.backgroundOpacity)
     }
 
     var tooltipForeground: Color {
