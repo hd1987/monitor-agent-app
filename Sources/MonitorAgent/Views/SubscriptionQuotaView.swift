@@ -161,12 +161,13 @@ struct SubscriptionQuotaCard: View {
         HStack(spacing: 5) {
             ProviderIcon(provider: provider)
                 .overlay(alignment: .topTrailing) {
-                    if let color = quotaStateDotColor {
-                        Circle()
-                            .fill(color)
-                            .frame(width: 4, height: 4)
+                    if let status = quotaStateDotStatus {
+                        QuotaStatusDot(
+                            status: status,
+                            diameter: 4,
+                            unknownColor: .clear
+                        )
                             .offset(x: 2, y: -2)
-                            .accessibilityHidden(true)
                     }
                 }
             Text(provider.displayName)
@@ -184,12 +185,11 @@ struct SubscriptionQuotaCard: View {
         .accessibilityValue(quotaStateHelp)
     }
 
-    private var quotaStateDotColor: Color? {
-        guard let status = QuotaRefreshPresentation.headerStatus(
+    private var quotaStateDotStatus: QuotaStatus? {
+        QuotaRefreshPresentation.headerStatus(
             snapshotStatus: snapshot?.status,
             phase: refreshPhase
-        ) else { return nil }
-        return QuotaStatusPalette.color(for: status, unknown: .clear)
+        )
     }
 
     private var quotaStateHelp: String {
@@ -253,10 +253,12 @@ struct SubscriptionQuotaCard: View {
                 .foregroundStyle(quotaColor(item.remainingPercent))
             Text(item.countdownText)
                 .font(.system(size: 11))
-                .foregroundStyle(theme.panelSecondaryForeground)
+                .foregroundStyle(quotaStatusColor(item.status))
         }
         .lineLimit(1)
         .fixedSize()
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(QuotaAccessibility.resetStatus(for: item.status))
     }
 
     private func statusText(_ text: String) -> some View {
@@ -277,10 +279,11 @@ struct SubscriptionQuotaCard: View {
     }
 
     private func quotaColor(_ percent: Double) -> Color {
-        QuotaStatusPalette.color(
-            for: QuotaRemaining.status(for: percent),
-            unknown: theme.panelSecondaryForeground
-        )
+        quotaStatusColor(QuotaRemaining.status(for: percent))
+    }
+
+    private func quotaStatusColor(_ status: QuotaStatus) -> Color {
+        QuotaStatusPalette.color(for: status, unknown: theme.panelSecondaryForeground)
     }
 
     private func planColor(subscriptionStatus: QuotaStatus?) -> Color {
@@ -392,6 +395,7 @@ struct QuotaWindowPresentation: Equatable {
     let remainingPercent: Double
     let countdownText: String
     let absoluteResetText: String
+    let status: QuotaStatus
 }
 
 struct QuotaResetCreditPresentation: Equatable {
@@ -475,7 +479,7 @@ struct QuotaDetailsPresentation: Equatable {
                 }
                 let expiration = expirations[index]
                 return QuotaResetCreditPresentation(
-                    countdownText: SubscriptionExpiration.distanceText(
+                    countdownText: QuotaExpirationCountdown.text(
                         to: expiration,
                         now: now,
                         calendar: calendar
@@ -503,7 +507,7 @@ struct QuotaDetailsPresentation: Equatable {
 
         let subscription = expirationDate.map {
             QuotaSubscriptionPresentation(
-                distanceText: SubscriptionExpiration.distanceText(
+                distanceText: QuotaExpirationCountdown.text(
                     to: $0,
                     now: now,
                     calendar: calendar
@@ -542,7 +546,12 @@ struct QuotaDetailsPresentation: Equatable {
             label: label,
             remainingPercent: window.remainingPercent,
             countdownText: QuotaResetCountdown.text(until: window.resetsAt, now: now),
-            absoluteResetText: QuotaDateFormat.resetDateTime(window.resetsAt)
+            absoluteResetText: QuotaDateFormat.resetDateTime(window.resetsAt),
+            status: QuotaWindowResetStatus.status(
+                for: window,
+                fallbackLabel: fallbackLabel,
+                now: now
+            )
         )
     }
 }
@@ -571,22 +580,31 @@ enum QuotaResetCountdown {
     }
 }
 
-private struct QuotaDetailsTip: View {
+struct QuotaDetailsTip: View {
     @EnvironmentObject private var theme: ThemeManager
     let presentation: QuotaDetailsPresentation
 
     var body: some View {
-        VStack(alignment: .leading, spacing: QuotaCardLayout.detailsTipSectionSpacing) {
+        Grid(
+            alignment: .leading,
+            horizontalSpacing: QuotaCardLayout.detailsTipColumnSpacing,
+            verticalSpacing: QuotaCardLayout.detailsTipItemSpacing
+        ) {
+            QuotaDetailHeaderRow(
+                primaryText: QuotaDetailsCopy.itemTitle,
+                secondaryText: QuotaDetailsCopy.remainingTitle,
+                tertiaryText: QuotaDetailsCopy.dateTitle
+            )
             if let resetCredits = presentation.resetCredits {
-                resetCreditsSection(resetCredits)
+                resetCreditsRows(resetCredits)
             }
             if !presentation.usageWindows.isEmpty {
                 if presentation.resetCredits != nil { sectionDivider }
-                usageLimitsSection
+                usageLimitRows
             }
             if let subscription = presentation.subscription {
                 if !presentation.usageWindows.isEmpty || presentation.resetCredits != nil { sectionDivider }
-                subscriptionSection(subscription)
+                subscriptionRows(subscription)
             }
             if let failure = presentation.refreshFailure {
                 if !presentation.usageWindows.isEmpty
@@ -594,135 +612,167 @@ private struct QuotaDetailsTip: View {
                     || presentation.subscription != nil {
                     sectionDivider
                 }
-                failureSection(failure)
+                QuotaDetailRow(
+                    status: .critical,
+                    primaryText: failure.label,
+                    secondaryText: "",
+                    tertiaryText: QuotaDateFormat.updateDateTime(failure.attemptedAt)
+                )
             }
         }
         .foregroundStyle(theme.tooltipForeground)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, QuotaCardLayout.detailsTipHorizontalPadding)
         .padding(.vertical, 9)
         .frame(width: QuotaCardLayout.detailsTipWidth)
         .mainPanelTooltipSurface()
     }
 
-    private var usageLimitsSection: some View {
-        VStack(alignment: .leading, spacing: QuotaCardLayout.detailsTipItemSpacing) {
-            sectionHeader(QuotaDetailsCopy.usageLimitsTitle, trailing: QuotaDetailsCopy.resetsAtTitle)
-            ForEach(Array(presentation.usageWindows.enumerated()), id: \.offset) { _, window in
-                HStack(spacing: 8) {
-                    Text("\(window.label) · \(window.countdownText)")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(theme.tooltipForeground.opacity(0.72))
-                    Spacer(minLength: 12)
-                    Text(window.absoluteResetText)
-                        .font(.system(size: 10))
-                }
-            }
-        }
-    }
-
-    private func resetCreditsSection(_ resetCredits: QuotaResetCreditsPresentation) -> some View {
-        VStack(alignment: .leading, spacing: QuotaCardLayout.detailsTipItemSpacing) {
-            sectionHeader(ResetCreditsCopy.title, trailing: ResetCreditsCopy.expiresTitle)
-            ForEach(Array(resetCredits.items.enumerated()), id: \.offset) { _, item in
-                HStack(spacing: 8) {
-                    statusDot(item.status)
-                    Text(item.countdownText)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(theme.tooltipForeground.opacity(0.72))
-                    Spacer(minLength: 12)
-                    Text(item.absoluteExpirationText)
-                        .font(.system(size: 10))
-                }
-            }
-        }
-    }
-
-    private func subscriptionSection(_ subscription: QuotaSubscriptionPresentation) -> some View {
-        VStack(alignment: .leading, spacing: QuotaCardLayout.detailsTipItemSpacing) {
-            sectionHeader(
-                SubscriptionExpirationCopy.subscriptionTitle,
-                trailing: SubscriptionExpirationCopy.expiresTitle
+    @ViewBuilder
+    private var usageLimitRows: some View {
+        ForEach(Array(presentation.usageWindows.enumerated()), id: \.offset) { _, window in
+            QuotaDetailRow(
+                status: window.status,
+                primaryText: "\(window.label) limit",
+                secondaryText: window.countdownText,
+                tertiaryText: window.absoluteResetText
             )
-            HStack(spacing: 8) {
-                statusDot(subscription.status)
-                Text(subscription.distanceText)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(theme.tooltipForeground.opacity(0.72))
-                Spacer(minLength: 12)
-                Text(subscription.expirationText)
-                    .font(.system(size: 10))
-            }
         }
     }
 
-    private func failureSection(_ failure: QuotaRefreshPresentation.Failure) -> some View {
-        HStack(spacing: 8) {
-            statusDot(.critical)
-            Text(failure.label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(theme.tooltipForeground.opacity(0.72))
-            Spacer(minLength: 8)
-            Text(QuotaDateFormat.updateDateTime(failure.attemptedAt))
-                .font(.system(size: 10))
+    @ViewBuilder
+    private func resetCreditsRows(_ resetCredits: QuotaResetCreditsPresentation) -> some View {
+        ForEach(Array(resetCredits.items.enumerated()), id: \.offset) { index, item in
+            QuotaDetailRow(
+                status: item.status,
+                primaryText: "Reset credit \(index + 1)",
+                secondaryText: item.countdownText,
+                tertiaryText: item.absoluteExpirationText
+            )
         }
     }
 
-    private func sectionHeader(_ title: String, trailing: String) -> some View {
-        HStack {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-            Spacer()
-            Text(trailing)
-                .font(.system(size: 10))
-        }
+    @ViewBuilder
+    private func subscriptionRows(_ subscription: QuotaSubscriptionPresentation) -> some View {
+        QuotaDetailRow(
+            status: subscription.status,
+            primaryText: SubscriptionExpirationCopy.subscriptionTitle,
+            secondaryText: subscription.distanceText,
+            tertiaryText: subscription.expirationText
+        )
     }
 
     private var sectionDivider: some View {
         Divider()
             .overlay(theme.tooltipForeground.opacity(0.12))
-    }
-
-    private func statusDot(_ status: QuotaStatus) -> some View {
-        Circle()
-            .fill(QuotaStatusPalette.color(
-                for: status,
-                unknown: theme.tooltipForeground.opacity(0.72)
+            .gridCellColumns(3)
+            .padding(.vertical, max(
+                0,
+                (QuotaCardLayout.detailsTipSectionSpacing
+                    - QuotaCardLayout.detailsTipItemSpacing) / 2
             ))
-            .frame(width: 6, height: 6)
+    }
+}
+
+private struct QuotaDetailHeaderRow: View {
+    @EnvironmentObject private var theme: ThemeManager
+    let primaryText: String
+    let secondaryText: String
+    let tertiaryText: String
+
+    var body: some View {
+        GridRow {
+            Text(primaryText)
+                .font(.system(size: 10, weight: .medium))
+                .frame(
+                    width: QuotaCardLayout.detailsTipPrimaryColumnWidth,
+                    alignment: .leading
+                )
+            Text(secondaryText)
+                .font(.system(size: 10))
+                .frame(
+                    width: QuotaCardLayout.detailsTipSecondaryColumnWidth,
+                    alignment: .leading
+                )
+            Text(tertiaryText)
+                .font(.system(size: 10))
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .lineLimit(1)
+        .foregroundStyle(theme.tooltipForeground.opacity(0.62))
+    }
+}
+
+private struct QuotaDetailRow: View {
+    @EnvironmentObject private var theme: ThemeManager
+    let status: QuotaStatus
+    let primaryText: String
+    let secondaryText: String
+    let tertiaryText: String
+
+    var body: some View {
+        GridRow {
+            HStack(spacing: 8) {
+                QuotaStatusDot(
+                    status: status,
+                    diameter: 6,
+                    unknownColor: theme.tooltipForeground.opacity(0.72)
+                )
+                Text(primaryText)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(theme.tooltipForeground.opacity(0.72))
+            }
+            .frame(
+                width: QuotaCardLayout.detailsTipPrimaryColumnWidth,
+                alignment: .leading
+            )
+            Text(secondaryText)
+                .font(.system(size: 10, weight: .medium))
+                .frame(
+                    width: QuotaCardLayout.detailsTipSecondaryColumnWidth,
+                    alignment: .leading
+                )
+            Text(tertiaryText)
+                .font(.system(size: 10))
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .lineLimit(1)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([primaryText, secondaryText, tertiaryText]
+            .filter { !$0.isEmpty }
+            .joined(separator: ", "))
+        .accessibilityValue("\(status.accessibilityLabel) status")
+    }
+}
+
+private struct QuotaStatusDot: View {
+    let status: QuotaStatus
+    let diameter: CGFloat
+    let unknownColor: Color
+
+    var body: some View {
+        Circle()
+            .fill(QuotaStatusPalette.color(for: status, unknown: unknownColor))
+            .frame(width: diameter, height: diameter)
+            .accessibilityHidden(true)
     }
 }
 
 enum QuotaDetailsCopy {
-    static let usageLimitsTitle = "Usage limits"
-    static let resetsAtTitle = "Resets at"
+    static let itemTitle = "Item"
+    static let remainingTitle = "Remaining"
+    static let dateTitle = "Date"
 }
 
 enum ResetCreditsCopy {
-    static let title = "Usage limit resets"
-    static let expiresTitle = "Expires"
     static let expirationUnavailable = "Expiration unavailable"
 }
 
 enum SubscriptionExpirationCopy {
     static let subscriptionTitle = "Subscription"
-    static let expiresTitle = "Expires"
-    static let today = "Today"
-
-    static func days(_ days: Int) -> String {
-        "\(days) \(days == 1 ? "day" : "days")"
-    }
-
-    static func daysExpired(_ days: Int) -> String {
-        "\(days) \(days == 1 ? "day" : "days") ago"
-    }
 }
 
-enum SubscriptionExpiration {
-    static func dateText(_ date: Date) -> String {
-        dateFormatter.string(from: date)
-    }
-
-    static func distanceText(
+enum QuotaExpirationCountdown {
+    static func text(
         to expirationDate: Date,
         now: Date = Date(),
         calendar: Calendar = .current
@@ -730,9 +780,15 @@ enum SubscriptionExpiration {
         let today = calendar.startOfDay(for: now)
         let expirationDay = calendar.startOfDay(for: expirationDate)
         let days = calendar.dateComponents([.day], from: today, to: expirationDay).day ?? 0
-        if days > 0 { return SubscriptionExpirationCopy.days(days) }
-        if days < 0 { return SubscriptionExpirationCopy.daysExpired(abs(days)) }
-        return SubscriptionExpirationCopy.today
+        if days > 0 { return "\(days)d" }
+        if days < 0 { return "Expired \(abs(days))d" }
+        return "Today"
+    }
+}
+
+enum SubscriptionExpiration {
+    static func dateText(_ date: Date) -> String {
+        dateFormatter.string(from: date)
     }
 
     static func isExpired(
@@ -764,12 +820,58 @@ enum QuotaStatus: Equatable {
     case warning
     case critical
     case unknown
+
+    var accessibilityLabel: String {
+        switch self {
+        case .healthy: return "Healthy"
+        case .warning: return "Warning"
+        case .critical: return "Critical"
+        case .unknown: return "Unknown"
+        }
+    }
+}
+
+enum QuotaAccessibility {
+    static func resetStatus(for status: QuotaStatus) -> String {
+        "\(status.accessibilityLabel) reset status"
+    }
 }
 
 enum QuotaRemaining {
     static func status(for percent: Double) -> QuotaStatus {
         if percent <= 10 { return .critical }
         if percent <= 40 { return .warning }
+        return .healthy
+    }
+}
+
+enum QuotaWindowResetStatus {
+    private static let shortCriticalThreshold: TimeInterval = 60 * 60
+    private static let shortWarningThreshold: TimeInterval = 3 * 60 * 60
+    private static let weeklyCriticalThreshold: TimeInterval = 24 * 60 * 60
+    private static let weeklyWarningThreshold: TimeInterval = 3 * 24 * 60 * 60
+
+    static func status(
+        for window: QuotaWindow,
+        fallbackLabel: String,
+        now: Date
+    ) -> QuotaStatus {
+        guard let resetsAt = window.resetsAt else { return .unknown }
+        let remaining = resetsAt.timeIntervalSince(now)
+        guard remaining.isFinite else { return .unknown }
+
+        let usesWeeklyThresholds = window.usesDateTimeReset
+            || fallbackLabel == "1w"
+            || fallbackLabel == "Opus"
+        let criticalThreshold = usesWeeklyThresholds
+            ? weeklyCriticalThreshold
+            : shortCriticalThreshold
+        let warningThreshold = usesWeeklyThresholds
+            ? weeklyWarningThreshold
+            : shortWarningThreshold
+
+        if remaining <= criticalThreshold { return .critical }
+        if remaining <= warningThreshold { return .warning }
         return .healthy
     }
 }
@@ -857,7 +959,11 @@ enum QuotaCardLayout {
     static let horizontalPadding: CGFloat = 12
     static let contentSpacing: CGFloat = 16
     static let metricSpacing: CGFloat = 28
-    static let detailsTipWidth: CGFloat = 280
+    static let detailsTipWidth: CGFloat = 320
+    static let detailsTipHorizontalPadding: CGFloat = 10
+    static let detailsTipPrimaryColumnWidth: CGFloat = 112
+    static let detailsTipSecondaryColumnWidth: CGFloat = 58
+    static let detailsTipColumnSpacing: CGFloat = 8
     static let detailsTipSectionSpacing: CGFloat = 10
     static let detailsTipItemSpacing: CGFloat = 8
     static let tipHoverBridgeHeight: CGFloat = 6

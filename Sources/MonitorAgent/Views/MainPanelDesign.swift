@@ -46,6 +46,7 @@ enum MainPanelSelectionPalette {
 
 enum MainPanelTooltipDesign {
     static let cornerRadius: CGFloat = 6
+    static let backgroundOpacity = 0.80
     static let borderOpacity = 0.12
     static let shadowOpacity = 0.10
     static let shadowRadius: CGFloat = 5
