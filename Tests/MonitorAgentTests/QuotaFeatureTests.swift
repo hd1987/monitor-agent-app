@@ -239,6 +239,88 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(QuotaDetailsCopy.itemTitle, "Item")
         XCTAssertEqual(QuotaDetailsCopy.remainingTitle, "Remaining")
         XCTAssertEqual(QuotaDetailsCopy.dateTitle, "Date")
+        XCTAssertEqual(ResetCreditsCopy.cardTitle, "Resets")
+        XCTAssertEqual(ResetCreditsCopy.itemTitle(number: 1), "Reset 1")
+        XCTAssertEqual(
+            ResetCreditsCopy.accessibilityItemTitle(number: 1),
+            "Reset credit 1"
+        )
+    }
+
+    func testQuotaWindowPresentationFormatsRoundedRemainingPercent() {
+        let presentation = QuotaWindowPresentation(
+            label: "5h",
+            remainingPercent: 79.6,
+            countdownText: "3h 1m",
+            absoluteResetText: "Aug 31, 10:07",
+            status: .healthy
+        )
+
+        XCTAssertEqual(presentation.remainingPercentText, "80%")
+        XCTAssertEqual(presentation.detailsItemText, "5h • 80%")
+        XCTAssertEqual(presentation.accessibilityItemText, "5h limit, 80% remaining")
+    }
+
+    func testQuotaDetailsPresentationSectionsPreserveVisibleOrder() {
+        let window = QuotaWindowPresentation(
+            label: "5h",
+            remainingPercent: 80,
+            countdownText: "3h",
+            absoluteResetText: "Aug 31, 10:07",
+            status: .healthy
+        )
+        let resetCredits = QuotaResetCreditsPresentation(
+            count: 1,
+            items: [
+                QuotaResetCreditPresentation(
+                    countdownText: "28d",
+                    absoluteExpirationText: "Sep 21, 2026",
+                    status: .healthy
+                )
+            ],
+            status: .healthy
+        )
+        let subscription = QuotaSubscriptionPresentation(
+            distanceText: "30d",
+            expirationText: "Sep 23, 2026",
+            status: .healthy
+        )
+        let failure = QuotaRefreshPresentation.Failure(
+            label: "Refresh failed",
+            attemptedAt: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+
+        let completePresentation = QuotaDetailsPresentation(
+            usageWindows: [window],
+            resetCredits: resetCredits,
+            subscription: subscription,
+            refreshFailure: failure
+        )
+        let partialPresentation = QuotaDetailsPresentation(
+            usageWindows: [],
+            resetCredits: resetCredits,
+            subscription: nil,
+            refreshFailure: failure
+        )
+        let emptyPresentation = QuotaDetailsPresentation(
+            usageWindows: [],
+            resetCredits: nil,
+            subscription: nil,
+            refreshFailure: nil
+        )
+
+        XCTAssertEqual(
+            completePresentation.sections,
+            [.usageLimits, .resetCredits, .subscription, .refreshFailure]
+        )
+        XCTAssertEqual(
+            partialPresentation.sections,
+            [.resetCredits, .refreshFailure]
+        )
+        XCTAssertTrue(completePresentation.hasContent)
+        XCTAssertTrue(partialPresentation.hasContent)
+        XCTAssertFalse(emptyPresentation.hasContent)
+        XCTAssertTrue(emptyPresentation.sections.isEmpty)
     }
 
     func testQuotaStatusProvidesAccessibleTextForEveryState() {

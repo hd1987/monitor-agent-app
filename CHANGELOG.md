@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.15.4] - 2026-08-25
+
+### Changed
+- Order quota details by Usage limits, Reset credits, Subscription, then refresh failure
+- Show each Usage limit's remaining percentage as plain text in quota details
+- Shorten numbered Reset credit labels in quota details
+- Capitalize the Codex quota card's Resets label
+- Preserve full quota semantics for VoiceOver and test the details-section order
+
 ## [0.15.3] - 2026-08-24
 
 ### Changed

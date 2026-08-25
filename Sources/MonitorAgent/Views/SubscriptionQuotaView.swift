@@ -215,7 +215,7 @@ struct SubscriptionQuotaCard: View {
                 }
                 if let resetCredits = presentation.resetCredits {
                     HStack(spacing: 5) {
-                        Text("resets")
+                        Text(ResetCreditsCopy.cardTitle)
                             .fontWeight(.medium)
                             .foregroundStyle(theme.panelSecondaryForeground)
                         Text("·")
@@ -248,7 +248,7 @@ struct SubscriptionQuotaCard: View {
                 .foregroundStyle(theme.panelSecondaryForeground)
             Text("·")
                 .foregroundStyle(theme.panelSecondaryForeground)
-            Text("\(Int(item.remainingPercent.rounded()))%")
+            Text(item.remainingPercentText)
                 .fontWeight(.semibold)
                 .foregroundStyle(quotaColor(item.remainingPercent))
             Text(item.countdownText)
@@ -396,6 +396,18 @@ struct QuotaWindowPresentation: Equatable {
     let countdownText: String
     let absoluteResetText: String
     let status: QuotaStatus
+
+    var remainingPercentText: String {
+        "\(Int(remainingPercent.rounded()))%"
+    }
+
+    var detailsItemText: String {
+        "\(label) • \(remainingPercentText)"
+    }
+
+    var accessibilityItemText: String {
+        "\(label) limit, \(remainingPercentText) remaining"
+    }
 }
 
 struct QuotaResetCreditPresentation: Equatable {
@@ -423,10 +435,16 @@ struct QuotaDetailsPresentation: Equatable {
     let refreshFailure: QuotaRefreshPresentation.Failure?
 
     var hasContent: Bool {
-        !usageWindows.isEmpty
-            || resetCredits != nil
-            || subscription != nil
-            || refreshFailure != nil
+        !sections.isEmpty
+    }
+
+    var sections: [QuotaDetailsSection] {
+        var sections: [QuotaDetailsSection] = []
+        if !usageWindows.isEmpty { sections.append(.usageLimits) }
+        if resetCredits != nil { sections.append(.resetCredits) }
+        if subscription != nil { sections.append(.subscription) }
+        if refreshFailure != nil { sections.append(.refreshFailure) }
+        return sections
     }
 
     static func make(
@@ -556,6 +574,13 @@ struct QuotaDetailsPresentation: Equatable {
     }
 }
 
+enum QuotaDetailsSection: Equatable {
+    case usageLimits
+    case resetCredits
+    case subscription
+    case refreshFailure
+}
+
 enum QuotaResetCountdown {
     static func text(until resetDate: Date?, now: Date) -> String {
         guard let resetDate else { return "--" }
@@ -595,29 +620,9 @@ struct QuotaDetailsTip: View {
                 secondaryText: QuotaDetailsCopy.remainingTitle,
                 tertiaryText: QuotaDetailsCopy.dateTitle
             )
-            if let resetCredits = presentation.resetCredits {
-                resetCreditsRows(resetCredits)
-            }
-            if !presentation.usageWindows.isEmpty {
-                if presentation.resetCredits != nil { sectionDivider }
-                usageLimitRows
-            }
-            if let subscription = presentation.subscription {
-                if !presentation.usageWindows.isEmpty || presentation.resetCredits != nil { sectionDivider }
-                subscriptionRows(subscription)
-            }
-            if let failure = presentation.refreshFailure {
-                if !presentation.usageWindows.isEmpty
-                    || presentation.resetCredits != nil
-                    || presentation.subscription != nil {
-                    sectionDivider
-                }
-                QuotaDetailRow(
-                    status: .critical,
-                    primaryText: failure.label,
-                    secondaryText: "",
-                    tertiaryText: QuotaDateFormat.updateDateTime(failure.attemptedAt)
-                )
+            ForEach(Array(presentation.sections.enumerated()), id: \.offset) { index, section in
+                if index > 0 { sectionDivider }
+                sectionRows(section)
             }
         }
         .foregroundStyle(theme.tooltipForeground)
@@ -632,9 +637,10 @@ struct QuotaDetailsTip: View {
         ForEach(Array(presentation.usageWindows.enumerated()), id: \.offset) { _, window in
             QuotaDetailRow(
                 status: window.status,
-                primaryText: "\(window.label) limit",
+                primaryText: window.detailsItemText,
                 secondaryText: window.countdownText,
-                tertiaryText: window.absoluteResetText
+                tertiaryText: window.absoluteResetText,
+                accessibilityPrimaryText: window.accessibilityItemText
             )
         }
     }
@@ -644,9 +650,10 @@ struct QuotaDetailsTip: View {
         ForEach(Array(resetCredits.items.enumerated()), id: \.offset) { index, item in
             QuotaDetailRow(
                 status: item.status,
-                primaryText: "Reset credit \(index + 1)",
+                primaryText: ResetCreditsCopy.itemTitle(number: index + 1),
                 secondaryText: item.countdownText,
-                tertiaryText: item.absoluteExpirationText
+                tertiaryText: item.absoluteExpirationText,
+                accessibilityPrimaryText: ResetCreditsCopy.accessibilityItemTitle(number: index + 1)
             )
         }
     }
@@ -659,6 +666,31 @@ struct QuotaDetailsTip: View {
             secondaryText: subscription.distanceText,
             tertiaryText: subscription.expirationText
         )
+    }
+
+    @ViewBuilder
+    private func sectionRows(_ section: QuotaDetailsSection) -> some View {
+        switch section {
+        case .usageLimits:
+            usageLimitRows
+        case .resetCredits:
+            if let resetCredits = presentation.resetCredits {
+                resetCreditsRows(resetCredits)
+            }
+        case .subscription:
+            if let subscription = presentation.subscription {
+                subscriptionRows(subscription)
+            }
+        case .refreshFailure:
+            if let failure = presentation.refreshFailure {
+                QuotaDetailRow(
+                    status: .critical,
+                    primaryText: failure.label,
+                    secondaryText: "",
+                    tertiaryText: QuotaDateFormat.updateDateTime(failure.attemptedAt)
+                )
+            }
+        }
     }
 
     private var sectionDivider: some View {
@@ -708,6 +740,7 @@ private struct QuotaDetailRow: View {
     let primaryText: String
     let secondaryText: String
     let tertiaryText: String
+    var accessibilityPrimaryText: String? = nil
 
     var body: some View {
         GridRow {
@@ -737,7 +770,7 @@ private struct QuotaDetailRow: View {
         }
         .lineLimit(1)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([primaryText, secondaryText, tertiaryText]
+        .accessibilityLabel([accessibilityPrimaryText ?? primaryText, secondaryText, tertiaryText]
             .filter { !$0.isEmpty }
             .joined(separator: ", "))
         .accessibilityValue("\(status.accessibilityLabel) status")
@@ -764,7 +797,16 @@ enum QuotaDetailsCopy {
 }
 
 enum ResetCreditsCopy {
+    static let cardTitle = "Resets"
     static let expirationUnavailable = "Expiration unavailable"
+
+    static func itemTitle(number: Int) -> String {
+        "Reset \(number)"
+    }
+
+    static func accessibilityItemTitle(number: Int) -> String {
+        "Reset credit \(number)"
+    }
 }
 
 enum SubscriptionExpirationCopy {
