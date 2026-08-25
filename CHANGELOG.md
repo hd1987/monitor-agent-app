@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.15.4] - 2026-08-25
+
 ### Changed
 - Order quota details by Usage limits, Reset credits, Subscription, then refresh failure
 - Show each Usage limit's remaining percentage as plain text in quota details
