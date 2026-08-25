@@ -595,12 +595,12 @@ struct QuotaDetailsTip: View {
                 secondaryText: QuotaDetailsCopy.remainingTitle,
                 tertiaryText: QuotaDetailsCopy.dateTitle
             )
-            if let resetCredits = presentation.resetCredits {
-                resetCreditsRows(resetCredits)
-            }
             if !presentation.usageWindows.isEmpty {
-                if presentation.resetCredits != nil { sectionDivider }
                 usageLimitRows
+            }
+            if let resetCredits = presentation.resetCredits {
+                if !presentation.usageWindows.isEmpty { sectionDivider }
+                resetCreditsRows(resetCredits)
             }
             if let subscription = presentation.subscription {
                 if !presentation.usageWindows.isEmpty || presentation.resetCredits != nil { sectionDivider }

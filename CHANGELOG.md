@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Order quota details by Usage limits, Reset credits, Subscription, then refresh failure
+
 ## [0.15.3] - 2026-08-24
 
 ### Changed
