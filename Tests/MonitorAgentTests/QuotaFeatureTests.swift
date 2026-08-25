@@ -239,6 +239,21 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(QuotaDetailsCopy.itemTitle, "Item")
         XCTAssertEqual(QuotaDetailsCopy.remainingTitle, "Remaining")
         XCTAssertEqual(QuotaDetailsCopy.dateTitle, "Date")
+        XCTAssertEqual(ResetCreditsCopy.cardTitle, "Resets")
+        XCTAssertEqual(ResetCreditsCopy.itemTitle(number: 1), "Reset 1")
+    }
+
+    func testQuotaWindowPresentationFormatsRoundedRemainingPercent() {
+        let presentation = QuotaWindowPresentation(
+            label: "5h",
+            remainingPercent: 79.6,
+            countdownText: "3h 1m",
+            absoluteResetText: "Aug 31, 10:07",
+            status: .healthy
+        )
+
+        XCTAssertEqual(presentation.remainingPercentText, "80%")
+        XCTAssertEqual(presentation.detailsItemText, "5h • 80%")
     }
 
     func testQuotaStatusProvidesAccessibleTextForEveryState() {

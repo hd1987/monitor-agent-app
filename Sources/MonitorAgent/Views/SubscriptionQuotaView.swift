@@ -215,7 +215,7 @@ struct SubscriptionQuotaCard: View {
                 }
                 if let resetCredits = presentation.resetCredits {
                     HStack(spacing: 5) {
-                        Text("resets")
+                        Text(ResetCreditsCopy.cardTitle)
                             .fontWeight(.medium)
                             .foregroundStyle(theme.panelSecondaryForeground)
                         Text("·")
@@ -248,7 +248,7 @@ struct SubscriptionQuotaCard: View {
                 .foregroundStyle(theme.panelSecondaryForeground)
             Text("·")
                 .foregroundStyle(theme.panelSecondaryForeground)
-            Text("\(Int(item.remainingPercent.rounded()))%")
+            Text(item.remainingPercentText)
                 .fontWeight(.semibold)
                 .foregroundStyle(quotaColor(item.remainingPercent))
             Text(item.countdownText)
@@ -396,6 +396,14 @@ struct QuotaWindowPresentation: Equatable {
     let countdownText: String
     let absoluteResetText: String
     let status: QuotaStatus
+
+    var remainingPercentText: String {
+        "\(Int(remainingPercent.rounded()))%"
+    }
+
+    var detailsItemText: String {
+        "\(label) • \(remainingPercentText)"
+    }
 }
 
 struct QuotaResetCreditPresentation: Equatable {
@@ -632,7 +640,7 @@ struct QuotaDetailsTip: View {
         ForEach(Array(presentation.usageWindows.enumerated()), id: \.offset) { _, window in
             QuotaDetailRow(
                 status: window.status,
-                primaryText: "\(window.label) limit",
+                primaryText: window.detailsItemText,
                 secondaryText: window.countdownText,
                 tertiaryText: window.absoluteResetText
             )
@@ -644,7 +652,7 @@ struct QuotaDetailsTip: View {
         ForEach(Array(resetCredits.items.enumerated()), id: \.offset) { index, item in
             QuotaDetailRow(
                 status: item.status,
-                primaryText: "Reset credit \(index + 1)",
+                primaryText: ResetCreditsCopy.itemTitle(number: index + 1),
                 secondaryText: item.countdownText,
                 tertiaryText: item.absoluteExpirationText
             )
@@ -764,7 +772,12 @@ enum QuotaDetailsCopy {
 }
 
 enum ResetCreditsCopy {
+    static let cardTitle = "Resets"
     static let expirationUnavailable = "Expiration unavailable"
+
+    static func itemTitle(number: Int) -> String {
+        "Reset \(number)"
+    }
 }
 
 enum SubscriptionExpirationCopy {

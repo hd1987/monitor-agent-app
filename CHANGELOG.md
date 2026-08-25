@@ -8,6 +8,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ### Changed
 - Order quota details by Usage limits, Reset credits, Subscription, then refresh failure
+- Show each Usage limit's remaining percentage as plain text in quota details
+- Shorten numbered Reset credit labels in quota details
+- Capitalize the Codex quota card's Resets label
 
 ## [0.15.3] - 2026-08-24
 
