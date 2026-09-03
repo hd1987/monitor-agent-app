@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.15.6] - 2026-09-03
+
 ### Changed
 - Disable Cursor Subscription Quota by default while preserving saved user choices
 
