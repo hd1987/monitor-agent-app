@@ -35,7 +35,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         store.panelDidOpen()
         XCTAssertTrue(store.isPanelVisible)
         XCTAssertTrue(store.isPeriodicRefreshActive)
-        XCTAssertEqual(quotaService.providers, [.claude, .codex])
+        XCTAssertEqual(quotaService.providers, [.claude, .codex, .cursor])
 
         store.panelDidClose()
         XCTAssertFalse(store.isPanelVisible)
@@ -76,6 +76,29 @@ final class AppStoreTodayRolloverTests: XCTestCase {
 
         store.panelDidOpen()
 
+        XCTAssertEqual(quotaService.providers, [.claude, .codex, .cursor])
+        store.panelDidClose()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testCursorQuotaSwitchExcludesCursorFromRefresh() {
+        let suiteName = "AppStoreTodayRolloverTests.cursorQuotaDisabled"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        enableAllProviders(quotaSettings)
+        quotaSettings.cursorQuotaEnabled = false
+        let quotaService = RecordingQuotaService()
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            quotaService: quotaService,
+            quotaSettings: quotaSettings,
+            observeRefreshIntervalChanges: false
+        )
+
+        store.panelDidOpen()
+
+        XCTAssertEqual(store.visibleQuotaProviders, [.claude, .codex])
         XCTAssertEqual(quotaService.providers, [.claude, .codex])
         store.panelDidClose()
         defaults.removePersistentDomain(forName: suiteName)
@@ -318,9 +341,12 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         XCTAssertTrue(store.isPeriodicRefreshActive)
         let restarted = expectation(description: "unified refresh restarts")
         waitUntil(attemptsRemaining: 50) {
-            quotaService.providers.count == 4
+            quotaService.providers.count == 6
         } completion: {
-            XCTAssertEqual(quotaService.providers, [.claude, .codex, .claude, .codex])
+            XCTAssertEqual(
+                quotaService.providers,
+                [.claude, .codex, .cursor, .claude, .codex, .cursor]
+            )
             restarted.fulfill()
         }
         wait(for: [restarted], timeout: 1)
@@ -355,7 +381,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         store.panelDidOpen()
 
         XCTAssertFalse(store.isPeriodicRefreshActive)
-        XCTAssertEqual(quotaService.providers, [.claude, .codex])
+        XCTAssertEqual(quotaService.providers, [.claude, .codex, .cursor])
         store.panelDidClose()
         defaults.removePersistentDomain(forName: suiteName)
     }
@@ -396,9 +422,12 @@ final class AppStoreTodayRolloverTests: XCTestCase {
 
         let refreshed = expectation(description: "manual unified refresh completes")
         waitUntil(attemptsRemaining: 50) {
-            quotaService.providers.count == 4
+            quotaService.providers.count == 6
         } completion: {
-            XCTAssertEqual(quotaService.providers, [.claude, .codex, .claude, .codex])
+            XCTAssertEqual(
+                quotaService.providers,
+                [.claude, .codex, .cursor, .claude, .codex, .cursor]
+            )
             XCTAssertTrue(store.isPeriodicRefreshActive)
             refreshed.fulfill()
         }
@@ -441,9 +470,9 @@ final class AppStoreTodayRolloverTests: XCTestCase {
 
         let refreshed = expectation(description: "request window unified refresh completes")
         waitUntil(attemptsRemaining: 50) {
-            quotaService.providers.count == 2 && !store.isRefreshInProgress
+            quotaService.providers.count == 3 && !store.isRefreshInProgress
         } completion: {
-            XCTAssertEqual(quotaService.providers, [.claude, .codex])
+            XCTAssertEqual(quotaService.providers, [.claude, .codex, .cursor])
             XCTAssertFalse(store.isPeriodicRefreshActive)
             refreshed.fulfill()
         }
@@ -1408,9 +1437,15 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)",
             cursorUsageSyncer: syncer
         )
+        let quotaSnapshot = cursorQuotaSnapshot(usedCents: 500)
+        let quotaService = CursorQuotaRefreshingProbe(
+            identity: secondAccount.account.syncIdentity,
+            snapshot: quotaSnapshot
+        )
         let store = AppStore(
             database: database,
             syncManager: syncManager,
+            quotaService: quotaService,
             cursorAccountResolver: StaticCursorAccountResolver(
                 result: .success(secondAccount)
             ),
@@ -1425,6 +1460,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         waitUntil(attemptsRemaining: 100) {
             store.cursorAccountPresentationState == .verifying(secondAccount.account.syncIdentity)
                 && store.stats.totalRequests == 0
+                && store.quotaCardState(for: .cursor)?.snapshot == nil
         } completion: {
             oldCacheHidden.fulfill()
         }
@@ -1435,6 +1471,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         waitUntil(attemptsRemaining: 100) {
             store.cursorAccountPresentationState == .verified(secondAccount.account.syncIdentity)
                 && store.stats.inputTokens == 200
+                && store.quotaCardState(for: .cursor)?.snapshot == quotaSnapshot
         } completion: {
             replacementVisible.fulfill()
         }
@@ -1444,6 +1481,245 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             ["account-two"]
         )
         store.panelDidClose()
+    }
+
+    func testUnifiedRefreshStartsOneCursorQuotaRequestAfterIdentityResolution() throws {
+        let suiteName = "AppStoreTodayRolloverTests.cursorQuotaSingleRequest"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.removePersistentDomain(forName: suiteName)
+        let refreshSettings = RefreshSettings(defaults: defaults)
+        refreshSettings.interval = .never
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        monitoringSettings.enabledAgents = [.cursor]
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        let database = DatabaseManager(inMemory: true)
+        let account = cursorAuthenticatedAccount(userId: 1)
+        try seedCursorCache(
+            database: database,
+            identity: account.account.syncIdentity,
+            model: "account-one",
+            inputTokens: 100
+        )
+        let quotaService = CursorQuotaRefreshingProbe(
+            identity: account.account.syncIdentity,
+            snapshot: cursorQuotaSnapshot(usedCents: 100)
+        )
+        let store = AppStore(
+            database: database,
+            syncManager: SessionSyncManager(
+                database: database,
+                claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
+                codexSessionsPath: "/missing-codex-\(UUID().uuidString)",
+                codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)",
+                cursorUsageSyncer: CountingCursorUsageSyncerProbe()
+            ),
+            refreshSettings: refreshSettings,
+            monitoringSettings: monitoringSettings,
+            quotaService: quotaService,
+            quotaSettings: quotaSettings,
+            cursorAccountResolver: StaticCursorAccountResolver(result: .success(account)),
+            observeRefreshIntervalChanges: false
+        )
+
+        store.panelDidOpen()
+        let refreshed = expectation(description: "Cursor quota refresh finishes")
+        waitUntil(attemptsRemaining: 100) {
+            quotaService.refreshCount == 1 && !store.isRefreshInProgress
+        } completion: {
+            refreshed.fulfill()
+        }
+        wait(for: [refreshed], timeout: 1)
+
+        XCTAssertEqual(quotaService.refreshCount, 1)
+        XCTAssertEqual(store.quotaSnapshots[.cursor]?.monthly?.usageAmount?.usedCents, 100)
+        store.panelDidClose()
+    }
+
+    func testUnifiedRefreshJoinsStandaloneCursorQuotaRequest() throws {
+        let suiteName = "AppStoreTodayRolloverTests.cursorQuotaRequestJoin"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.removePersistentDomain(forName: suiteName)
+        var now = Date(timeIntervalSince1970: 1_800_000_000)
+        let refreshSettings = RefreshSettings(defaults: defaults)
+        refreshSettings.interval = .fiveMinutes
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        monitoringSettings.enabledAgents = [.cursor]
+        let database = DatabaseManager(inMemory: true)
+        let firstAccount = cursorAuthenticatedAccount(userId: 1)
+        let secondAccount = cursorAuthenticatedAccount(userId: 2)
+        try seedCursorCache(
+            database: database,
+            identity: firstAccount.account.syncIdentity,
+            model: "account-one",
+            inputTokens: 100
+        )
+        let resolver = StaticCursorAccountResolver(result: .success(firstAccount))
+        let quotaService = ControllableCursorQuotaRefreshingProbe(
+            identity: firstAccount.account.syncIdentity,
+            snapshot: cursorQuotaSnapshot(usedCents: 100)
+        )
+        let store = AppStore(
+            database: database,
+            syncManager: SessionSyncManager(
+                database: database,
+                claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
+                codexSessionsPath: "/missing-codex-\(UUID().uuidString)",
+                codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)",
+                cursorUsageSyncer: CountingCursorUsageSyncerProbe()
+            ),
+            refreshSettings: refreshSettings,
+            monitoringSettings: monitoringSettings,
+            quotaService: quotaService,
+            quotaSettings: QuotaSettings(defaults: defaults),
+            cursorAccountResolver: resolver,
+            refreshCoordinator: PanelRefreshCoordinator(currentDateProvider: { now }),
+            observeRefreshIntervalChanges: false,
+            currentDateProvider: { now }
+        )
+
+        store.panelDidOpen()
+        let initialRefresh = expectation(description: "Initial Cursor quota refresh finishes")
+        waitUntil(attemptsRemaining: 100) {
+            quotaService.refreshCount == 1 && !store.isRefreshInProgress
+        } completion: {
+            initialRefresh.fulfill()
+        }
+        wait(for: [initialRefresh], timeout: 1)
+        store.panelDidClose()
+
+        try seedCursorCache(
+            database: database,
+            identity: secondAccount.account.syncIdentity,
+            model: "account-two",
+            inputTokens: 200
+        )
+        resolver.setResult(.success(secondAccount))
+        quotaService.setResponse(
+            identity: secondAccount.account.syncIdentity,
+            snapshot: cursorQuotaSnapshot(usedCents: 200),
+            completesImmediately: false
+        )
+        now = now.addingTimeInterval(60)
+        store.panelDidOpen()
+        let standaloneStarted = expectation(description: "Standalone Cursor quota refresh starts")
+        waitUntil(attemptsRemaining: 100) {
+            quotaService.refreshCount == 2
+        } completion: {
+            standaloneStarted.fulfill()
+        }
+        wait(for: [standaloneStarted], timeout: 1)
+
+        store.refreshNow()
+        let joined = expectation(description: "Unified refresh joins Cursor quota request")
+        waitUntil(attemptsRemaining: 100) {
+            store.isManualRefreshInProgress && quotaService.refreshCount == 2
+        } completion: {
+            joined.fulfill()
+        }
+        wait(for: [joined], timeout: 1)
+        XCTAssertEqual(quotaService.refreshCount, 2)
+
+        quotaService.finishNext()
+        let completed = expectation(description: "Joined Cursor quota refresh finishes")
+        waitUntil(attemptsRemaining: 100) {
+            !store.isRefreshInProgress
+        } completion: {
+            completed.fulfill()
+        }
+        wait(for: [completed], timeout: 1)
+        XCTAssertEqual(quotaService.refreshCount, 2)
+        store.panelDidClose()
+    }
+
+    func testCursorQuotaFailureRemainsVisibleForVerifiedAccount() throws {
+        let suiteName = "AppStoreTodayRolloverTests.cursorQuotaFailureIdentity"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.removePersistentDomain(forName: suiteName)
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        monitoringSettings.enabledAgents = [.cursor]
+        let database = DatabaseManager(inMemory: true)
+        let account = cursorAuthenticatedAccount(userId: 1)
+        try seedCursorCache(
+            database: database,
+            identity: account.account.syncIdentity,
+            model: "account-one",
+            inputTokens: 100
+        )
+        let failedSnapshot = QuotaSnapshot.failure(
+            provider: .cursor,
+            status: .unavailable("Quota service unavailable")
+        )
+        let store = AppStore(
+            database: database,
+            syncManager: SessionSyncManager(
+                database: database,
+                claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
+                codexSessionsPath: "/missing-codex-\(UUID().uuidString)",
+                codexArchivedSessionsPath: "/missing-archive-\(UUID().uuidString)",
+                cursorUsageSyncer: CountingCursorUsageSyncerProbe()
+            ),
+            monitoringSettings: monitoringSettings,
+            quotaService: CursorQuotaRefreshingProbe(
+                identity: account.account.syncIdentity,
+                snapshot: failedSnapshot
+            ),
+            quotaSettings: QuotaSettings(defaults: defaults),
+            cursorAccountResolver: StaticCursorAccountResolver(result: .success(account)),
+            observeRefreshIntervalChanges: false
+        )
+
+        store.panelDidOpen()
+        let failed = expectation(description: "Cursor quota failure is visible")
+        waitUntil(attemptsRemaining: 100) {
+            store.cursorAccountPresentationState == .verified(account.account.syncIdentity)
+                && store.quotaCardState(for: .cursor)?.snapshot == failedSnapshot
+        } completion: {
+            failed.fulfill()
+        }
+        wait(for: [failed], timeout: 1)
+        store.panelDidClose()
+    }
+
+    func testCursorQuotaRestoreUsesCachedTokenPresentationIdentity() throws {
+        let suiteName = "AppStoreTodayRolloverTests.cursorQuotaPresentationRestore"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.removePersistentDomain(forName: suiteName)
+        let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
+        monitoringSettings.enabledAgents = [.cursor]
+        let database = DatabaseManager(inMemory: true)
+        let cachedAccount = cursorAuthenticatedAccount(userId: 1)
+        let signedInAccount = cursorAuthenticatedAccount(userId: 2)
+        try seedCursorCache(
+            database: database,
+            identity: cachedAccount.account.syncIdentity,
+            model: "account-one",
+            inputTokens: 100
+        )
+        let cachedQuota = cursorQuotaSnapshot(usedCents: 250)
+        let quotaCache = CursorQuotaCacheProbe(
+            identity: cachedAccount.account.syncIdentity,
+            snapshot: cachedQuota
+        )
+        let quotaService = CursorQuotaRefreshingProbe(
+            identity: signedInAccount.account.syncIdentity,
+            snapshot: cursorQuotaSnapshot(usedCents: 500)
+        )
+        let store = AppStore(
+            database: database,
+            monitoringSettings: monitoringSettings,
+            quotaService: quotaService,
+            quotaSettings: QuotaSettings(defaults: defaults),
+            quotaCache: quotaCache,
+            cursorAccountResolver: StaticCursorAccountResolver(result: .success(signedInAccount)),
+            observeRefreshIntervalChanges: false
+        )
+
+        XCTAssertEqual(quotaCache.loadedIdentities, [cachedAccount.account.syncIdentity])
+        XCTAssertEqual(store.quotaCardState(for: .cursor)?.snapshot, cachedQuota)
     }
 
     func testFailedCursorAccountReplacementExcludesOldCacheFromRequestDetail() throws {
@@ -1493,6 +1769,8 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         XCTAssertNil(context.cursorDataPresentationToken)
         XCTAssertNil(context.cursorSpendAccountIdentity)
         XCTAssertEqual(detailSummary.totalRequests, 0)
+        XCTAssertFalse(store.visibleQuotaProviders.contains(.cursor))
+        XCTAssertNil(store.quotaCardState(for: .cursor))
         XCTAssertEqual(
             database.fetchRequestLogSummary(app: .cursor, range: .allTime).totalRequests,
             1
@@ -1820,6 +2098,15 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             updatedAt: now
         )
         let resolver = StaticCursorAccountResolver(result: .success(account))
+        let quotaSnapshot = cursorQuotaSnapshot(usedCents: 250)
+        let quotaCache = CursorQuotaCacheProbe(
+            identity: account.account.syncIdentity,
+            snapshot: quotaSnapshot
+        )
+        let quotaService = CursorQuotaRefreshingProbe(
+            identity: account.account.syncIdentity,
+            snapshot: quotaSnapshot
+        )
         let syncManager = SessionSyncManager(
             database: database,
             claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
@@ -1830,6 +2117,8 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         let store = AppStore(
             database: database,
             syncManager: syncManager,
+            quotaService: quotaService,
+            quotaCache: quotaCache,
             cursorAccountResolver: resolver,
             observeRefreshIntervalChanges: false,
             currentDateProvider: { now }
@@ -1863,6 +2152,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         XCTAssertFalse(store.modelDistribution.isEmpty)
         XCTAssertFalse(store.availableYears.isEmpty)
         XCTAssertEqual(store.cursorSpendSnapshot?.totalCents, 500)
+        XCTAssertEqual(store.quotaCardState(for: .cursor)?.snapshot, quotaSnapshot)
 
         let unavailable = expectation(description: "Cursor verification failure settles")
         waitUntil(attemptsRemaining: 100) {
@@ -1875,6 +2165,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         XCTAssertTrue(store.isCursorDataPresentationAvailable)
         XCTAssertEqual(store.stats.totalRequests, 1)
         XCTAssertEqual(store.cursorSpendSnapshot?.totalCents, 500)
+        XCTAssertEqual(store.quotaCardState(for: .cursor)?.snapshot, quotaSnapshot)
 
         XCTAssertEqual(
             store.cursorRefreshFailures[.account]?.kind,
@@ -2181,8 +2472,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         }
     }
 
-    /// Enables both quota providers by giving each a future expiration date,
-    /// since enablement now derives from a set expiration date.
+    /// Enables every quota provider; Cursor also requires Agent monitoring.
     private func enableAllProviders(_ settings: QuotaSettings) {
         let future = Date(timeIntervalSinceNow: 30 * 24 * 60 * 60)
         settings.claudeExpirationDate = future
@@ -2211,6 +2501,27 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             from: Data(#"{"userId":\#(userId),"teamId":7}"#.utf8)
         )
         return CursorAuthenticatedAccount(token: "token-\(userId)", account: account)
+    }
+
+    private func cursorQuotaSnapshot(usedCents: Int) -> QuotaSnapshot {
+        let now = Date()
+        return QuotaSnapshot(
+            provider: .cursor,
+            plan: nil,
+            fiveHour: nil,
+            weekly: nil,
+            opusWeekly: nil,
+            monthly: QuotaWindow(
+                remainingPercent: 75,
+                resetsAt: now.addingTimeInterval(30 * 24 * 60 * 60),
+                durationSeconds: nil,
+                usageAmount: QuotaUsageAmount(usedCents: usedCents, limitCents: 1_000)
+            ),
+            resetCredits: nil,
+            resetCreditExpirations: [],
+            status: .available,
+            fetchedAt: now
+        )
     }
 
     private func seedCursorCache(
@@ -2263,6 +2574,137 @@ private final class RecordingQuotaService: QuotaRefreshing {
     }
 }
 
+private final class CursorQuotaRefreshingProbe: QuotaRefreshing {
+    private let lock = NSLock()
+    private let identity: String
+    private let snapshot: QuotaSnapshot
+    private var storedRefreshCount = 0
+
+    var refreshCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedRefreshCount
+    }
+
+    init(identity: String, snapshot: QuotaSnapshot) {
+        self.identity = identity
+        self.snapshot = snapshot
+    }
+
+    func refresh(
+        provider: QuotaProviderID,
+        now _: Date,
+        completion: @escaping (QuotaRefreshResult) -> Void
+    ) {
+        lock.lock()
+        storedRefreshCount += 1
+        lock.unlock()
+        completion(QuotaRefreshResult(
+            snapshot: snapshot,
+            identityDigest: provider == .cursor ? identity : nil
+        ))
+    }
+
+    func resolveIdentityDigest(
+        provider: QuotaProviderID,
+        completion: @escaping (String?) -> Void
+    ) {
+        completion(provider == .cursor ? identity : nil)
+    }
+}
+
+private final class ControllableCursorQuotaRefreshingProbe: QuotaRefreshing {
+    private let lock = NSLock()
+    private var identity: String
+    private var snapshot: QuotaSnapshot
+    private var completesImmediately = true
+    private var storedRefreshCount = 0
+    private var completions: [(QuotaRefreshResult) -> Void] = []
+
+    var refreshCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedRefreshCount
+    }
+
+    init(identity: String, snapshot: QuotaSnapshot) {
+        self.identity = identity
+        self.snapshot = snapshot
+    }
+
+    func setResponse(
+        identity: String,
+        snapshot: QuotaSnapshot,
+        completesImmediately: Bool
+    ) {
+        lock.lock()
+        self.identity = identity
+        self.snapshot = snapshot
+        self.completesImmediately = completesImmediately
+        lock.unlock()
+    }
+
+    func refresh(
+        provider _: QuotaProviderID,
+        now _: Date,
+        completion: @escaping (QuotaRefreshResult) -> Void
+    ) {
+        lock.lock()
+        storedRefreshCount += 1
+        let result = QuotaRefreshResult(snapshot: snapshot, identityDigest: identity)
+        if completesImmediately {
+            lock.unlock()
+            completion(result)
+        } else {
+            completions.append(completion)
+            lock.unlock()
+        }
+    }
+
+    func resolveIdentityDigest(
+        provider _: QuotaProviderID,
+        completion: @escaping (String?) -> Void
+    ) {
+        lock.lock()
+        let identity = identity
+        lock.unlock()
+        completion(identity)
+    }
+
+    func finishNext() {
+        lock.lock()
+        let completion = completions.isEmpty ? nil : completions.removeFirst()
+        let result = QuotaRefreshResult(snapshot: snapshot, identityDigest: identity)
+        lock.unlock()
+        completion?(result)
+    }
+}
+
+private final class CursorQuotaCacheProbe: QuotaSnapshotCaching {
+    private let identity: String
+    private let snapshot: QuotaSnapshot
+    private(set) var loadedIdentities: [String] = []
+
+    init(identity: String, snapshot: QuotaSnapshot) {
+        self.identity = identity
+        self.snapshot = snapshot
+    }
+
+    func load(
+        provider: QuotaProviderID,
+        identityDigest: String,
+        now _: Date,
+        completion: @escaping (QuotaSnapshot?) -> Void
+    ) {
+        loadedIdentities.append(identityDigest)
+        completion(
+            provider == .cursor && identityDigest == identity ? snapshot : nil
+        )
+    }
+
+    func store(_ snapshot: QuotaSnapshot, identityDigest: String) {}
+}
+
 private final class BlockingQuotaService: QuotaRefreshing {
     let started = XCTestExpectation(description: "Quota refresh started")
     private var completion: ((QuotaRefreshResult) -> Void)?
@@ -2272,6 +2714,13 @@ private final class BlockingQuotaService: QuotaRefreshing {
         now: Date,
         completion: @escaping (QuotaRefreshResult) -> Void
     ) {
+        guard provider == .claude else {
+            completion(QuotaRefreshResult(
+                snapshot: .failure(provider: provider, status: .notInstalled, at: now),
+                identityDigest: nil
+            ))
+            return
+        }
         self.completion = completion
         started.fulfill()
     }

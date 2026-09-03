@@ -155,9 +155,12 @@ final class AppStore: ObservableObject {
     private var activeAgentSyncCancellation: AgentSyncCancellation?
     private var cursorAccountSyncCancellation: AgentSyncCancellation?
     private var activeQuotaParticipants: [QuotaProviderID: RefreshCycleParticipant] = [:]
+    private var cursorQuotaCycleWaiters: [RefreshCycleParticipant] = []
     private var quotaSnapshotIdentities: [QuotaProviderID: String] = [:]
     private var quotaRefreshGenerations: [QuotaProviderID: Int] = [:]
     private var quotaRestoreGenerations: [QuotaProviderID: Int] = [:]
+    private var pendingCursorQuotaResult: QuotaRefreshResult?
+    private var pendingCursorQuotaRefreshIdentity: String?
     private var cursorSpendSnapshotRestoreGeneration = 0
     private var cursorSpendRefreshGeneration = 0
     private var cursorUsageRefreshGeneration = 0
@@ -490,7 +493,10 @@ final class AppStore: ObservableObject {
             return
         }
 
-        resolveCursorAccount(force: true) { [weak self] identity, isAccepted, verificationGeneration in
+        resolveCursorAccount(
+            force: true,
+            refreshCursorQuotaWhenNeeded: false
+        ) { [weak self] identity, isAccepted, verificationGeneration in
             guard let self else {
                 completion()
                 return
@@ -596,6 +602,8 @@ final class AppStore: ObservableObject {
                     }
                     if let currentIdentity {
                         self.cursorAccountPresentationState = .verified(currentIdentity)
+                        self.reconcilePendingCursorQuotaResult(for: currentIdentity)
+                        self.ensureCursorQuotaRefresh(for: currentIdentity)
                     }
                     self.reload()
                     if deferredCursorSpendParticipant != nil {
@@ -649,6 +657,13 @@ final class AppStore: ObservableObject {
 
         for provider in QuotaProviderID.allCases
             where quotaSettings.isEnabled(provider) && isAgentEnabled(for: provider, in: enabledAgents) {
+            if provider == .cursor, activeQuotaParticipants[.cursor] != nil {
+                group.enter()
+                cursorQuotaCycleWaiters.append(RefreshCycleParticipant {
+                    group.leave()
+                })
+                continue
+            }
             group.enter()
             let quotaGeneration = (quotaRefreshGenerations[provider] ?? 0) + 1
             quotaRefreshGenerations[provider] = quotaGeneration
@@ -672,6 +687,10 @@ final class AppStore: ObservableObject {
                         }
                     }
                     participant.finish()
+                    if provider == .cursor {
+                        self?.startPendingCursorQuotaRefreshIfNeeded()
+                        self?.settleCursorQuotaCycleWaitersIfIdle()
+                    }
                 }
             }
         }
@@ -777,6 +796,11 @@ final class AppStore: ObservableObject {
         retainQuotaPresentationState {
             quotaSettings.isEnabled($0) && isAgentEnabled(for: $0, in: enabledAgents)
         }
+        if !quotaSettings.isEnabled(.cursor) {
+            pendingCursorQuotaResult = nil
+            pendingCursorQuotaRefreshIdentity = nil
+            finishCursorQuotaCycleWaiters()
+        }
         ensureEnabledQuotaCardStates()
         restoreCachedQuotaSnapshots()
     }
@@ -787,10 +811,17 @@ final class AppStore: ObservableObject {
         case .all: filtered = QuotaProviderID.allCases
         case .claude: filtered = [.claude]
         case .codex: filtered = [.codex]
-        case .cursor: filtered = []
+        case .cursor: filtered = [.cursor]
         }
-        return filtered.filter {
-            isAgentEnabled(for: $0, in: enabledAgents) && quotaSettings.isEnabled($0)
+        return filtered.filter { provider in
+            guard isAgentEnabled(for: provider, in: enabledAgents),
+                  quotaSettings.isEnabled(provider) else { return false }
+            if provider == .cursor,
+               cursorAccountResolver != nil,
+               case .mismatched = cursorAccountPresentationState {
+                return false
+            }
+            return true
         }
     }
 
@@ -799,7 +830,23 @@ final class AppStore: ObservableObject {
     }
 
     func quotaCardState(for provider: QuotaProviderID) -> QuotaCardState? {
-        quotaCardStates[provider]
+        guard provider == .cursor, cursorAccountResolver != nil else {
+            return quotaCardStates[provider]
+        }
+        if let identity = cursorPresentationIdentity {
+            guard quotaSnapshotIdentities[.cursor] == identity else {
+                return cursorQuotaLoadingCardState()
+            }
+            return quotaCardStates[.cursor]
+        }
+        switch cursorAccountPresentationState {
+        case .verifying:
+            return cursorQuotaLoadingCardState()
+        case .mismatched:
+            return nil
+        case .unverified, .verified, .unavailable:
+            return quotaCardStates[.cursor]
+        }
     }
 
     func cycleAppFilter(reverse: Bool = false) {
@@ -830,6 +877,9 @@ final class AppStore: ObservableObject {
             cursorSpendRefreshGeneration += 1
             cursorSpendSnapshot = nil
             cursorRefreshFailures = [:]
+            pendingCursorQuotaResult = nil
+            pendingCursorQuotaRefreshIdentity = nil
+            finishCursorQuotaCycleWaiters()
         }
         retainQuotaPresentationState { isAgentEnabled(for: $0, in: enabledAgents) }
         ensureEnabledQuotaCardStates()
@@ -854,6 +904,7 @@ final class AppStore: ObservableObject {
         switch provider {
         case .claude: return enabledAgents.contains(.claude)
         case .codex: return enabledAgents.contains(.codex)
+        case .cursor: return enabledAgents.contains(.cursor)
         }
     }
 
@@ -1109,7 +1160,10 @@ final class AppStore: ObservableObject {
         invalidateCursorSpendSnapshotRestore()
         cursorAccountPresentationState = .verifying(nil)
         reload()
-        resolveCursorAccount(force: force) { [weak self] identity, isAccepted, verificationGeneration in
+        resolveCursorAccount(
+            force: force,
+            refreshCursorQuotaWhenNeeded: true
+        ) { [weak self] identity, isAccepted, verificationGeneration in
             guard let self, isAccepted, let identity else { return }
             if self.cursorAccountPresentationState == .verified(identity) {
                 self.restoreCursorSpendSnapshotForSelection()
@@ -1125,6 +1179,7 @@ final class AppStore: ObservableObject {
 
     private func resolveCursorAccount(
         force: Bool,
+        refreshCursorQuotaWhenNeeded: Bool,
         completion: @escaping (String?, Bool, Int) -> Void
     ) {
         guard let cursorAccountResolver else {
@@ -1163,8 +1218,14 @@ final class AppStore: ObservableObject {
                             self.cursorSpendSnapshot = nil
                             self.clearCursorDependentPresentation()
                         }
+                        self.alignCursorQuotaPresentation(
+                            to: identity,
+                            refreshWhenNeeded: refreshCursorQuotaWhenNeeded
+                        )
+                        self.reconcilePendingCursorQuotaResult(for: identity)
                     } else {
                         self.cursorAccountPresentationState = .unavailable
+                        self.reconcilePendingCursorQuotaResult(for: nil)
                         if case .failure(let error) = result,
                            (error as? CursorUsageError) != .cancelled {
                             let kind: CursorRefreshFailureKind
@@ -1209,6 +1270,8 @@ final class AppStore: ObservableObject {
                     }
                     self.cursorAccountSyncCancellation = nil
                     self.cursorAccountPresentationState = .verified(identity)
+                    self.reconcilePendingCursorQuotaResult(for: identity)
+                    self.ensureCursorQuotaRefresh(for: identity)
                     self.reload()
                     self.restoreCursorSpendSnapshotForSelection()
                 }
@@ -1236,6 +1299,11 @@ final class AppStore: ObservableObject {
                     }
                     self.cursorAccountSyncCancellation = nil
                     self.cursorAccountPresentationState = .mismatched(identity)
+                    self.pendingCursorQuotaResult = nil
+                    self.pendingCursorQuotaRefreshIdentity = nil
+                    if self.quotaRefreshPhases[.cursor] == .refreshing {
+                        self.quotaRefreshPhases[.cursor] = .idle
+                    }
                     self.cursorSpendSnapshot = nil
                     self.clearCursorDependentPresentation()
                     self.reload()
@@ -1258,6 +1326,120 @@ final class AppStore: ObservableObject {
         case .range(let range, _, _):
             activityDetailState = .range(range: range, series: .empty, isLoading: true)
         }
+    }
+
+    private func alignCursorQuotaPresentation(
+        to identity: String,
+        refreshWhenNeeded: Bool
+    ) {
+        if quotaSnapshotIdentities[.cursor] != identity {
+            quotaRestoreGenerations[.cursor, default: 0] += 1
+        }
+        if pendingCursorQuotaResult?.identityDigest != identity {
+            pendingCursorQuotaResult = nil
+        }
+        guard quotaSnapshotIdentities[.cursor] != identity,
+              pendingCursorQuotaResult?.identityDigest != identity else {
+            pendingCursorQuotaRefreshIdentity = nil
+            return
+        }
+        if activeQuotaParticipants[.cursor] != nil {
+            pendingCursorQuotaRefreshIdentity = identity
+            return
+        }
+        if refreshWhenNeeded {
+            refreshCursorQuota(for: identity)
+        }
+    }
+
+    private func ensureCursorQuotaRefresh(for identity: String) {
+        guard quotaSnapshotIdentities[.cursor] != identity,
+              pendingCursorQuotaResult?.identityDigest != identity else { return }
+        if activeQuotaParticipants[.cursor] != nil {
+            pendingCursorQuotaRefreshIdentity = identity
+            return
+        }
+        refreshCursorQuota(for: identity)
+    }
+
+    private func refreshCursorQuota(for expectedIdentity: String) {
+        guard isRefreshSurfaceVisible,
+              enabledAgents.contains(.cursor),
+              quotaSettings.isEnabled(.cursor),
+              activeQuotaParticipants[.cursor] == nil else { return }
+        pendingCursorQuotaRefreshIdentity = nil
+        let generation = (quotaRefreshGenerations[.cursor] ?? 0) + 1
+        quotaRefreshGenerations[.cursor] = generation
+        quotaRefreshPhases[.cursor] = .refreshing
+        let participant = RefreshCycleParticipant {}
+        activeQuotaParticipants[.cursor] = participant
+        quotaService.refresh(
+            provider: .cursor,
+            now: currentDateProvider()
+        ) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self,
+                      self.activeQuotaParticipants[.cursor] === participant,
+                      self.quotaRefreshGenerations[.cursor] == generation else {
+                    participant.finish()
+                    return
+                }
+                self.activeQuotaParticipants.removeValue(forKey: .cursor)
+                if self.quotaSettings.isEnabled(.cursor),
+                   self.enabledAgents.contains(.cursor) {
+                    if let identity = result.identityDigest,
+                       identity != expectedIdentity {
+                        self.quotaRefreshPhases[.cursor] = .failed(
+                            status: .unavailable("Quota refresh superseded"),
+                            attemptedAt: result.snapshot.fetchedAt
+                        )
+                    } else {
+                        self.applyQuotaRefreshResult(result, provider: .cursor)
+                    }
+                }
+                participant.finish()
+                self.startPendingCursorQuotaRefreshIfNeeded()
+                self.settleCursorQuotaCycleWaitersIfIdle()
+            }
+        }
+    }
+
+    private func startPendingCursorQuotaRefreshIfNeeded() {
+        guard let identity = pendingCursorQuotaRefreshIdentity,
+              activeQuotaParticipants[.cursor] == nil else { return }
+        if quotaSnapshotIdentities[.cursor] == identity
+            || pendingCursorQuotaResult?.identityDigest == identity {
+            pendingCursorQuotaRefreshIdentity = nil
+            return
+        }
+        refreshCursorQuota(for: identity)
+    }
+
+    private func settleCursorQuotaCycleWaitersIfIdle() {
+        guard activeQuotaParticipants[.cursor] == nil,
+              pendingCursorQuotaRefreshIdentity == nil else { return }
+        finishCursorQuotaCycleWaiters()
+    }
+
+    private func finishCursorQuotaCycleWaiters() {
+        let waiters = cursorQuotaCycleWaiters
+        cursorQuotaCycleWaiters = []
+        waiters.forEach { $0.finish() }
+    }
+
+    private func reconcilePendingCursorQuotaResult(for identity: String?) {
+        guard let result = pendingCursorQuotaResult else { return }
+        guard let identity, result.identityDigest == identity else {
+            pendingCursorQuotaResult = nil
+            if activeQuotaParticipants[.cursor] == nil,
+               quotaRefreshPhases[.cursor] == .refreshing {
+                quotaRefreshPhases[.cursor] = .idle
+            }
+            return
+        }
+        guard cursorAccountPresentationState == .verified(identity) else { return }
+        pendingCursorQuotaResult = nil
+        applyQuotaRefreshResult(result, provider: .cursor)
     }
 
     private func restoreCursorSpendSnapshotForSelection() {
@@ -1489,9 +1671,28 @@ final class AppStore: ObservableObject {
         guard let quotaCache else { return }
         for provider in QuotaProviderID.allCases
             where quotaSettings.isEnabled(provider)
-                && isAgentEnabled(for: provider, in: enabledAgents)
-                && quotaSnapshots[provider]?.status != .available {
+                && isAgentEnabled(for: provider, in: enabledAgents) {
             let generation = quotaRestoreGenerations[provider] ?? 0
+            if provider == .cursor {
+                guard let identity = cursorPresentationIdentity,
+                      quotaSnapshotIdentities[provider] != identity
+                        || quotaSnapshots[provider]?.status != .available else { continue }
+                quotaCache.load(
+                    provider: provider,
+                    identityDigest: identity,
+                    now: currentDateProvider()
+                ) { [weak self] snapshot in
+                    guard let self, let snapshot,
+                          self.cursorPresentationIdentity == identity,
+                          (self.quotaRestoreGenerations[provider] ?? 0) == generation,
+                          self.quotaSettings.isEnabled(provider),
+                          self.isAgentEnabled(for: provider, in: self.enabledAgents) else { return }
+                    self.publishQuotaSnapshot(snapshot, for: provider)
+                    self.quotaSnapshotIdentities[provider] = identity
+                }
+                continue
+            }
+            guard quotaSnapshots[provider]?.status != .available else { continue }
             quotaService.resolveIdentityDigest(provider: provider) { [weak self] identityDigest in
                 guard let self, let identityDigest,
                       (self.quotaRestoreGenerations[provider] ?? 0) == generation else { return }
@@ -1533,7 +1734,29 @@ final class AppStore: ObservableObject {
         _ result: QuotaRefreshResult,
         provider: QuotaProviderID
     ) {
+        if provider == .cursor {
+            if let identity = result.identityDigest,
+               identity != cursorPresentationIdentity {
+                if cursorQuotaResultCanWaitForVerification(identity) {
+                    pendingCursorQuotaResult = result
+                } else if activeQuotaParticipants[.cursor] == nil,
+                          quotaRefreshPhases[.cursor] == .refreshing {
+                    quotaRefreshPhases[.cursor] = .idle
+                }
+                return
+            }
+            if result.identityDigest == nil {
+                switch cursorAccountPresentationState {
+                case .verifying(.some), .mismatched:
+                    return
+                case .unverified, .verifying(nil), .verified, .unavailable:
+                    break
+                }
+            }
+        }
         var snapshot = result.snapshot
+        let resultIdentity = result.identityDigest
+            ?? (provider == .cursor ? cursorPresentationIdentity : nil)
         if snapshot.status == .available, let identityDigest = result.identityDigest {
             var shouldStoreSnapshot = true
             if provider == .codex {
@@ -1567,18 +1790,29 @@ final class AppStore: ObservableObject {
             return
         }
 
-        let canRetainSuccess = result.identityDigest != nil
-            && quotaSnapshotIdentities[provider] == result.identityDigest
+        let canRetainSuccess = resultIdentity != nil
+            && quotaSnapshotIdentities[provider] == resultIdentity
             && quotaSnapshots[provider]?.status == .available
             && shouldRetainSuccessfulQuota(for: snapshot.status)
         if !canRetainSuccess {
             publishQuotaSnapshot(snapshot, for: provider)
-            quotaSnapshotIdentities.removeValue(forKey: provider)
+            if provider == .cursor, let resultIdentity {
+                quotaSnapshotIdentities[provider] = resultIdentity
+            } else {
+                quotaSnapshotIdentities.removeValue(forKey: provider)
+            }
         }
         quotaRefreshPhases[provider] = .failed(
             status: snapshot.status,
             attemptedAt: snapshot.fetchedAt
         )
+    }
+
+    private func cursorQuotaResultCanWaitForVerification(_ identity: String) -> Bool {
+        guard case .verifying(let pendingIdentity) = cursorAccountPresentationState else {
+            return false
+        }
+        return pendingIdentity == nil || pendingIdentity == identity
     }
 
     private func normalizeCodexResetCredits(at date: Date) {
@@ -1605,6 +1839,13 @@ final class AppStore: ObservableObject {
                 presentedAt: presentedAt
             )
         }
+    }
+
+    private func cursorQuotaLoadingCardState() -> QuotaCardState {
+        QuotaCardState(
+            snapshot: nil,
+            presentedAt: quotaCardStates[.cursor]?.presentedAt ?? currentDateProvider()
+        )
     }
 
     private func publishQuotaSnapshot(

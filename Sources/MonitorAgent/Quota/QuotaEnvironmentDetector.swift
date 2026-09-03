@@ -2,6 +2,12 @@ import Foundation
 
 enum QuotaEnvironmentDetector {
     static func isInstalled(_ provider: QuotaProviderID) -> Bool {
+        if provider == .cursor {
+            return FileManager.default.fileExists(atPath: "/Applications/Cursor.app")
+                || FileManager.default.fileExists(
+                    atPath: CursorStateAuthenticationReader.defaultDatabasePath
+                )
+        }
         let executable = provider == .claude ? "claude" : "codex"
         if provider == .codex,
            FileManager.default.fileExists(atPath: "/Applications/Codex.app") {
@@ -19,6 +25,9 @@ enum QuotaEnvironmentDetector {
     }
 
     static func fixedExecutablePaths(_ provider: QuotaProviderID, home: String) -> [String] {
+        if provider == .cursor {
+            return ["/Applications/Cursor.app/Contents/MacOS/Cursor"]
+        }
         let executable = provider == .claude ? "claude" : "codex"
         return [
             "/opt/homebrew/bin/\(executable)",
@@ -35,6 +44,7 @@ enum QuotaEnvironmentDetector {
         switch provider {
         case .claude: return claudeUsesThirdPartyAPI()
         case .codex: return codexUsesThirdPartyAPI()
+        case .cursor: return false
         }
     }
 

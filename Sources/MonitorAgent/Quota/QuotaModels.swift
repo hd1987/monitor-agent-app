@@ -3,19 +3,39 @@ import Foundation
 enum QuotaProviderID: String, CaseIterable, Hashable {
     case claude
     case codex
+    case cursor
 
     var displayName: String {
         switch self {
         case .claude: return "Claude Code"
         case .codex: return "Codex"
+        case .cursor: return "Cursor"
         }
     }
+}
+
+struct QuotaUsageAmount: Equatable {
+    let usedCents: Int
+    let limitCents: Int
 }
 
 struct QuotaWindow: Equatable {
     let remainingPercent: Double
     let resetsAt: Date?
     let durationSeconds: Int?
+    let usageAmount: QuotaUsageAmount?
+
+    init(
+        remainingPercent: Double,
+        resetsAt: Date?,
+        durationSeconds: Int?,
+        usageAmount: QuotaUsageAmount? = nil
+    ) {
+        self.remainingPercent = remainingPercent
+        self.resetsAt = resetsAt
+        self.durationSeconds = durationSeconds
+        self.usageAmount = usageAmount
+    }
 
     func displayLabel(fallback: String) -> String {
         guard let durationSeconds else { return fallback }
@@ -118,10 +138,35 @@ struct QuotaSnapshot: Equatable {
     let fiveHour: QuotaWindow?
     let weekly: QuotaWindow?
     let opusWeekly: QuotaWindow?
+    let monthly: QuotaWindow?
     let resetCredits: Int?
     let resetCreditExpirations: [Date]
     let status: QuotaSnapshotStatus
     let fetchedAt: Date
+
+    init(
+        provider: QuotaProviderID,
+        plan: String?,
+        fiveHour: QuotaWindow?,
+        weekly: QuotaWindow?,
+        opusWeekly: QuotaWindow?,
+        monthly: QuotaWindow? = nil,
+        resetCredits: Int?,
+        resetCreditExpirations: [Date],
+        status: QuotaSnapshotStatus,
+        fetchedAt: Date
+    ) {
+        self.provider = provider
+        self.plan = plan
+        self.fiveHour = fiveHour
+        self.weekly = weekly
+        self.opusWeekly = opusWeekly
+        self.monthly = monthly
+        self.resetCredits = resetCredits
+        self.resetCreditExpirations = resetCreditExpirations
+        self.status = status
+        self.fetchedAt = fetchedAt
+    }
 
     static func failure(
         provider: QuotaProviderID,
@@ -134,6 +179,7 @@ struct QuotaSnapshot: Equatable {
             fiveHour: nil,
             weekly: nil,
             opusWeekly: nil,
+            monthly: nil,
             resetCredits: nil,
             resetCreditExpirations: [],
             status: status,
@@ -148,6 +194,7 @@ struct QuotaSnapshot: Equatable {
             fiveHour: fiveHour,
             weekly: weekly,
             opusWeekly: opusWeekly,
+            monthly: monthly,
             resetCredits: state?.count,
             resetCreditExpirations: state?.expirations ?? [],
             status: status,
