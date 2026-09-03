@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.15.5] - 2026-09-03
+
+### Added
+- Show Cursor monthly usage and allowance in Subscription Quota, with account-safe refresh and cache behavior plus a persisted General setting
+
 ## [0.15.4] - 2026-08-25
 
 ### Changed
