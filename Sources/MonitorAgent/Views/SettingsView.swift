@@ -84,7 +84,7 @@ struct SettingsView: View {
     @State private var draftLaunchAtLogin: Bool = false
     @State private var draftClaudeExpirationDate: Date?
     @State private var draftCodexExpirationDate: Date?
-    @State private var draftCursorQuotaEnabled = true
+    @State private var draftCursorQuotaEnabled = false
 
     // Config drafts
     @State private var claudeConfigText: String = ""

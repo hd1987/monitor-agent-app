@@ -684,15 +684,15 @@ final class QuotaFeatureTests: XCTestCase {
         // No expiration date means the provider is disabled and hidden.
         XCTAssertFalse(settings.isEnabled(.claude))
         XCTAssertFalse(settings.isEnabled(.codex))
-        XCTAssertTrue(settings.isEnabled(.cursor))
+        XCTAssertFalse(settings.isEnabled(.cursor))
         XCTAssertNil(settings.claudeExpirationDate)
         XCTAssertNil(settings.codexExpirationDate)
         XCTAssertNil(settings.expirationDate(for: .cursor))
 
-        settings.cursorQuotaEnabled = false
-        XCTAssertFalse(QuotaSettings(defaults: defaults).isEnabled(.cursor))
         settings.cursorQuotaEnabled = true
         XCTAssertTrue(QuotaSettings(defaults: defaults).isEnabled(.cursor))
+        settings.cursorQuotaEnabled = false
+        XCTAssertFalse(QuotaSettings(defaults: defaults).isEnabled(.cursor))
 
         let claudeExpiration = Date(timeIntervalSince1970: 1_800_000_000)
         let codexExpiration = Date(timeIntervalSince1970: 1_900_000_000)
@@ -835,6 +835,7 @@ final class QuotaFeatureTests: XCTestCase {
         let quotaSettings = QuotaSettings(defaults: defaults)
         quotaSettings.claudeExpirationDate = Date(timeIntervalSince1970: 1_900_000_000)
         quotaSettings.codexExpirationDate = Date(timeIntervalSince1970: 1_900_000_000)
+        quotaSettings.cursorQuotaEnabled = true
         var now = Date(timeIntervalSince1970: 1_800_000_000)
         let store = AppStore(
             database: DatabaseManager(inMemory: true),
