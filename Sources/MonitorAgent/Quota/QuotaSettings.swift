@@ -22,7 +22,7 @@ final class QuotaSettings: ObservableObject {
         self.defaults = defaults
         claudeExpirationDate = defaults.object(forKey: Keys.claudeExpirationDate) as? Date
         codexExpirationDate = defaults.object(forKey: Keys.codexExpirationDate) as? Date
-        cursorQuotaEnabled = defaults.object(forKey: Keys.cursorQuotaEnabled) as? Bool ?? true
+        cursorQuotaEnabled = defaults.object(forKey: Keys.cursorQuotaEnabled) as? Bool ?? false
     }
 
     func isEnabled(_ provider: QuotaProviderID) -> Bool {

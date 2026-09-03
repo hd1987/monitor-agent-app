@@ -1442,10 +1442,12 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             identity: secondAccount.account.syncIdentity,
             snapshot: quotaSnapshot
         )
+        let quotaSettings = makeEnabledCursorQuotaSettings()
         let store = AppStore(
             database: database,
             syncManager: syncManager,
             quotaService: quotaService,
+            quotaSettings: quotaSettings,
             cursorAccountResolver: StaticCursorAccountResolver(
                 result: .success(secondAccount)
             ),
@@ -1493,6 +1495,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
         monitoringSettings.enabledAgents = [.cursor]
         let quotaSettings = QuotaSettings(defaults: defaults)
+        quotaSettings.cursorQuotaEnabled = true
         let database = DatabaseManager(inMemory: true)
         let account = cursorAuthenticatedAccount(userId: 1)
         try seedCursorCache(
@@ -1546,6 +1549,8 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         refreshSettings.interval = .fiveMinutes
         let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
         monitoringSettings.enabledAgents = [.cursor]
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        quotaSettings.cursorQuotaEnabled = true
         let database = DatabaseManager(inMemory: true)
         let firstAccount = cursorAuthenticatedAccount(userId: 1)
         let secondAccount = cursorAuthenticatedAccount(userId: 2)
@@ -1572,7 +1577,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             refreshSettings: refreshSettings,
             monitoringSettings: monitoringSettings,
             quotaService: quotaService,
-            quotaSettings: QuotaSettings(defaults: defaults),
+            quotaSettings: quotaSettings,
             cursorAccountResolver: resolver,
             refreshCoordinator: PanelRefreshCoordinator(currentDateProvider: { now }),
             observeRefreshIntervalChanges: false,
@@ -1640,6 +1645,8 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
         let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
         monitoringSettings.enabledAgents = [.cursor]
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        quotaSettings.cursorQuotaEnabled = true
         let database = DatabaseManager(inMemory: true)
         let account = cursorAuthenticatedAccount(userId: 1)
         try seedCursorCache(
@@ -1666,7 +1673,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
                 identity: account.account.syncIdentity,
                 snapshot: failedSnapshot
             ),
-            quotaSettings: QuotaSettings(defaults: defaults),
+            quotaSettings: quotaSettings,
             cursorAccountResolver: StaticCursorAccountResolver(result: .success(account)),
             observeRefreshIntervalChanges: false
         )
@@ -1690,6 +1697,8 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
         let monitoringSettings = AgentMonitoringSettings(defaults: defaults)
         monitoringSettings.enabledAgents = [.cursor]
+        let quotaSettings = QuotaSettings(defaults: defaults)
+        quotaSettings.cursorQuotaEnabled = true
         let database = DatabaseManager(inMemory: true)
         let cachedAccount = cursorAuthenticatedAccount(userId: 1)
         let signedInAccount = cursorAuthenticatedAccount(userId: 2)
@@ -1712,7 +1721,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             database: database,
             monitoringSettings: monitoringSettings,
             quotaService: quotaService,
-            quotaSettings: QuotaSettings(defaults: defaults),
+            quotaSettings: quotaSettings,
             quotaCache: quotaCache,
             cursorAccountResolver: StaticCursorAccountResolver(result: .success(signedInAccount)),
             observeRefreshIntervalChanges: false
@@ -2107,6 +2116,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             identity: account.account.syncIdentity,
             snapshot: quotaSnapshot
         )
+        let quotaSettings = makeEnabledCursorQuotaSettings()
         let syncManager = SessionSyncManager(
             database: database,
             claudeProjectsPath: "/missing-claude-\(UUID().uuidString)",
@@ -2118,6 +2128,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
             database: database,
             syncManager: syncManager,
             quotaService: quotaService,
+            quotaSettings: quotaSettings,
             quotaCache: quotaCache,
             cursorAccountResolver: resolver,
             observeRefreshIntervalChanges: false,
@@ -2477,6 +2488,16 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         let future = Date(timeIntervalSinceNow: 30 * 24 * 60 * 60)
         settings.claudeExpirationDate = future
         settings.codexExpirationDate = future
+        settings.cursorQuotaEnabled = true
+    }
+
+    private func makeEnabledCursorQuotaSettings() -> QuotaSettings {
+        let suiteName = "AppStoreTodayRolloverTests.cursorQuota.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let settings = QuotaSettings(defaults: defaults)
+        settings.cursorQuotaEnabled = true
+        defaults.removePersistentDomain(forName: suiteName)
+        return settings
     }
 
     private func date(year: Int, month: Int, day: Int, hour: Int = 0) -> Date {
