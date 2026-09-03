@@ -248,7 +248,7 @@ struct SubscriptionQuotaCard: View {
                 .foregroundStyle(theme.panelSecondaryForeground)
             Text("·")
                 .foregroundStyle(theme.panelSecondaryForeground)
-            Text(item.remainingPercentText)
+            Text(item.cardValueText)
                 .fontWeight(.semibold)
                 .foregroundStyle(quotaColor(item.remainingPercent))
             Text(item.countdownText)
@@ -258,6 +258,7 @@ struct SubscriptionQuotaCard: View {
         .lineLimit(1)
         .fixedSize()
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(item.accessibilityItemText)
         .accessibilityValue(QuotaAccessibility.resetStatus(for: item.status))
     }
 
@@ -393,20 +394,61 @@ private struct QuotaHoverTip<Content: View>: View {
 struct QuotaWindowPresentation: Equatable {
     let label: String
     let remainingPercent: Double
+    let usageAmount: QuotaUsageAmount?
     let countdownText: String
     let absoluteResetText: String
     let status: QuotaStatus
+
+    init(
+        label: String,
+        remainingPercent: Double,
+        usageAmount: QuotaUsageAmount? = nil,
+        countdownText: String,
+        absoluteResetText: String,
+        status: QuotaStatus
+    ) {
+        self.label = label
+        self.remainingPercent = remainingPercent
+        self.usageAmount = usageAmount
+        self.countdownText = countdownText
+        self.absoluteResetText = absoluteResetText
+        self.status = status
+    }
 
     var remainingPercentText: String {
         "\(Int(remainingPercent.rounded()))%"
     }
 
+    var cardValueText: String {
+        usageAmountText ?? remainingPercentText
+    }
+
     var detailsItemText: String {
-        "\(label) • \(remainingPercentText)"
+        "\(label) • \(cardValueText)"
     }
 
     var accessibilityItemText: String {
-        "\(label) limit, \(remainingPercentText) remaining"
+        if let usageAmount {
+            let remainingCents = max(0, usageAmount.limitCents - usageAmount.usedCents)
+            return "\(label) limit, \(QuotaCurrencyFormat.text(usageAmount.usedCents)) used of \(QuotaCurrencyFormat.text(usageAmount.limitCents)), \(QuotaCurrencyFormat.text(remainingCents)) remaining, \(remainingPercentText) remaining"
+        }
+        return "\(label) limit, \(remainingPercentText) remaining"
+    }
+
+    private var usageAmountText: String? {
+        guard let usageAmount else { return nil }
+        return "\(QuotaCurrencyFormat.text(usageAmount.usedCents)) / \(QuotaCurrencyFormat.text(usageAmount.limitCents))"
+    }
+}
+
+enum QuotaCurrencyFormat {
+    static func text(_ cents: Int) -> String {
+        guard cents % 100 != 0 else { return "$\(cents / 100)" }
+        return String(
+            format: "$%.2f",
+            locale: Locale(identifier: "en_US_POSIX"),
+            arguments: [Double(cents) / 100]
+        )
     }
 }
 
@@ -478,6 +520,15 @@ struct QuotaDetailsPresentation: Equatable {
             usageWindows.append(windowPresentation(
                 provider: provider,
                 fallbackLabel: "Opus",
+                window: window,
+                now: now,
+                usesProviderDurationLabel: false
+            ))
+        }
+        if isAvailable, let window = snapshot?.monthly {
+            usageWindows.append(windowPresentation(
+                provider: provider,
+                fallbackLabel: "1m",
                 window: window,
                 now: now,
                 usesProviderDurationLabel: false
@@ -563,6 +614,7 @@ struct QuotaDetailsPresentation: Equatable {
         return QuotaWindowPresentation(
             label: label,
             remainingPercent: window.remainingPercent,
+            usageAmount: window.usageAmount,
             countdownText: QuotaResetCountdown.text(until: window.resetsAt, now: now),
             absoluteResetText: QuotaDateFormat.resetDateTime(window.resetsAt),
             status: QuotaWindowResetStatus.status(
@@ -904,6 +956,7 @@ enum QuotaWindowResetStatus {
 
         let usesWeeklyThresholds = window.usesDateTimeReset
             || fallbackLabel == "1w"
+            || fallbackLabel == "1m"
             || fallbackLabel == "Opus"
         let criticalThreshold = usesWeeklyThresholds
             ? weeklyCriticalThreshold

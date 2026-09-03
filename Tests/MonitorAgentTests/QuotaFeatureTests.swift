@@ -7,8 +7,10 @@ final class QuotaFeatureTests: XCTestCase {
     func testQuotaProviderIconsUseSuppliedSVGAssets() throws {
         XCTAssertFalse(try XCTUnwrap(ProviderIconAsset.data(for: .claude)).isEmpty)
         XCTAssertFalse(try XCTUnwrap(ProviderIconAsset.data(for: .codex)).isEmpty)
+        XCTAssertFalse(try XCTUnwrap(ProviderIconAsset.data(for: .cursor)).isEmpty)
         XCTAssertTrue(ProviderIconAsset.image(for: .claude).isTemplate)
         XCTAssertTrue(ProviderIconAsset.image(for: .codex).isTemplate)
+        XCTAssertFalse(ProviderIconAsset.image(for: .cursor).isTemplate)
     }
 
     func testQuotaCardUsesCompactSingleLineLayout() {
@@ -673,7 +675,7 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertTrue(paths.contains("/Applications/Codex.app/Contents/Resources/codex"))
     }
 
-    func testQuotaEnablementDerivesFromExpirationDate() throws {
+    func testQuotaEnablementUsesConfiguredExpirationOrCursorSwitch() throws {
         let suiteName = "QuotaFeatureTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -682,8 +684,15 @@ final class QuotaFeatureTests: XCTestCase {
         // No expiration date means the provider is disabled and hidden.
         XCTAssertFalse(settings.isEnabled(.claude))
         XCTAssertFalse(settings.isEnabled(.codex))
+        XCTAssertTrue(settings.isEnabled(.cursor))
         XCTAssertNil(settings.claudeExpirationDate)
         XCTAssertNil(settings.codexExpirationDate)
+        XCTAssertNil(settings.expirationDate(for: .cursor))
+
+        settings.cursorQuotaEnabled = false
+        XCTAssertFalse(QuotaSettings(defaults: defaults).isEnabled(.cursor))
+        settings.cursorQuotaEnabled = true
+        XCTAssertTrue(QuotaSettings(defaults: defaults).isEnabled(.cursor))
 
         let claudeExpiration = Date(timeIntervalSince1970: 1_800_000_000)
         let codexExpiration = Date(timeIntervalSince1970: 1_900_000_000)
@@ -837,7 +846,7 @@ final class QuotaFeatureTests: XCTestCase {
         let initialCodexState = store.quotaCardState(for: .codex)
 
         store.appFilter = .all
-        XCTAssertEqual(store.visibleQuotaProviders, [.claude, .codex])
+        XCTAssertEqual(store.visibleQuotaProviders, [.claude, .codex, .cursor])
 
         store.appFilter = .claude
         XCTAssertEqual(store.visibleQuotaProviders, [.claude])
@@ -846,14 +855,14 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(store.visibleQuotaProviders, [.codex])
 
         store.appFilter = .cursor
-        XCTAssertEqual(store.visibleQuotaProviders, [])
+        XCTAssertEqual(store.visibleQuotaProviders, [.cursor])
         XCTAssertEqual(store.quotaCardState(for: .claude), initialClaudeState)
         XCTAssertEqual(store.quotaCardState(for: .codex), initialCodexState)
 
         quotaSettings.codexExpirationDate = nil
         store.quotaProviderSettingsDidChange()
         store.appFilter = .all
-        XCTAssertEqual(store.visibleQuotaProviders, [.claude])
+        XCTAssertEqual(store.visibleQuotaProviders, [.claude, .cursor])
         XCTAssertEqual(
             store.quotaExpirationDate(for: .claude),
             quotaSettings.claudeExpirationDate
@@ -861,6 +870,14 @@ final class QuotaFeatureTests: XCTestCase {
         store.appFilter = .codex
         XCTAssertEqual(store.visibleQuotaProviders, [])
         XCTAssertNil(store.quotaCardState(for: .codex))
+
+        quotaSettings.cursorQuotaEnabled = false
+        store.quotaProviderSettingsDidChange()
+        store.appFilter = .all
+        XCTAssertEqual(store.visibleQuotaProviders, [.claude])
+        store.appFilter = .cursor
+        XCTAssertEqual(store.visibleQuotaProviders, [])
+        XCTAssertNil(store.quotaCardState(for: .cursor))
 
         now = now.addingTimeInterval(60)
         quotaSettings.codexExpirationDate = Date(timeIntervalSince1970: 1_900_000_000)

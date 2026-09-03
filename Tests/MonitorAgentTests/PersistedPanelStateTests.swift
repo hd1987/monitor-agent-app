@@ -190,6 +190,42 @@ final class PersistedPanelStateTests: XCTestCase {
         wait(for: [mismatching], timeout: 1)
     }
 
+    func testQuotaCacheRestoresCursorMonthlyAmountForMatchingAccount() {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cursor-quota-cache-\(UUID().uuidString).json").path
+        let cache = QuotaSnapshotCache(path: path)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let snapshot = QuotaSnapshot(
+            provider: .cursor,
+            plan: nil,
+            fiveHour: nil,
+            weekly: nil,
+            opusWeekly: nil,
+            monthly: QuotaWindow(
+                remainingPercent: 88.59,
+                resetsAt: now.addingTimeInterval(28 * 24 * 60 * 60),
+                durationSeconds: nil,
+                usageAmount: QuotaUsageAmount(usedCents: 6_847, limitCents: 60_000)
+            ),
+            resetCredits: nil,
+            resetCreditExpirations: [],
+            status: .available,
+            fetchedAt: now
+        )
+        cache.store(snapshot, identityDigest: "cursor-account-a")
+
+        let loaded = expectation(description: "Cursor monthly quota cache loads")
+        cache.load(
+            provider: .cursor,
+            identityDigest: "cursor-account-a",
+            now: now
+        ) { restored in
+            XCTAssertEqual(restored, snapshot)
+            loaded.fulfill()
+        }
+        wait(for: [loaded], timeout: 1)
+    }
+
     func testQuotaCacheSerializesProviderWritesAndIgnoresCorruption() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("quota-cache-\(UUID().uuidString)")

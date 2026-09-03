@@ -147,6 +147,7 @@ private extension QuotaSnapshotCache {
             guard restored.fiveHour != nil
                     || restored.weekly != nil
                     || restored.opusWeekly != nil
+                    || restored.monthly != nil
                     || (restored.resetCredits ?? 0) > 0 else {
                 return nil
             }
@@ -159,6 +160,7 @@ private extension QuotaSnapshotCache {
         let fiveHour: Window?
         let weekly: Window?
         let opusWeekly: Window?
+        let monthly: Window?
         let resetCredits: Int?
         let resetCreditExpirations: [Date]
         let fetchedAt: Date
@@ -168,6 +170,7 @@ private extension QuotaSnapshotCache {
             fiveHour = snapshot.fiveHour.map(Window.init)
             weekly = snapshot.weekly.map(Window.init)
             opusWeekly = snapshot.opusWeekly.map(Window.init)
+            monthly = snapshot.monthly.map(Window.init)
             resetCredits = snapshot.resetCredits
             resetCreditExpirations = snapshot.resetCreditExpirations
             fetchedAt = snapshot.fetchedAt
@@ -186,6 +189,11 @@ private extension QuotaSnapshotCache {
                 now: now,
                 fallbackExpiration: fetchedAt.addingTimeInterval(7 * 24 * 60 * 60)
             )
+            let validMonthly = monthly?.value(
+                now: now,
+                fallbackExpiration: fetchedAt,
+                requiresUsageAmount: true
+            )
             let resetCreditsState = ResetCreditsState.restored(
                 count: resetCredits,
                 expirations: resetCreditExpirations,
@@ -197,6 +205,7 @@ private extension QuotaSnapshotCache {
                 fiveHour: validFiveHour,
                 weekly: validWeekly,
                 opusWeekly: validOpus,
+                monthly: validMonthly,
                 resetCredits: resetCreditsState?.count,
                 resetCreditExpirations: resetCreditsState?.expirations ?? [],
                 status: .available,
@@ -209,21 +218,40 @@ private extension QuotaSnapshotCache {
         let remainingPercent: Double
         let resetsAt: Date?
         let durationSeconds: Int?
+        let usedCents: Int?
+        let limitCents: Int?
 
         init(_ window: QuotaWindow) {
             remainingPercent = window.remainingPercent
             resetsAt = window.resetsAt
             durationSeconds = window.durationSeconds
+            usedCents = window.usageAmount?.usedCents
+            limitCents = window.usageAmount?.limitCents
         }
 
-        func value(now: Date, fallbackExpiration: Date) -> QuotaWindow? {
+        func value(
+            now: Date,
+            fallbackExpiration: Date,
+            requiresUsageAmount: Bool = false
+        ) -> QuotaWindow? {
             guard remainingPercent.isFinite,
                   (0...100).contains(remainingPercent),
                   (resetsAt ?? fallbackExpiration) > now else { return nil }
+            let usageAmount: QuotaUsageAmount?
+            switch (usedCents, limitCents) {
+            case (nil, nil):
+                guard !requiresUsageAmount else { return nil }
+                usageAmount = nil
+            case (let used?, let limit?) where used >= 0 && limit > 0:
+                usageAmount = QuotaUsageAmount(usedCents: used, limitCents: limit)
+            default:
+                return nil
+            }
             return QuotaWindow(
                 remainingPercent: remainingPercent,
                 resetsAt: resetsAt,
-                durationSeconds: durationSeconds
+                durationSeconds: durationSeconds,
+                usageAmount: usageAmount
             )
         }
     }

@@ -27,11 +27,16 @@ final class QuotaService: QuotaRefreshing {
     static let shared = QuotaService()
 
     private let session: URLSession
+    private let cursorQuotaService: CursorQuotaServicing
     private let queue = DispatchQueue(label: "com.monitoragent.quota-service")
     private var inFlightCompletions: [RequestKey: [(QuotaRefreshResult) -> Void]] = [:]
 
-    init(session: URLSession = .shared) {
+    init(
+        session: URLSession = .shared,
+        cursorQuotaService: CursorQuotaServicing = CursorQuotaService()
+    ) {
         self.session = session
+        self.cursorQuotaService = cursorQuotaService
     }
 
     func refresh(
@@ -112,6 +117,8 @@ final class QuotaService: QuotaRefreshing {
                         ))
                     }
                 }
+            case .cursor:
+                self.cursorQuotaService.refresh(now: now, completion: completion)
             }
         }
     }
@@ -120,6 +127,10 @@ final class QuotaService: QuotaRefreshing {
         provider: QuotaProviderID,
         completion: @escaping (String?) -> Void
     ) {
+        if provider == .cursor {
+            cursorQuotaService.resolveIdentityDigest(completion: completion)
+            return
+        }
         queue.async {
             guard QuotaEnvironmentDetector.isInstalled(provider),
                   !QuotaEnvironmentDetector.usesThirdPartyAPI(provider) else {
@@ -179,6 +190,7 @@ final class QuotaService: QuotaRefreshing {
         switch provider {
         case .claude: stableIdentity = loadClaudeCredentials()?.stableIdentity
         case .codex: stableIdentity = loadCodexAuth()?.stableIdentity
+        case .cursor: stableIdentity = nil
         }
         return stableIdentity.map {
             Self.identityDigest(provider: provider, stableIdentity: $0)

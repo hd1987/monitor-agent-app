@@ -84,6 +84,7 @@ struct SettingsView: View {
     @State private var draftLaunchAtLogin: Bool = false
     @State private var draftClaudeExpirationDate: Date?
     @State private var draftCodexExpirationDate: Date?
+    @State private var draftCursorQuotaEnabled = true
 
     // Config drafts
     @State private var claudeConfigText: String = ""
@@ -234,7 +235,8 @@ struct SettingsView: View {
                 draftEnabledAgents: $draftEnabledAgents,
                 draftLaunchAtLogin: $draftLaunchAtLogin,
                 draftClaudeExpirationDate: $draftClaudeExpirationDate,
-                draftCodexExpirationDate: $draftCodexExpirationDate
+                draftCodexExpirationDate: $draftCodexExpirationDate,
+                draftCursorQuotaEnabled: $draftCursorQuotaEnabled
             )
         case .shortcuts:
             ShortcutsSettingsView(
@@ -292,6 +294,7 @@ struct SettingsView: View {
             draftLaunchAtLogin = LaunchAtLoginController.shared.launchAtLogin
             draftClaudeExpirationDate = QuotaSettings.shared.claudeExpirationDate
             draftCodexExpirationDate = QuotaSettings.shared.codexExpirationDate
+            draftCursorQuotaEnabled = QuotaSettings.shared.cursorQuotaEnabled
         case .shortcuts:
             draftGlobalShortcut = GlobalShortcutController.shared.shortcut
             var panelDraft: [String: GlobalShortcut?] = [:]
@@ -336,6 +339,7 @@ struct SettingsView: View {
             LaunchAtLoginController.shared.launchAtLogin = draftLaunchAtLogin
             QuotaSettings.shared.claudeExpirationDate = draftClaudeExpirationDate
             QuotaSettings.shared.codexExpirationDate = draftCodexExpirationDate
+            QuotaSettings.shared.cursorQuotaEnabled = draftCursorQuotaEnabled
             store.updateEnabledAgents(draftEnabledAgents)
             RefreshSettings.shared.interval = draftRefreshInterval
             store.quotaProviderSettingsDidChange()
@@ -504,6 +508,7 @@ struct GeneralSettingsView: View {
     @Binding var draftLaunchAtLogin: Bool
     @Binding var draftClaudeExpirationDate: Date?
     @Binding var draftCodexExpirationDate: Date?
+    @Binding var draftCursorQuotaEnabled: Bool
     @State private var showUsageDataRebuildSheet = false
 
     var body: some View {
@@ -563,6 +568,7 @@ struct GeneralSettingsView: View {
                 QuotaSettingsGroup(
                     claudeExpirationDate: $draftClaudeExpirationDate,
                     codexExpirationDate: $draftCodexExpirationDate,
+                    cursorQuotaEnabled: $draftCursorQuotaEnabled,
                     enabledAgents: draftEnabledAgents
                 )
             }
@@ -746,6 +752,9 @@ enum QuotaSettingsCopy {
     static let claudeDescription = "Set an expiration date to show Claude Code subscription quota in the main panel; leave it empty to hide."
     static let codexTitle = "Codex"
     static let codexDescription = "Set an expiration date to show Codex subscription quota in the main panel; leave it empty to hide."
+    static let cursorTitle = "Cursor"
+    static let cursorDescription = "Show Cursor subscription quota in the main panel."
+    static let cursorToggleAccessibilityLabel = "Cursor Subscription Quota"
     static let expirationNotSet = "Not set"
     static let expirationPickerTitle = "Subscription Expiration"
     static let today = "Today"
@@ -950,6 +959,7 @@ enum ExpirationDateControlStyle {
 private struct QuotaSettingsGroup: View {
     @Binding var claudeExpirationDate: Date?
     @Binding var codexExpirationDate: Date?
+    @Binding var cursorQuotaEnabled: Bool
     let enabledAgents: Set<AgentID>
 
     var body: some View {
@@ -967,8 +977,30 @@ private struct QuotaSettingsGroup: View {
                 expirationDate: $codexExpirationDate,
                 isEnabled: enabledAgents.contains(.codex)
             )
+            Divider()
+            cursorQuotaRow
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var cursorQuotaRow: some View {
+        let isEnabled = enabledAgents.contains(.cursor)
+        return HStack(spacing: 16) {
+            settingLabel(
+                title: QuotaSettingsCopy.cursorTitle,
+                description: isEnabled
+                    ? QuotaSettingsCopy.cursorDescription
+                    : "Enable Cursor monitoring to configure subscription quota."
+            )
+            Spacer(minLength: 16)
+            Toggle("", isOn: $cursorQuotaEnabled)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .disabled(!isEnabled)
+                .accessibilityLabel(QuotaSettingsCopy.cursorToggleAccessibilityLabel)
+        }
+        .padding(.vertical, 8)
+        .opacity(isEnabled ? 1 : 0.55)
     }
 
     private func quotaRow(

@@ -16,10 +16,18 @@ struct ProviderIcon: View {
 
 enum ProviderIconAsset {
     static func data(for provider: QuotaProviderID) -> Data? {
-        AppIconAsset.data(for: provider == .claude ? .claude : .codex)
+        AppIconAsset.data(for: appIcon(for: provider))
     }
 
     static func image(for provider: QuotaProviderID) -> NSImage {
-        AppIconAsset.image(for: provider == .claude ? .claude : .codex)
+        AppIconAsset.image(for: appIcon(for: provider))
+    }
+
+    private static func appIcon(for provider: QuotaProviderID) -> AppIcon {
+        switch provider {
+        case .claude: return .claude
+        case .codex: return .codex
+        case .cursor: return .cursor
+        }
     }
 }
