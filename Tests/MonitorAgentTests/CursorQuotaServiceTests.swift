@@ -92,16 +92,81 @@ final class CursorQuotaServiceTests: XCTestCase {
         )
         let monthly = try XCTUnwrap(presentation.usageWindows.first)
 
-        XCTAssertEqual(presentation.sections, [.usageLimits])
+        XCTAssertEqual(presentation.sections, [.usageLimits, .usageAmounts])
         XCTAssertEqual(monthly.label, "1m")
-        XCTAssertEqual(monthly.cardValueText, "$68.47 / $600")
-        XCTAssertEqual(monthly.detailsItemText, "1m • $68.47 / $600")
+        XCTAssertEqual(monthly.cardValueText, "89%")
+        XCTAssertEqual(monthly.cardUsedAmountText, "$68.47")
+        XCTAssertEqual(monthly.detailsItemText, "1m • 89%")
+        let amountDetails = try XCTUnwrap(monthly.usageAmountDetails)
+        XCTAssertEqual(amountDetails.periodText, "Monthly")
+        XCTAssertEqual(amountDetails.usedText, "$68.47")
+        XCTAssertEqual(amountDetails.limitText, "$600")
+        XCTAssertEqual(
+            amountDetails.balanceAccessibilityText,
+            "$68.47 used of $600, $531.53 remaining"
+        )
         XCTAssertEqual(monthly.countdownText, "28d")
         XCTAssertEqual(monthly.status, .healthy)
         XCTAssertEqual(
             monthly.accessibilityItemText,
             "1m limit, $68.47 used of $600, $531.53 remaining, 89% remaining"
         )
+    }
+
+    func testCursorMonthlyQuotaPreservesOverageAccessibility() {
+        let amountDetails = QuotaUsageAmountPresentation(
+            periodText: "Monthly",
+            usageAmount: QuotaUsageAmount(usedCents: 62_000, limitCents: 60_000)
+        )
+        let presentation = QuotaWindowPresentation(
+            label: "1m",
+            remainingPercent: 0,
+            usageAmountDetails: amountDetails,
+            countdownText: "2d",
+            absoluteResetText: "Oct 1, 10:07",
+            status: .warning
+        )
+
+        XCTAssertEqual(presentation.cardValueText, "0%")
+        XCTAssertEqual(presentation.cardUsedAmountText, "$620")
+        XCTAssertEqual(presentation.usageAmountDetails, amountDetails)
+        XCTAssertEqual(amountDetails.balanceAccessibilityText, "$620 used of $600, $20 over")
+        XCTAssertEqual(
+            presentation.accessibilityItemText,
+            "1m limit, $620 used of $600, $20 over, 0% remaining"
+        )
+    }
+
+    func testCursorMonthlyQuotaPresentsZeroAndFullyUsedAmounts() {
+        let zeroAmountDetails = QuotaUsageAmountPresentation(
+            periodText: "Monthly",
+            usageAmount: QuotaUsageAmount(usedCents: 0, limitCents: 60_000)
+        )
+        let fullyUsedAmountDetails = QuotaUsageAmountPresentation(
+            periodText: "Monthly",
+            usageAmount: QuotaUsageAmount(usedCents: 60_000, limitCents: 60_000)
+        )
+        let zeroUsage = QuotaWindowPresentation(
+            label: "1m",
+            remainingPercent: 100,
+            usageAmountDetails: zeroAmountDetails,
+            countdownText: "28d",
+            absoluteResetText: "Oct 1, 10:07",
+            status: .healthy
+        )
+        let fullyUsed = QuotaWindowPresentation(
+            label: "1m",
+            remainingPercent: 0,
+            usageAmountDetails: fullyUsedAmountDetails,
+            countdownText: "28d",
+            absoluteResetText: "Oct 1, 10:07",
+            status: .healthy
+        )
+
+        XCTAssertEqual(zeroUsage.cardUsedAmountText, "$0")
+        XCTAssertEqual(zeroUsage.usageAmountDetails, zeroAmountDetails)
+        XCTAssertEqual(fullyUsed.cardUsedAmountText, "$600")
+        XCTAssertEqual(fullyUsed.usageAmountDetails, fullyUsedAmountDetails)
     }
 
     private func currentPeriodPayload(

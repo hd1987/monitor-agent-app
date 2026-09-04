@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Align the Cursor quota card with the shared remaining-percentage format and show Monthly period, Used, and Limit as a separate quota-details section
+
 ## [0.15.6] - 2026-09-03
 
 ### Changed
