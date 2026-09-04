@@ -242,18 +242,32 @@ struct SubscriptionQuotaCard: View {
     }
 
     private func quotaMetric(_ item: QuotaWindowPresentation) -> some View {
-        HStack(spacing: 5) {
-            Text(item.label)
-                .fontWeight(.medium)
-                .foregroundStyle(theme.panelSecondaryForeground)
-            Text("·")
-                .foregroundStyle(theme.panelSecondaryForeground)
-            Text(item.cardValueText)
-                .fontWeight(.semibold)
-                .foregroundStyle(quotaColor(item.remainingPercent))
-            Text(item.countdownText)
-                .font(.system(size: 11))
-                .foregroundStyle(quotaStatusColor(item.status))
+        HStack(spacing: QuotaCardLayout.metricSpacing) {
+            HStack(spacing: 5) {
+                Text(item.label)
+                    .fontWeight(.medium)
+                    .foregroundStyle(theme.panelSecondaryForeground)
+                Text("·")
+                    .foregroundStyle(theme.panelSecondaryForeground)
+                Text(item.cardValueText)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(quotaColor(item.remainingPercent))
+                Text(item.countdownText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(quotaStatusColor(item.status))
+            }
+            if let usedAmountText = item.cardUsedAmountText {
+                HStack(spacing: 5) {
+                    Text("Used")
+                        .fontWeight(.medium)
+                        .foregroundStyle(theme.panelSecondaryForeground)
+                    Text("•")
+                        .foregroundStyle(theme.panelSecondaryForeground)
+                    Text(usedAmountText)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(quotaColor(item.remainingPercent))
+                }
+            }
         }
         .lineLimit(1)
         .fixedSize()
@@ -394,7 +408,7 @@ private struct QuotaHoverTip<Content: View>: View {
 struct QuotaWindowPresentation: Equatable {
     let label: String
     let remainingPercent: Double
-    let usageAmount: QuotaUsageAmount?
+    let usageAmountDetails: QuotaUsageAmountPresentation?
     let countdownText: String
     let absoluteResetText: String
     let status: QuotaStatus
@@ -402,14 +416,14 @@ struct QuotaWindowPresentation: Equatable {
     init(
         label: String,
         remainingPercent: Double,
-        usageAmount: QuotaUsageAmount? = nil,
+        usageAmountDetails: QuotaUsageAmountPresentation? = nil,
         countdownText: String,
         absoluteResetText: String,
         status: QuotaStatus
     ) {
         self.label = label
         self.remainingPercent = remainingPercent
-        self.usageAmount = usageAmount
+        self.usageAmountDetails = usageAmountDetails
         self.countdownText = countdownText
         self.absoluteResetText = absoluteResetText
         self.status = status
@@ -420,35 +434,102 @@ struct QuotaWindowPresentation: Equatable {
     }
 
     var cardValueText: String {
-        usageAmountText ?? remainingPercentText
+        remainingPercentText
     }
 
     var detailsItemText: String {
-        "\(label) • \(cardValueText)"
+        "\(label) • \(remainingPercentText)"
+    }
+
+    var cardUsedAmountText: String? {
+        usageAmountDetails?.usedText
     }
 
     var accessibilityItemText: String {
-        if let usageAmount {
-            let remainingCents = max(0, usageAmount.limitCents - usageAmount.usedCents)
-            return "\(label) limit, \(QuotaCurrencyFormat.text(usageAmount.usedCents)) used of \(QuotaCurrencyFormat.text(usageAmount.limitCents)), \(QuotaCurrencyFormat.text(remainingCents)) remaining, \(remainingPercentText) remaining"
+        if let usageAmountDetails {
+            return "\(label) limit, \(usageAmountDetails.balanceAccessibilityText), \(remainingPercentText) remaining"
         }
         return "\(label) limit, \(remainingPercentText) remaining"
     }
+}
 
-    private var usageAmountText: String? {
-        guard let usageAmount else { return nil }
-        return "\(QuotaCurrencyFormat.text(usageAmount.usedCents)) / \(QuotaCurrencyFormat.text(usageAmount.limitCents))"
+struct QuotaUsageAmountPresentation: Equatable {
+    let periodText: String
+    let usedText: String
+    let limitText: String
+    let balanceAccessibilityText: String
+
+    init(periodText: String, usageAmount: QuotaUsageAmount) {
+        self.periodText = periodText
+        usedText = QuotaCurrencyFormat.text(usageAmount.usedCents)
+        limitText = QuotaCurrencyFormat.text(usageAmount.limitCents)
+        if usageAmount.usedCents > usageAmount.limitCents {
+            let overageText = QuotaCurrencyFormat.text(
+                usageAmount.usedCents - usageAmount.limitCents
+            )
+            balanceAccessibilityText = "\(usedText) used of \(limitText), \(overageText) over"
+        } else {
+            let remainingText = QuotaCurrencyFormat.text(
+                usageAmount.limitCents - usageAmount.usedCents
+            )
+            balanceAccessibilityText = "\(usedText) used of \(limitText), \(remainingText) remaining"
+        }
+    }
+
+    var columns: [QuotaDetailAmountColumn] {
+        [
+            QuotaDetailAmountColumn(text: periodText, role: .item),
+            QuotaDetailAmountColumn(text: usedText, role: .remaining),
+            QuotaDetailAmountColumn(text: limitText, role: .date)
+        ]
+    }
+
+    var accessibilityText: String {
+        "Period, \(periodText), Used, \(usedText), Limit, \(limitText)"
+    }
+}
+
+struct QuotaDetailAmountColumn: Equatable, Identifiable {
+    let text: String
+    let role: QuotaDetailValueRole
+
+    var id: QuotaDetailValueRole { role }
+}
+
+enum QuotaDetailValueRole: Hashable {
+    case item
+    case remaining
+    case date
+
+    var fontWeight: Font.Weight {
+        switch self {
+        case .item, .remaining: return .medium
+        case .date: return .regular
+        }
+    }
+
+    var foregroundOpacity: Double {
+        switch self {
+        case .item: return 0.72
+        case .remaining, .date: return 1
+        }
     }
 }
 
 enum QuotaCurrencyFormat {
-    static func text(_ cents: Int) -> String {
-        guard cents % 100 != 0 else { return "$\(cents / 100)" }
+    static let symbol = "$"
+
+    static func amountText(_ cents: Int) -> String {
+        guard cents % 100 != 0 else { return "\(cents / 100)" }
         return String(
-            format: "$%.2f",
+            format: "%.2f",
             locale: Locale(identifier: "en_US_POSIX"),
             arguments: [Double(cents) / 100]
         )
+    }
+
+    static func text(_ cents: Int) -> String {
+        "\(symbol)\(amountText(cents))"
     }
 }
 
@@ -483,6 +564,9 @@ struct QuotaDetailsPresentation: Equatable {
     var sections: [QuotaDetailsSection] {
         var sections: [QuotaDetailsSection] = []
         if !usageWindows.isEmpty { sections.append(.usageLimits) }
+        if usageWindows.contains(where: { $0.usageAmountDetails != nil }) {
+            sections.append(.usageAmounts)
+        }
         if resetCredits != nil { sections.append(.resetCredits) }
         if subscription != nil { sections.append(.subscription) }
         if refreshFailure != nil { sections.append(.refreshFailure) }
@@ -531,7 +615,8 @@ struct QuotaDetailsPresentation: Equatable {
                 fallbackLabel: "1m",
                 window: window,
                 now: now,
-                usesProviderDurationLabel: false
+                usesProviderDurationLabel: false,
+                usagePeriodText: provider == .cursor ? "Monthly" : nil
             ))
         }
 
@@ -606,15 +691,24 @@ struct QuotaDetailsPresentation: Equatable {
         fallbackLabel: String,
         window: QuotaWindow,
         now: Date,
-        usesProviderDurationLabel: Bool = true
+        usesProviderDurationLabel: Bool = true,
+        usagePeriodText: String? = nil
     ) -> QuotaWindowPresentation {
         let label = provider == .codex && usesProviderDurationLabel
             ? window.displayLabel(fallback: fallbackLabel)
             : fallbackLabel
+        let usageAmountDetails = usagePeriodText.flatMap { periodText in
+            window.usageAmount.map {
+                QuotaUsageAmountPresentation(
+                    periodText: periodText,
+                    usageAmount: $0
+                )
+            }
+        }
         return QuotaWindowPresentation(
             label: label,
             remainingPercent: window.remainingPercent,
-            usageAmount: window.usageAmount,
+            usageAmountDetails: usageAmountDetails,
             countdownText: QuotaResetCountdown.text(until: window.resetsAt, now: now),
             absoluteResetText: QuotaDateFormat.resetDateTime(window.resetsAt),
             status: QuotaWindowResetStatus.status(
@@ -628,6 +722,7 @@ struct QuotaDetailsPresentation: Equatable {
 
 enum QuotaDetailsSection: Equatable {
     case usageLimits
+    case usageAmounts
     case resetCredits
     case subscription
     case refreshFailure
@@ -698,6 +793,20 @@ struct QuotaDetailsTip: View {
     }
 
     @ViewBuilder
+    private var usageAmountRows: some View {
+        QuotaDetailHeaderRow(
+            primaryText: QuotaAmountDetailsCopy.periodTitle,
+            secondaryText: QuotaAmountDetailsCopy.usedTitle,
+            tertiaryText: QuotaAmountDetailsCopy.limitTitle
+        )
+        ForEach(Array(presentation.usageWindows.enumerated()), id: \.offset) { _, window in
+            if let amountDetails = window.usageAmountDetails {
+                QuotaDetailAmountRow(details: amountDetails)
+            }
+        }
+    }
+
+    @ViewBuilder
     private func resetCreditsRows(_ resetCredits: QuotaResetCreditsPresentation) -> some View {
         ForEach(Array(resetCredits.items.enumerated()), id: \.offset) { index, item in
             QuotaDetailRow(
@@ -725,6 +834,8 @@ struct QuotaDetailsTip: View {
         switch section {
         case .usageLimits:
             usageLimitRows
+        case .usageAmounts:
+            usageAmountRows
         case .resetCredits:
             if let resetCredits = presentation.resetCredits {
                 resetCreditsRows(resetCredits)
@@ -802,22 +913,18 @@ private struct QuotaDetailRow: View {
                     diameter: 6,
                     unknownColor: theme.tooltipForeground.opacity(0.72)
                 )
-                Text(primaryText)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(theme.tooltipForeground.opacity(0.72))
+                QuotaDetailValueText(text: primaryText, role: .item)
             }
             .frame(
                 width: QuotaCardLayout.detailsTipPrimaryColumnWidth,
                 alignment: .leading
             )
-            Text(secondaryText)
-                .font(.system(size: 10, weight: .medium))
+            QuotaDetailValueText(text: secondaryText, role: .remaining)
                 .frame(
                     width: QuotaCardLayout.detailsTipSecondaryColumnWidth,
                     alignment: .leading
                 )
-            Text(tertiaryText)
-                .font(.system(size: 10))
+            QuotaDetailValueText(text: tertiaryText, role: .date)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .lineLimit(1)
@@ -826,6 +933,54 @@ private struct QuotaDetailRow: View {
             .filter { !$0.isEmpty }
             .joined(separator: ", "))
         .accessibilityValue("\(status.accessibilityLabel) status")
+    }
+}
+
+private struct QuotaDetailAmountRow: View {
+    let details: QuotaUsageAmountPresentation
+
+    var body: some View {
+        GridRow {
+            ForEach(details.columns) { column in
+                amountColumn(column)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(details.accessibilityText)
+    }
+
+    @ViewBuilder
+    private func amountColumn(_ column: QuotaDetailAmountColumn) -> some View {
+        switch column.role {
+        case .item:
+            QuotaDetailValueText(text: column.text, role: column.role)
+                .frame(
+                    width: QuotaCardLayout.detailsTipPrimaryColumnWidth,
+                    alignment: .leading
+                )
+        case .remaining:
+            QuotaDetailValueText(text: column.text, role: column.role)
+                .frame(
+                    width: QuotaCardLayout.detailsTipSecondaryColumnWidth,
+                    alignment: .leading
+                )
+        case .date:
+            QuotaDetailValueText(text: column.text, role: column.role)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+}
+
+private struct QuotaDetailValueText: View {
+    @EnvironmentObject private var theme: ThemeManager
+    let text: String
+    let role: QuotaDetailValueRole
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10, weight: role.fontWeight))
+            .foregroundStyle(theme.tooltipForeground.opacity(role.foregroundOpacity))
+            .lineLimit(1)
     }
 }
 
@@ -846,6 +1001,12 @@ enum QuotaDetailsCopy {
     static let itemTitle = "Item"
     static let remainingTitle = "Remaining"
     static let dateTitle = "Date"
+}
+
+enum QuotaAmountDetailsCopy {
+    static let periodTitle = "Period"
+    static let usedTitle = "Used"
+    static let limitTitle = "Limit"
 }
 
 enum ResetCreditsCopy {

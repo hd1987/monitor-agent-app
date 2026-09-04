@@ -241,6 +241,9 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertEqual(QuotaDetailsCopy.itemTitle, "Item")
         XCTAssertEqual(QuotaDetailsCopy.remainingTitle, "Remaining")
         XCTAssertEqual(QuotaDetailsCopy.dateTitle, "Date")
+        XCTAssertEqual(QuotaAmountDetailsCopy.periodTitle, "Period")
+        XCTAssertEqual(QuotaAmountDetailsCopy.usedTitle, "Used")
+        XCTAssertEqual(QuotaAmountDetailsCopy.limitTitle, "Limit")
         XCTAssertEqual(ResetCreditsCopy.cardTitle, "Resets")
         XCTAssertEqual(ResetCreditsCopy.itemTitle(number: 1), "Reset 1")
         XCTAssertEqual(
@@ -259,14 +262,45 @@ final class QuotaFeatureTests: XCTestCase {
         )
 
         XCTAssertEqual(presentation.remainingPercentText, "80%")
+        XCTAssertEqual(presentation.cardValueText, "80%")
+        XCTAssertNil(presentation.cardUsedAmountText)
         XCTAssertEqual(presentation.detailsItemText, "5h • 80%")
+        XCTAssertNil(presentation.usageAmountDetails)
         XCTAssertEqual(presentation.accessibilityItemText, "5h limit, 80% remaining")
     }
 
+    func testQuotaUsageAmountDetailsUseSharedColumnRoles() {
+        let details = QuotaUsageAmountPresentation(
+            periodText: "Monthly",
+            usageAmount: QuotaUsageAmount(usedCents: 11_994, limitCents: 60_000)
+        )
+
+        XCTAssertEqual(
+            details.columns,
+            [
+                QuotaDetailAmountColumn(text: "Monthly", role: .item),
+                QuotaDetailAmountColumn(text: "$119.94", role: .remaining),
+                QuotaDetailAmountColumn(text: "$600", role: .date)
+            ]
+        )
+        XCTAssertEqual(details.accessibilityText, "Period, Monthly, Used, $119.94, Limit, $600")
+        XCTAssertEqual(QuotaDetailValueRole.item.fontWeight, .medium)
+        XCTAssertEqual(QuotaDetailValueRole.remaining.fontWeight, .medium)
+        XCTAssertEqual(QuotaDetailValueRole.date.fontWeight, .regular)
+        XCTAssertEqual(QuotaDetailValueRole.item.foregroundOpacity, 0.72)
+        XCTAssertEqual(QuotaDetailValueRole.remaining.foregroundOpacity, 1)
+        XCTAssertEqual(QuotaDetailValueRole.date.foregroundOpacity, 1)
+    }
+
     func testQuotaDetailsPresentationSectionsPreserveVisibleOrder() {
+        let usageAmountDetails = QuotaUsageAmountPresentation(
+            periodText: "Monthly",
+            usageAmount: QuotaUsageAmount(usedCents: 100, limitCents: 1_000)
+        )
         let window = QuotaWindowPresentation(
             label: "5h",
             remainingPercent: 80,
+            usageAmountDetails: usageAmountDetails,
             countdownText: "3h",
             absoluteResetText: "Aug 31, 10:07",
             status: .healthy
@@ -313,7 +347,7 @@ final class QuotaFeatureTests: XCTestCase {
 
         XCTAssertEqual(
             completePresentation.sections,
-            [.usageLimits, .resetCredits, .subscription, .refreshFailure]
+            [.usageLimits, .usageAmounts, .resetCredits, .subscription, .refreshFailure]
         )
         XCTAssertEqual(
             partialPresentation.sections,
@@ -409,6 +443,68 @@ final class QuotaFeatureTests: XCTestCase {
             hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds)
         )
         hostingView.cacheDisplay(in: hostingView.bounds, to: image)
+        XCTAssertGreaterThan(image.pixelsWide, 0)
+        XCTAssertGreaterThan(image.pixelsHigh, 0)
+    }
+
+    func testCursorQuotaDetailsTipAddsAmountSectionWithinFixedWidth() throws {
+        let usageAmountDetails = QuotaUsageAmountPresentation(
+            periodText: "Monthly",
+            usageAmount: QuotaUsageAmount(
+                usedCents: 9_686,
+                limitCents: 60_000
+            )
+        )
+        let presentation = QuotaDetailsPresentation(
+            usageWindows: [
+                QuotaWindowPresentation(
+                    label: "1m",
+                    remainingPercent: 84,
+                    usageAmountDetails: usageAmountDetails,
+                    countdownText: "26d 21h",
+                    absoluteResetText: "Oct 1, 10:07",
+                    status: .healthy
+                )
+            ],
+            resetCredits: nil,
+            subscription: nil,
+            refreshFailure: nil
+        )
+        let hostingView = NSHostingView(
+            rootView: QuotaDetailsTip(presentation: presentation)
+                .environmentObject(ThemeManager.shared)
+        )
+        let usageOnlyPresentation = QuotaDetailsPresentation(
+            usageWindows: presentation.usageWindows.map {
+                QuotaWindowPresentation(
+                    label: $0.label,
+                    remainingPercent: $0.remainingPercent,
+                    countdownText: $0.countdownText,
+                    absoluteResetText: $0.absoluteResetText,
+                    status: $0.status
+                )
+            },
+            resetCredits: nil,
+            subscription: nil,
+            refreshFailure: nil
+        )
+        let usageOnlyView = NSHostingView(
+            rootView: QuotaDetailsTip(presentation: usageOnlyPresentation)
+                .environmentObject(ThemeManager.shared)
+        )
+
+        hostingView.layoutSubtreeIfNeeded()
+        usageOnlyView.layoutSubtreeIfNeeded()
+        let fittingSize = hostingView.fittingSize
+        hostingView.frame = NSRect(origin: .zero, size: fittingSize)
+        hostingView.layoutSubtreeIfNeeded()
+        let image = try XCTUnwrap(
+            hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds)
+        )
+        hostingView.cacheDisplay(in: hostingView.bounds, to: image)
+
+        XCTAssertEqual(fittingSize.width, QuotaCardLayout.detailsTipWidth, accuracy: 0.5)
+        XCTAssertGreaterThan(fittingSize.height, usageOnlyView.fittingSize.height)
         XCTAssertGreaterThan(image.pixelsWide, 0)
         XCTAssertGreaterThan(image.pixelsHigh, 0)
     }
