@@ -223,6 +223,11 @@ struct SubscriptionQuotaCard: View {
                         Text("\(resetCredits.count)")
                             .fontWeight(.semibold)
                             .foregroundStyle(resetCreditCountColor(status: resetCredits.status))
+                        if let countdownText = resetCredits.countdownText {
+                            Text(countdownText)
+                                .font(.system(size: 11))
+                                .foregroundStyle(resetCreditCountColor(status: resetCredits.status))
+                        }
                     }
                     .lineLimit(1)
                     .fixedSize()
@@ -543,6 +548,11 @@ struct QuotaResetCreditsPresentation: Equatable {
     let count: Int
     let items: [QuotaResetCreditPresentation]
     let status: QuotaStatus
+
+    var countdownText: String? {
+        guard let first = items.first, first.status != .unknown else { return nil }
+        return first.countdownText
+    }
 }
 
 struct QuotaSubscriptionPresentation: Equatable {
@@ -1119,15 +1129,16 @@ enum QuotaWindowResetStatus {
             || fallbackLabel == "1w"
             || fallbackLabel == "1m"
             || fallbackLabel == "Opus"
-        let criticalThreshold = usesWeeklyThresholds
-            ? weeklyCriticalThreshold
-            : shortCriticalThreshold
-        let warningThreshold = usesWeeklyThresholds
-            ? weeklyWarningThreshold
-            : shortWarningThreshold
+        if usesWeeklyThresholds { return longWindowStatus(remaining: remaining) }
+        if remaining <= shortCriticalThreshold { return .critical }
+        if remaining <= shortWarningThreshold { return .warning }
+        return .healthy
+    }
 
-        if remaining <= criticalThreshold { return .critical }
-        if remaining <= warningThreshold { return .warning }
+    static func longWindowStatus(remaining: TimeInterval) -> QuotaStatus {
+        guard remaining.isFinite else { return .unknown }
+        if remaining <= weeklyCriticalThreshold { return .critical }
+        if remaining <= weeklyWarningThreshold { return .warning }
         return .healthy
     }
 }
@@ -1138,12 +1149,7 @@ enum QuotaExpiration {
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> QuotaStatus {
-        let today = calendar.startOfDay(for: now)
-        let expirationDay = calendar.startOfDay(for: expiration)
-        let days = calendar.dateComponents([.day], from: today, to: expirationDay).day ?? 0
-        if days <= 3 { return .critical }
-        if days <= 7 { return .warning }
-        return .healthy
+        QuotaWindowResetStatus.longWindowStatus(remaining: expiration.timeIntervalSince(now))
     }
 }
 
@@ -1217,8 +1223,8 @@ enum QuotaCardLayout {
     static let metricSpacing: CGFloat = 28
     static let detailsTipWidth: CGFloat = 320
     static let detailsTipHorizontalPadding: CGFloat = 10
-    static let detailsTipPrimaryColumnWidth: CGFloat = 112
-    static let detailsTipSecondaryColumnWidth: CGFloat = 58
+    static let detailsTipPrimaryColumnWidth: CGFloat = 96
+    static let detailsTipSecondaryColumnWidth: CGFloat = 112
     static let detailsTipColumnSpacing: CGFloat = 8
     static let detailsTipSectionSpacing: CGFloat = 10
     static let detailsTipItemSpacing: CGFloat = 8
