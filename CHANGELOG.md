@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.15.8] - 2026-09-14
+
 ### Changed
 - Rebalance quota-tip columns within 320pt to display expiration messages on one line
 - Align subscription and reset-credit urgency colors with long-window reset thresholds and show the first reset-credit countdown beside the Codex Resets count in the same color
