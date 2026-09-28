@@ -766,6 +766,40 @@ final class QuotaFeatureTests: XCTestCase {
         XCTAssertTrue(paths.contains("/Applications/Codex.app/Contents/Resources/codex"))
     }
 
+    func testCodexQuotaUsesSignedInAccountWithoutDetectedExecutable() {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [CodexQuotaResponseProtocol.self]
+        let service = QuotaService(
+            session: URLSession(configuration: configuration),
+            installationCheck: { _ in false },
+            thirdPartyCheck: { _ in false },
+            codexAuthData: {
+                Data(#"{"tokens":{"access_token":"test-token","account_id":"test-account"}}"#.utf8)
+            }
+        )
+        let identityResolved = expectation(description: "Codex quota identity resolves")
+        var resolvedIdentity: String?
+
+        service.resolveIdentityDigest(provider: .codex) { identity in
+            resolvedIdentity = identity
+            identityResolved.fulfill()
+        }
+        wait(for: [identityResolved], timeout: 2)
+        XCTAssertNotNil(resolvedIdentity)
+
+        let refreshed = expectation(description: "Codex quota refresh completes")
+        var result: QuotaRefreshResult?
+        service.refresh(provider: .codex, now: Date(timeIntervalSince1970: 1_800_000_000)) { value in
+            result = value
+            refreshed.fulfill()
+        }
+        wait(for: [refreshed], timeout: 2)
+
+        XCTAssertEqual(result?.identityDigest, resolvedIdentity)
+        XCTAssertEqual(result?.snapshot.status, .available)
+        XCTAssertEqual(result?.snapshot.fiveHour?.remainingPercent, 80)
+    }
+
     func testQuotaEnablementUsesConfiguredExpirationOrCursorSwitch() throws {
         let suiteName = "QuotaFeatureTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -1161,6 +1195,36 @@ final class QuotaFeatureTests: XCTestCase {
         hostingView.layoutSubtreeIfNeeded()
         return hostingView.fittingSize
     }
+}
+
+private final class CodexQuotaResponseProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.host == "chatgpt.com"
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let url = request.url,
+              url.path == "/backend-api/wham/usage",
+              let response = HTTPURLResponse(
+                url: url,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+              ) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+        let data = Data(#"{"rate_limit":{"primary_window":{"used_percent":20,"limit_window_seconds":18000}},"rate_limit_reset_credits":{"available_count":0,"credits":[]}}"#.utf8)
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }
 
 private struct QuotaCardRenderHarness: View {
