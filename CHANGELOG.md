@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Fixed
+- Read Codex subscription quota from its signed-in account even when the bundled CLI is outside the known executable paths
+
 ## [0.15.8] - 2026-09-14
 
 ### Changed

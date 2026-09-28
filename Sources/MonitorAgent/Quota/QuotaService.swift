@@ -28,15 +28,24 @@ final class QuotaService: QuotaRefreshing {
 
     private let session: URLSession
     private let cursorQuotaService: CursorQuotaServicing
+    private let installationCheck: (QuotaProviderID) -> Bool
+    private let thirdPartyCheck: (QuotaProviderID) -> Bool
+    private let codexAuthData: (() -> Data?)?
     private let queue = DispatchQueue(label: "com.monitoragent.quota-service")
     private var inFlightCompletions: [RequestKey: [(QuotaRefreshResult) -> Void]] = [:]
 
     init(
         session: URLSession = .shared,
-        cursorQuotaService: CursorQuotaServicing = CursorQuotaService()
+        cursorQuotaService: CursorQuotaServicing = CursorQuotaService(),
+        installationCheck: @escaping (QuotaProviderID) -> Bool = QuotaEnvironmentDetector.isInstalled,
+        thirdPartyCheck: @escaping (QuotaProviderID) -> Bool = QuotaEnvironmentDetector.usesThirdPartyAPI,
+        codexAuthData: (() -> Data?)? = nil
     ) {
         self.session = session
         self.cursorQuotaService = cursorQuotaService
+        self.installationCheck = installationCheck
+        self.thirdPartyCheck = thirdPartyCheck
+        self.codexAuthData = codexAuthData
     }
 
     func refresh(
@@ -45,7 +54,7 @@ final class QuotaService: QuotaRefreshing {
         completion: @escaping (QuotaRefreshResult) -> Void
     ) {
         queue.async {
-            guard QuotaEnvironmentDetector.isInstalled(provider) else {
+            guard provider == .codex || self.installationCheck(provider) else {
                 self.deliver(
                     QuotaRefreshResult(
                         snapshot: .failure(provider: provider, status: .notInstalled, at: now),
@@ -55,7 +64,7 @@ final class QuotaService: QuotaRefreshing {
                 )
                 return
             }
-            guard !QuotaEnvironmentDetector.usesThirdPartyAPI(provider) else {
+            guard !self.thirdPartyCheck(provider) else {
                 self.deliver(
                     QuotaRefreshResult(
                         snapshot: .failure(provider: provider, status: .thirdPartyConfigured, at: now),
@@ -132,8 +141,8 @@ final class QuotaService: QuotaRefreshing {
             return
         }
         queue.async {
-            guard QuotaEnvironmentDetector.isInstalled(provider),
-                  !QuotaEnvironmentDetector.usesThirdPartyAPI(provider) else {
+            guard provider == .codex || self.installationCheck(provider),
+                  !self.thirdPartyCheck(provider) else {
                 DispatchQueue.main.async { completion(nil) }
                 return
             }
@@ -184,8 +193,8 @@ final class QuotaService: QuotaRefreshing {
     }
 
     private func currentIdentityDigest(provider: QuotaProviderID) -> String? {
-        guard QuotaEnvironmentDetector.isInstalled(provider),
-              !QuotaEnvironmentDetector.usesThirdPartyAPI(provider) else { return nil }
+        guard provider == .codex || installationCheck(provider),
+              !thirdPartyCheck(provider) else { return nil }
         let stableIdentity: String?
         switch provider {
         case .claude: stableIdentity = loadClaudeCredentials()?.stableIdentity
@@ -422,14 +431,19 @@ private extension QuotaService {
     }
 
     func loadCodexAuth() -> CodexAuth? {
-        let home: URL
-        if let custom = ProcessInfo.processInfo.environment["CODEX_HOME"], !custom.isEmpty {
-            home = URL(fileURLWithPath: custom)
+        let data: Data?
+        if let codexAuthData {
+            data = codexAuthData()
         } else {
-            home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
+            let home: URL
+            if let custom = ProcessInfo.processInfo.environment["CODEX_HOME"], !custom.isEmpty {
+                home = URL(fileURLWithPath: custom)
+            } else {
+                home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
+            }
+            data = try? Data(contentsOf: home.appendingPathComponent("auth.json"))
         }
-        let path = home.appendingPathComponent("auth.json")
-        guard let data = try? Data(contentsOf: path), data.count <= 262_144,
+        guard let data, data.count <= 262_144,
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         let tokens = (root["tokens"] as? [String: Any]) ?? root
         guard let token = (tokens["access_token"] ?? tokens["accessToken"]) as? String,
