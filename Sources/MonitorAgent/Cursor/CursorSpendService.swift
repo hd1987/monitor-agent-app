@@ -587,6 +587,7 @@ private struct CursorDailySpendResponse: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case dailySpend
+        case effectiveLimitCents
     }
 
     init(from decoder: Decoder) throws {
@@ -596,6 +597,14 @@ private struct CursorDailySpendResponse: Decodable {
             return
         }
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Connect JSON omits the empty repeated field in Cursor's limit-only response.
+        if responseContainer.allKeys.map(\.stringValue) == [CodingKeys.effectiveLimitCents.rawValue] {
+            guard try container.decodeFlexibleInt(forKey: .effectiveLimitCents) >= 0 else {
+                throw CursorUsageError.invalidResponse
+            }
+            dailySpend = []
+            return
+        }
         dailySpend = try container.decode(
             [CursorDailySpendItem].self,
             forKey: .dailySpend
