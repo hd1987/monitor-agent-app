@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.15.10] - 2026-10-01
+
 ### Fixed
 - Accept Cursor's valid limit-only empty-month spend response so monthly rollover does not fail fee refresh or show a Cursor error marker
 
