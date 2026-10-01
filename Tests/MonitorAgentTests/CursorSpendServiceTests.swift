@@ -439,6 +439,112 @@ final class CursorSpendServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.totalCents, 500)
     }
 
+    func testLimitOnlyEmptySpendResponseIsAuthoritativeZero() throws {
+        for body in [
+            #"{"effectiveLimitCents":80000}"#,
+            #"{"effectiveLimitCents":"80000"}"#,
+            #"{"effectiveLimitCents":0}"#,
+        ] {
+            let database = DatabaseManager(inMemory: true)
+            let identity = try seedCursorIdentity(database: database)
+            let now = Date(timeIntervalSince1970: 1_785_470_400)
+            let range = spendRange(now: now)
+            _ = try database.mergeCursorSpendSnapshot(
+                accountIdentity: identity,
+                range: range,
+                totalCents: 500,
+                updatedAt: now.addingTimeInterval(-600)
+            )
+            let transport = CursorSpendTransportStub(totalCents: 0)
+            transport.spendResponseBody = body
+            let service = CursorSpendService(
+                database: database,
+                authenticationReader: CursorSpendAuthenticationStub(),
+                transport: transport,
+                now: { now }
+            )
+
+            guard case .success(let snapshot) = service.refreshOutcome(range: range, cancellation: nil) else {
+                XCTFail("Expected a successful empty response: \(body)")
+                continue
+            }
+            XCTAssertEqual(snapshot.totalCents, 0)
+            XCTAssertEqual(database.fetchCursorSpendSnapshot(accountIdentity: identity, range: range)?.totalCents, 0)
+            XCTAssertEqual(database.fetchCursorSpendSyncedThrough(accountIdentity: identity), 1_785_470_400_000)
+        }
+    }
+
+    func testMalformedLimitOnlySpendResponsePreservesHistoryAndWatermark() throws {
+        for body in [
+            #"{"effectiveLimitCents":null}"#,
+            #"{"effectiveLimitCents":-1}"#,
+            #"{"effectiveLimitCents":1.5}"#,
+            #"{"effectiveLimitCents":true}"#,
+            #"{"effectiveLimitCents":"invalid"}"#,
+            #"{"effectiveLimitCents":"9223372036854775808"}"#,
+            #"{"effectiveLimitCents":80000,"dailySpend":null}"#,
+            #"{"effectiveLimitCents":80000,"dailySpend":{}}"#,
+            #"{"effectiveLimitCents":80000,"error":"unavailable"}"#,
+            #"{"effectiveLimitCents":80000,"categories":[]}"#,
+        ] {
+            let database = DatabaseManager(inMemory: true)
+            let identity = try seedCursorIdentity(database: database)
+            let now = Date(timeIntervalSince1970: 1_785_470_400)
+            let range = spendRange(now: now)
+            let archive = CursorDailySpendArchive(
+                accountIdentity: identity,
+                days: [CursorDailySpend(dayMilliseconds: 1_785_456_000_000, totalCents: 500)],
+                syncedThroughMilliseconds: 1_785_470_000_000,
+                lastSyncedAt: now.addingTimeInterval(-600)
+            )
+            try database.restoreCursorDailySpendArchive(archive)
+            let transport = CursorSpendTransportStub(totalCents: 0)
+            transport.spendResponseBody = body
+            let service = CursorSpendService(
+                database: database,
+                authenticationReader: CursorSpendAuthenticationStub(),
+                transport: transport,
+                now: { now }
+            )
+
+            guard case .failure(let snapshot, let reason) = service.refreshOutcome(range: range, cancellation: nil) else {
+                XCTFail("Expected a retained-cache failure: \(body)")
+                continue
+            }
+            XCTAssertEqual(reason, .request)
+            XCTAssertEqual(snapshot?.totalCents, 500)
+            XCTAssertEqual(database.fetchCursorDailySpendArchive(accountIdentity: identity), archive)
+        }
+    }
+
+    func testMonthlyRolloverAcceptsLimitOnlyEmptyMonthAndCommitsEarlierSpend() throws {
+        let database = DatabaseManager(inMemory: true)
+        let identity = try seedCursorIdentity(database: database)
+        let transport = CursorSpendTransportStub(totalCents: 500)
+        var now = Date(timeIntervalSince1970: 1_785_470_400)
+        let service = CursorSpendService(
+            database: database,
+            authenticationReader: CursorSpendAuthenticationStub(),
+            transport: transport,
+            now: { now }
+        )
+        _ = try XCTUnwrap(service.refresh(range: spendRange(now: now)))
+        let previousRequestCount = transport.spendRequestBodies.count
+        transport.totalCents = 900
+        transport.emptySpendResponseBody = #"{"effectiveLimitCents":80000}"#
+        now = Date(timeIntervalSince1970: 1_785_585_600)
+        let range = CursorSpendRange(key: "all", startMilliseconds: nil, endMilliseconds: nil)
+
+        guard case .success(let snapshot) = service.refreshOutcome(range: range, cancellation: nil) else {
+            return XCTFail("Expected successful catch-up across the empty new month")
+        }
+
+        XCTAssertEqual(transport.spendRequestBodies.count - previousRequestCount, 2)
+        XCTAssertEqual(snapshot.totalCents, 900)
+        XCTAssertEqual(database.fetchCursorSpendSnapshot(accountIdentity: identity, range: range)?.totalCents, 900)
+        XCTAssertEqual(database.fetchCursorSpendSyncedThrough(accountIdentity: identity), 1_785_585_600_000)
+    }
+
     func testAuthenticationFailuresRemainTypedInSpendOutcome() throws {
         let database = DatabaseManager(inMemory: true)
         _ = try seedCursorIdentity(database: database)
@@ -1100,6 +1206,8 @@ private final class CursorSpendTransportStub: CursorHTTPTransport {
     var totalStatusCode = 200
     var returnsMalformedMissingDailySpend = false
     var returnsStrictEmptyObject = false
+    var spendResponseBody: String?
+    var emptySpendResponseBody: String?
     var cancelsSpendRequest = false
     var failingSpendRequestNumber: Int?
     var accountResponseBody: String
@@ -1174,13 +1282,13 @@ private final class CursorSpendTransportStub: CursorHTTPTransport {
         let includesSpendDay = requestStart <= spendDayMilliseconds
             && spendDayMilliseconds < requestEnd
         let responseBody = totalStatusCode == 200
-            ? (returnsStrictEmptyObject
+            ? (spendResponseBody ?? (returnsStrictEmptyObject
                 ? #"{}"#
                 : returnsMalformedMissingDailySpend
                 ? #"{"categories":[]}"#
                 : totalCents == 0 || !includesSpendDay
-                ? #"{"dailySpend":[],"categories":[]}"#
-                : #"{"dailySpend":[{"day":"\#(spendDayMilliseconds)","category":"model","spendCents":"\#(totalCents)"}]}"#)
+                ? (emptySpendResponseBody ?? #"{"dailySpend":[],"categories":[]}"#)
+                : #"{"dailySpend":[{"day":"\#(spendDayMilliseconds)","category":"model","spendCents":"\#(totalCents)"}]}"#))
             : "{}"
         return response(request: request, statusCode: totalStatusCode, body: responseBody)
     }
