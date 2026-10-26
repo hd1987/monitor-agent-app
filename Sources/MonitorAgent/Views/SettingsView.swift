@@ -564,6 +564,10 @@ struct GeneralSettingsView: View {
                 }
             }
 
+            Section {
+                CursorAccountSettingsRow()
+            }
+
             Section(QuotaSettingsCopy.title) {
                 QuotaSettingsGroup(
                     claudeExpirationDate: $draftClaudeExpirationDate,
@@ -1504,5 +1508,52 @@ struct SettingsRow<Control: View>: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+private struct CursorAccountSettingsRow: View {
+    @EnvironmentObject var store: AppStore
+    @ObservedObject private var authentication = CursorAuthenticationService.shared
+
+    private var description: String {
+        if authentication.isSigningIn { return "Complete sign-in in your browser." }
+        if authentication.isSignedIn {
+            return authentication.accountEmail.map { "Signed in as \($0)." } ?? "Signed in to Cursor."
+        }
+        return "Sign in to refresh Cursor usage, spend, and quota."
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SettingsRow(title: "Cursor Account", description: description) {
+                HStack(spacing: 8) {
+                    if authentication.isSigningIn {
+                        ProgressView().controlSize(.small)
+                        Button("Cancel") { authentication.cancelSignIn() }
+                    } else {
+                        Button(authentication.isSignedIn ? "Switch Account" : "Sign In") {
+                            authentication.signIn()
+                        }
+                        if authentication.isSignedIn {
+                            Button("Sign Out") { authentication.signOut() }
+                        }
+                    }
+                }
+            }
+            if let error = authentication.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .disabled(store.isRebuildingUsageData || !store.enabledAgents.contains(.cursor))
+        .onAppear {
+            if store.enabledAgents.contains(.cursor) { authentication.loadSavedState() }
+        }
+        .onChange(of: store.enabledAgents) { _, enabledAgents in
+            if enabledAgents.contains(.cursor) {
+                authentication.loadSavedState()
+            }
+        }
     }
 }

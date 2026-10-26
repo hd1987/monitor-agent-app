@@ -34,10 +34,12 @@ final class CursorQuotaService: CursorQuotaServicing {
                     cancellation: nil
                 )
                 identityDigest = authenticated.account.syncIdentity
+                var body: [String: Any] = ["includePooledUsage": true]
+                if let teamId = authenticated.account.teamId { body["teamId"] = teamId }
                 let data = try self.client.perform(
                     path: "/aiserver.v1.DashboardService/GetCurrentPeriodUsage",
                     token: authenticated.token,
-                    body: ["includePooledUsage": true]
+                    body: body
                 )
                 snapshot = try Self.parseSnapshot(data: data, now: now)
             } catch CursorUsageError.authenticationUnavailable {

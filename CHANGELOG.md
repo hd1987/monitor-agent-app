@@ -6,10 +6,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
-## [0.15.11] - 2026-10-26
+## [0.15.12] - 2026-10-26
+
+### Changed
+- Replace Cursor Keychain access with independent browser sign-in in General settings, persisting sessions in owner-only local credential files
 
 ### Fixed
-- Decrypt Cursor's new macOS Safe Storage login tokens before refreshing usage, spend, and quota, while preserving support for legacy plaintext sessions
+- Keep the verified Cursor account isolated from older cached data when re-verification fails
+- Preserve the browser-selected Cursor team across saved sessions, token renewal, usage, spend, and quota requests
 
 ## [0.15.10] - 2026-10-01
 

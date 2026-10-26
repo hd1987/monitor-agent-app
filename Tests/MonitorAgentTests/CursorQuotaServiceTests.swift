@@ -41,7 +41,7 @@ final class CursorQuotaServiceTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer cursor-token")
         XCTAssertEqual(
             try requestBody(request),
-            ["includePooledUsage": true]
+            ["includePooledUsage": true, "teamId": 7]
         )
         XCTAssertEqual(result?.identityDigest, account.syncIdentity)
         XCTAssertEqual(result?.snapshot.provider, .cursor)
@@ -195,10 +195,10 @@ final class CursorQuotaServiceTests: XCTestCase {
         )
     }
 
-    private func requestBody(_ request: URLRequest) throws -> [String: Bool] {
+    private func requestBody(_ request: URLRequest) throws -> [String: AnyHashable] {
         let data = try XCTUnwrap(request.httpBody)
         return try XCTUnwrap(
-            JSONSerialization.jsonObject(with: data) as? [String: Bool]
+            JSONSerialization.jsonObject(with: data) as? [String: AnyHashable]
         )
     }
 
