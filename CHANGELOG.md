@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.15.12] - 2026-10-26
+
 ### Changed
 - Replace Cursor Keychain access with independent browser sign-in in General settings, persisting sessions in owner-only local credential files
 
