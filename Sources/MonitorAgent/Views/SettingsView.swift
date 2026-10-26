@@ -1515,6 +1515,7 @@ private struct CursorAccountSettingsRow: View {
     @EnvironmentObject var store: AppStore
     @ObservedObject private var authentication = CursorAuthenticationService.shared
     let isMonitoringEnabled: Bool
+    @State private var showSignOutConfirmation = false
 
     private var description: String {
         if authentication.isSigningIn { return "Complete sign-in in your browser." }
@@ -1531,12 +1532,13 @@ private struct CursorAccountSettingsRow: View {
                     if authentication.isSigningIn {
                         ProgressView().controlSize(.small)
                         Button("Cancel") { authentication.cancelSignIn() }
-                    } else {
-                        Button(authentication.isSignedIn ? "Switch Account" : "Sign In") {
-                            authentication.signIn()
+                    } else if authentication.isSignedIn {
+                        Button("Sign Out") {
+                            showSignOutConfirmation = true
                         }
-                        if authentication.isSignedIn {
-                            Button("Sign Out") { authentication.signOut() }
+                    } else {
+                        Button("Sign In") {
+                            authentication.signIn()
                         }
                     }
                 }
@@ -1548,6 +1550,12 @@ private struct CursorAccountSettingsRow: View {
             }
         }
         .disabled(store.isRebuildingUsageData || !isMonitoringEnabled)
+        .alert("Sign Out of Cursor?", isPresented: $showSignOutConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Sign Out", role: .destructive) { authentication.signOut() }
+        } message: {
+            Text("Cursor usage, spend, and quota will stop refreshing until you sign in again. Your cached history will be kept.")
+        }
         .onAppear {
             if isMonitoringEnabled { authentication.loadSavedState() }
         }
