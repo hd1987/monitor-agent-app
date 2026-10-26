@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Changed
+- Remove Switch Account from Cursor Account and require confirmation before signing out
+
 ## [0.15.13] - 2026-10-26
 
 ### Fixed
