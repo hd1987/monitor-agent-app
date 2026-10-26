@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+## [0.15.13] - 2026-10-26
+
+### Fixed
+- Update Cursor Account controls immediately with the draft Monitored Agents selection and cancel pending sign-in when Cursor is deselected
+
 ## [0.15.12] - 2026-10-26
 
 ### Changed
