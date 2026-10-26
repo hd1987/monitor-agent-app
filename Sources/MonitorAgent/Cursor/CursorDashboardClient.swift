@@ -1,9 +1,15 @@
 import CryptoKit
 import Foundation
-import GRDB
 
 protocol CursorAuthenticationReading {
+    var authenticationRevision: UInt64 { get }
+    var selectedTeamId: Int? { get }
     func readAccessToken() throws -> String
+}
+
+extension CursorAuthenticationReading {
+    var authenticationRevision: UInt64 { 0 }
+    var selectedTeamId: Int? { nil }
 }
 
 protocol CursorHTTPTransport {
@@ -54,9 +60,9 @@ enum CursorUsageError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .authenticationUnavailable:
-            return "Cursor is not signed in locally."
+            return "Sign in to Cursor in General settings."
         case .authenticationRejected:
-            return "Cursor rejected its current local login session."
+            return "Cursor sign-in has expired. Sign in again in General settings."
         case .invalidEndpoint:
             return "The Cursor usage endpoint was rejected."
         case .invalidResponse:
@@ -90,40 +96,6 @@ extension Error {
         default:
             return .request
         }
-    }
-}
-
-final class CursorStateAuthenticationReader: CursorAuthenticationReading {
-    static let defaultDatabasePath =
-        NSHomeDirectory() + "/Library/Application Support/Cursor/User/globalStorage/state.vscdb"
-
-    private let databasePath: String
-    private let tokenDecoder: CursorStoredTokenDecoder
-
-    init(
-        databasePath: String = CursorStateAuthenticationReader.defaultDatabasePath,
-        tokenDecoder: CursorStoredTokenDecoder = CursorStoredTokenDecoder()
-    ) {
-        self.databasePath = databasePath
-        self.tokenDecoder = tokenDecoder
-    }
-
-    func readAccessToken() throws -> String {
-        var configuration = Configuration()
-        configuration.readonly = true
-        let database = try DatabaseQueue(path: databasePath, configuration: configuration)
-        let token = try database.read { db in
-            try String.fetchOne(
-                db,
-                sql: "SELECT value FROM ItemTable WHERE key = ? LIMIT 1",
-                arguments: ["cursorAuth/accessToken"]
-            )
-        }?.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard let token, !token.isEmpty else {
-            throw CursorUsageError.authenticationUnavailable
-        }
-        return try tokenDecoder.decode(token)
     }
 }
 
@@ -345,15 +317,18 @@ struct CursorAccount: Decodable {
     let userId: Int
     let teamId: Int?
     let historyOrigin: CursorAccountHistoryOrigin
+    let email: String?
 
     private enum CodingKeys: String, CodingKey {
         case userId
         case teamId
         case createdAt
+        case email
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        email = try? container.decodeIfPresent(String.self, forKey: .email)
         userId = try container.decodeFlexibleInt(forKey: .userId)
         teamId = try container.decodeFlexibleIntIfPresent(forKey: .teamId)
         do {
@@ -383,22 +358,34 @@ final class CursorDashboardClient {
     private let transport: CursorHTTPTransport
 
     init(
-        authenticationReader: CursorAuthenticationReading = CursorStateAuthenticationReader(),
+        authenticationReader: CursorAuthenticationReading = CursorAuthenticationService.shared,
         transport: CursorHTTPTransport = CursorURLSessionTransport()
     ) {
         self.authenticationReader = authenticationReader
         self.transport = transport
     }
 
+    var authenticationRevision: UInt64 { authenticationReader.authenticationRevision }
+
     func authenticatedAccount(
         cancellation: CursorOperationCancellation? = nil
     ) throws -> CursorAuthenticatedAccount {
         try checkCancellation(cancellation)
+        let revision = authenticationReader.authenticationRevision
         let token = try authenticationReader.readAccessToken()
+        let selectedTeamId = authenticationReader.selectedTeamId
+        guard authenticationReader.authenticationRevision == revision else {
+            throw CursorUsageError.cancelled
+        }
+        var body: [String: Any] = [:]
+        if let selectedTeamId {
+            guard selectedTeamId > 0 else { throw CursorUsageError.authenticationUnavailable }
+            body["teamId"] = selectedTeamId
+        }
         let data = try perform(
             path: "/aiserver.v1.DashboardService/GetMe",
             token: token,
-            body: [:],
+            body: body,
             cancellation: cancellation
         )
         let account: CursorAccount
@@ -406,6 +393,12 @@ final class CursorDashboardClient {
             account = try JSONDecoder().decode(CursorAccount.self, from: data)
         } catch {
             throw CursorUsageError.invalidResponse
+        }
+        guard authenticationReader.authenticationRevision == revision else {
+            throw CursorUsageError.cancelled
+        }
+        if let selectedTeamId, account.teamId != selectedTeamId {
+            throw CursorUsageError.authenticationRejected
         }
         return CursorAuthenticatedAccount(token: token, account: account)
     }

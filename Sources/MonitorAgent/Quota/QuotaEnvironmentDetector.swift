@@ -3,10 +3,8 @@ import Foundation
 enum QuotaEnvironmentDetector {
     static func isInstalled(_ provider: QuotaProviderID) -> Bool {
         if provider == .cursor {
-            return FileManager.default.fileExists(atPath: "/Applications/Cursor.app")
-                || FileManager.default.fileExists(
-                    atPath: CursorStateAuthenticationReader.defaultDatabasePath
-                )
+            // Independent browser sign-in does not require the Cursor editor to be installed.
+            return true
         }
         let executable = provider == .claude ? "claude" : "codex"
         if provider == .codex,

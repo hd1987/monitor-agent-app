@@ -145,6 +145,9 @@ final class AppStore: ObservableObject {
     private let quotaCache: QuotaSnapshotCaching?
     private let cursorSpendRefresher: CursorSpendRefreshing?
     private let cursorAccountResolver: CursorAccountResolving?
+    private let cancelCursorSignIn: () -> Void
+    private let cursorSessionIdentity: (() -> String?)?
+    private var verifiedCursorSessionIdentity: String?
     private let activityPresentationSettings: ActivityPresentationPersisting?
     private let refreshCoordinator: PanelRefreshCoordinator
     private let hourlyTokenUsageLoader: HourlyTokenUsageLoader
@@ -187,6 +190,8 @@ final class AppStore: ObservableObject {
         quotaCache: QuotaSnapshotCaching? = nil,
         cursorSpendRefresher: CursorSpendRefreshing? = nil,
         cursorAccountResolver: CursorAccountResolving? = nil,
+        cancelCursorSignIn: @escaping () -> Void = {},
+        cursorSessionIdentity: (() -> String?)? = nil,
         activityPresentationSettings: ActivityPresentationPersisting? = nil,
         refreshCoordinator: PanelRefreshCoordinator = PanelRefreshCoordinator(),
         observeRefreshIntervalChanges: Bool = true,
@@ -212,12 +217,17 @@ final class AppStore: ObservableObject {
         self.quotaCache = quotaCache
         self.cursorSpendRefresher = cursorSpendRefresher
         self.cursorAccountResolver = cursorAccountResolver
+        self.cancelCursorSignIn = cancelCursorSignIn
+        self.cursorSessionIdentity = cursorSessionIdentity
         self.activityPresentationSettings = activityPresentationSettings
         self.activityChartStyle = activityPresentationSettings?.chartStyle ?? .line
         self.refreshCoordinator = refreshCoordinator
         self.hourlyTokenUsageLoader = hourlyTokenUsageLoader
         self.activityRangeTokenUsageLoader = activityRangeTokenUsageLoader
         self.activeDay = Calendar.current.startOfDay(for: currentDateProvider())
+        if enabledAgents.contains(.cursor) {
+            verifiedCursorSessionIdentity = cursorSessionIdentity?()
+        }
         ensureEnabledQuotaCardStates()
         if activityPresentationSettings?.isPresented == true, !enabledAgents.isEmpty {
             let formatter = DateFormatter()
@@ -289,9 +299,42 @@ final class AppStore: ObservableObject {
             .store(in: &cancellables)
 
         restoreCachedQuotaSnapshots()
+
+        NotificationCenter.default.publisher(for: CursorCredentialStore.didChange)
+            .sink { [weak self] notification in
+                self?.cursorAuthenticationDidChange(verifiedIdentity: notification.userInfo?["identity"] as? String)
+            }
+            .store(in: &cancellables)
     }
 
     var availableAppFilters: [AppFilter] { AppFilter.available(for: enabledAgents) }
+
+    func cursorAuthenticationDidChange(verifiedIdentity: String? = nil) {
+        cursorAccountVerificationGeneration += 1
+        cursorUsageRefreshGeneration += 1
+        cursorSpendRefreshGeneration += 1
+        invalidateCursorSpendSnapshotRestore()
+        activeAgentSyncCancellation?.disableAgents(notIn: enabledAgents.subtracting([.cursor]))
+        cursorAccountSyncCancellation?.disableAgents(notIn: [])
+        cursorRefreshFailures = [:]
+        verifiedCursorSessionIdentity = verifiedIdentity
+        cursorAccountPresentationState = verifiedIdentity.map { .verifying($0) } ?? .unverified
+        if let verifiedIdentity, verifiedIdentity != cachedCursorIdentity {
+            cursorSpendSnapshot = nil
+            clearCursorDependentPresentation()
+        }
+        pendingCursorQuotaResult = nil
+        pendingCursorQuotaRefreshIdentity = nil
+        quotaRefreshGenerations[.cursor, default: 0] += 1
+        quotaRefreshPhases[.cursor] = .idle
+        activeQuotaParticipants.removeValue(forKey: .cursor)?.finish()
+        finishCursorQuotaCycleWaiters()
+        reload()
+        verifyCursorAccountForPresentation(force: true)
+        if isRefreshSurfaceVisible {
+            applyRefreshInterval(refreshSettings.interval)
+        }
+    }
     var hasEnabledAgents: Bool { !enabledAgents.isEmpty }
     var hasCursorRefreshFailure: Bool { !cursorRefreshFailures.isEmpty }
     var cursorRefreshFailureHelp: String? {
@@ -326,6 +369,9 @@ final class AppStore: ObservableObject {
     }
     private var cursorPresentationIdentity: String? {
         guard !isRebuildingUsageData, let cachedIdentity = cachedCursorIdentity else { return nil }
+        if let verifiedCursorSessionIdentity, verifiedCursorSessionIdentity != cachedIdentity {
+            return nil
+        }
         switch cursorAccountPresentationState {
         case .verified(let identity):
             return identity == cachedIdentity ? cachedIdentity : nil
@@ -833,6 +879,11 @@ final class AppStore: ObservableObject {
         guard provider == .cursor, cursorAccountResolver != nil else {
             return quotaCardStates[provider]
         }
+        if let verifiedCursorSessionIdentity,
+           quotaSnapshotIdentities[.cursor] != verifiedCursorSessionIdentity {
+            if case .mismatched = cursorAccountPresentationState { return nil }
+            return cursorQuotaLoadingCardState()
+        }
         if let identity = cursorPresentationIdentity {
             guard quotaSnapshotIdentities[.cursor] == identity else {
                 return cursorQuotaLoadingCardState()
@@ -855,6 +906,9 @@ final class AppStore: ObservableObject {
 
     private func monitoringSettingsDidChange(_ enabledAgents: Set<AgentID>) {
         self.enabledAgents = enabledAgents
+        if enabledAgents.contains(.cursor), let cursorSessionIdentity {
+            verifiedCursorSessionIdentity = cursorSessionIdentity()
+        }
         activeAgentSyncCancellation?.disableAgents(notIn: enabledAgents)
         cursorAccountSyncCancellation?.disableAgents(notIn: enabledAgents)
         cancelQuotaParticipants(disabledBy: enabledAgents)
@@ -870,6 +924,7 @@ final class AppStore: ObservableObject {
             reload(enabledAgents: enabledAgents)
         }
         if !enabledAgents.contains(.cursor) {
+            cancelCursorSignIn()
             cursorAccountVerificationGeneration += 1
             cursorUsageRefreshGeneration += 1
             cursorAccountPresentationState = .unverified
@@ -911,6 +966,7 @@ final class AppStore: ObservableObject {
     func rebuildLocalUsageData() {
         guard !isRebuildingUsageData else { return }
 
+        cancelCursorSignIn()
         cancelActiveSyncForRebuild()
         isRebuildingUsageData = true
         cursorAccountVerificationGeneration += 1
@@ -1158,7 +1214,15 @@ final class AppStore: ObservableObject {
             return
         }
         invalidateCursorSpendSnapshotRestore()
-        cursorAccountPresentationState = .verifying(nil)
+        let knownIdentity: String?
+        if let verifiedCursorSessionIdentity {
+            knownIdentity = verifiedCursorSessionIdentity
+        } else if case .verifying(let identity) = cursorAccountPresentationState {
+            knownIdentity = identity
+        } else {
+            knownIdentity = nil
+        }
+        cursorAccountPresentationState = .verifying(knownIdentity)
         reload()
         resolveCursorAccount(
             force: force,
@@ -1204,6 +1268,7 @@ final class AppStore: ObservableObject {
                     && !self.isRebuildingUsageData
                 if isAccepted {
                     if let identity {
+                        self.verifiedCursorSessionIdentity = identity
                         self.clearCursorRefreshFailure(.account)
                         let cachedIdentity = self.db.getSyncState(
                             for: CursorUsageService.syncStateKey
@@ -1224,7 +1289,12 @@ final class AppStore: ObservableObject {
                         )
                         self.reconcilePendingCursorQuotaResult(for: identity)
                     } else {
-                        self.cursorAccountPresentationState = .unavailable
+                        if let verifiedIdentity = self.verifiedCursorSessionIdentity,
+                           verifiedIdentity != self.cachedCursorIdentity {
+                            self.cursorAccountPresentationState = .mismatched(verifiedIdentity)
+                        } else {
+                            self.cursorAccountPresentationState = .unavailable
+                        }
                         self.reconcilePendingCursorQuotaResult(for: nil)
                         if case .failure(let error) = result,
                            (error as? CursorUsageError) != .cancelled {

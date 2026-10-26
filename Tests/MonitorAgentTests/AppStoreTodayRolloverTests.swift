@@ -4,6 +4,142 @@ import XCTest
 @testable import MonitorAgent
 
 final class AppStoreTodayRolloverTests: XCTestCase {
+    func testDisablingCursorCancelsPendingIndependentSignIn() {
+        let suite = "AppStoreTodayRolloverTests.independentCursorSignIn"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set([AgentID.cursor.rawValue], forKey: "monitoredAgents")
+        var cancelCount = 0
+        let store = AppStore(
+            database: DatabaseManager(inMemory: true),
+            monitoringSettings: AgentMonitoringSettings(defaults: defaults),
+            cancelCursorSignIn: { cancelCount += 1 },
+            observeRefreshIntervalChanges: false
+        )
+        store.updateEnabledAgents([])
+        XCTAssertEqual(cancelCount, 1)
+    }
+
+    func testIndependentCursorAccountSwitchImmediatelyExcludesPreviousCache() throws {
+        let database = DatabaseManager(inMemory: true)
+        let previousIdentity = cursorAuthenticatedAccount(userId: 1).account.syncIdentity
+        let newIdentity = cursorAuthenticatedAccount(userId: 2).account.syncIdentity
+        try seedCursorCache(database: database, identity: previousIdentity, model: "previous-account", inputTokens: 100)
+        let store = AppStore(
+            database: database,
+            cursorAccountResolver: StaticCursorAccountResolver(result: .success(cursorAuthenticatedAccount(userId: 2))),
+            observeRefreshIntervalChanges: false
+        )
+        store.cursorAuthenticationDidChange(verifiedIdentity: newIdentity)
+        XCTAssertEqual(store.cursorAccountPresentationState, .verifying(newIdentity))
+        XCTAssertFalse(store.isCursorDataPresentationAvailable)
+        XCTAssertFalse(store.requestPresentationContext.enabledAgents.contains(.cursor))
+        XCTAssertEqual(database.fetchStats(app: .cursor, range: .allTime).totalRequests, 1)
+    }
+
+    func testIndependentCursorLogoutRetainsCachedHistoryWithoutResolvedAccount() throws {
+        let database = DatabaseManager(inMemory: true)
+        let identity = cursorAuthenticatedAccount(userId: 1).account.syncIdentity
+        try seedCursorCache(database: database, identity: identity, model: "cached-account", inputTokens: 100)
+        let store = AppStore(
+            database: database,
+            cursorAccountResolver: StaticCursorAccountResolver(result: .failure(CursorUsageError.authenticationUnavailable)),
+            observeRefreshIntervalChanges: false
+        )
+        store.cursorAuthenticationDidChange(verifiedIdentity: cursorAuthenticatedAccount(userId: 2).account.syncIdentity)
+        XCTAssertFalse(store.isCursorDataPresentationAvailable)
+        store.cursorAuthenticationDidChange()
+        XCTAssertEqual(store.cursorAccountPresentationState, .unverified)
+        XCTAssertTrue(store.isCursorDataPresentationAvailable)
+        XCTAssertTrue(store.requestPresentationContext.enabledAgents.contains(.cursor))
+        XCTAssertEqual(database.fetchStats(app: .cursor, range: .allTime).totalRequests, 1)
+    }
+
+    func testIndependentCursorSwitchKeepsPreviousCacheExcludedAfterVerificationFailure() throws {
+        let database = DatabaseManager(inMemory: true)
+        let previousIdentity = cursorAuthenticatedAccount(userId: 1).account.syncIdentity
+        let newIdentity = cursorAuthenticatedAccount(userId: 2).account.syncIdentity
+        try seedCursorCache(database: database, identity: previousIdentity, model: "previous-account", inputTokens: 100)
+        let store = AppStore(
+            database: database,
+            syncManager: SessionSyncManager(
+                database: database, claudeProjectsPath: "/nonexistent/claude",
+                codexSessionsPath: "/nonexistent/codex", codexArchivedSessionsPath: "/nonexistent/archive"
+            ),
+            cursorAccountResolver: StaticCursorAccountResolver(result: .failure(CursorUsageError.requestFailed)),
+            observeRefreshIntervalChanges: false
+        )
+        store.cursorAuthenticationDidChange(verifiedIdentity: newIdentity)
+        store.panelDidOpen()
+        let failed = expectation(description: "New account verification failed")
+        waitUntil(attemptsRemaining: 100) {
+            store.cursorAccountPresentationState == .mismatched(newIdentity) && store.hasCursorRefreshFailure
+        } completion: { failed.fulfill() }
+        wait(for: [failed], timeout: 1)
+        XCTAssertFalse(store.isCursorDataPresentationAvailable)
+        XCTAssertFalse(store.requestPresentationContext.enabledAgents.contains(.cursor))
+        XCTAssertEqual(database.fetchStats(app: .cursor, range: .allTime).totalRequests, 1)
+        store.panelDidClose()
+        store.panelDidOpen()
+        XCTAssertFalse(store.isCursorDataPresentationAvailable)
+        store.panelDidClose()
+    }
+
+    func testSavedIndependentIdentityScopesCacheBeforeStartupVerificationAndAfterReenable() throws {
+        let database = DatabaseManager(inMemory: true)
+        let previousIdentity = cursorAuthenticatedAccount(userId: 1).account.syncIdentity
+        let newIdentity = cursorAuthenticatedAccount(userId: 2).account.syncIdentity
+        try seedCursorCache(database: database, identity: previousIdentity, model: "previous-account", inputTokens: 100)
+        let suite = "AppStoreTodayRolloverTests.savedIndependentIdentity"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set([AgentID.cursor.rawValue], forKey: "monitoredAgents")
+        let store = AppStore(
+            database: database,
+            monitoringSettings: AgentMonitoringSettings(defaults: defaults),
+            cursorAccountResolver: StaticCursorAccountResolver(result: .failure(CursorUsageError.requestFailed)),
+            cursorSessionIdentity: { newIdentity },
+            observeRefreshIntervalChanges: false
+        )
+        XCTAssertFalse(store.isCursorDataPresentationAvailable)
+        store.updateEnabledAgents([])
+        store.updateEnabledAgents([.cursor])
+        XCTAssertFalse(store.isCursorDataPresentationAvailable)
+        store.panelDidOpen()
+        let failed = expectation(description: "Persisted identity survives verification failure")
+        waitUntil(attemptsRemaining: 100) {
+            store.cursorAccountPresentationState == .mismatched(newIdentity)
+        } completion: { failed.fulfill() }
+        wait(for: [failed], timeout: 1)
+        XCTAssertFalse(store.requestPresentationContext.enabledAgents.contains(.cursor))
+        store.panelDidClose()
+    }
+
+    func testSavedMatchingIndependentIdentityRetainsCachedHistoryWhenOffline() throws {
+        let database = DatabaseManager(inMemory: true)
+        let identity = cursorAuthenticatedAccount(userId: 1).account.syncIdentity
+        try seedCursorCache(database: database, identity: identity, model: "matching-account", inputTokens: 100)
+        let store = AppStore(
+            database: database,
+            syncManager: SessionSyncManager(
+                database: database, claudeProjectsPath: "/nonexistent/claude",
+                codexSessionsPath: "/nonexistent/codex", codexArchivedSessionsPath: "/nonexistent/archive"
+            ),
+            cursorAccountResolver: StaticCursorAccountResolver(result: .failure(CursorUsageError.requestFailed)),
+            cursorSessionIdentity: { identity },
+            observeRefreshIntervalChanges: false
+        )
+        store.panelDidOpen()
+        let failed = expectation(description: "Same-account offline history retained")
+        waitUntil(attemptsRemaining: 100) {
+            store.cursorAccountPresentationState == .unavailable
+        } completion: { failed.fulfill() }
+        wait(for: [failed], timeout: 1)
+        XCTAssertTrue(store.isCursorDataPresentationAvailable)
+        XCTAssertTrue(store.requestPresentationContext.enabledAgents.contains(.cursor))
+        store.panelDidClose()
+    }
+
     func testPanelVisibilityTracksSyncLifecycle() {
         let suiteName = "AppStoreTodayRolloverTests.syncLifecycle"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -2155,7 +2291,7 @@ final class AppStoreTodayRolloverTests: XCTestCase {
         resolver.setResult(.failure(CursorUsageError.authenticationRejected))
         store.panelDidOpen()
 
-        XCTAssertEqual(store.cursorAccountPresentationState, .verifying(nil))
+        XCTAssertEqual(store.cursorAccountPresentationState, .verifying(account.account.syncIdentity))
         XCTAssertEqual(store.stats.totalRequests, 1)
         XCTAssertEqual(store.stats.totalSessions, 1)
         XCTAssertEqual(store.stats.totalTokens, 100)

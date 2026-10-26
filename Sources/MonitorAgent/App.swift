@@ -189,6 +189,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         quotaCache: QuotaSnapshotCache.shared,
         cursorSpendRefresher: CursorSpendRefreshCoordinator(),
         cursorAccountResolver: CursorAccountSession.shared,
+        cancelCursorSignIn: { CursorAuthenticationService.shared.cancelSignIn() },
+        cursorSessionIdentity: { CursorAuthenticationService.shared.savedAccountIdentity },
         activityPresentationSettings: ActivityPresentationSettings.shared
     )
     private let panelPresentationState = PanelPresentationState()

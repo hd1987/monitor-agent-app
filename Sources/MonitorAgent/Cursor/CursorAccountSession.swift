@@ -20,12 +20,14 @@ final class CursorAccountSession: CursorAccountResolving {
         qos: .userInitiated
     )
     private var isResolving = false
+    private var resolvingAuthenticationRevision: UInt64?
+    private var lastAuthenticationRevision: UInt64?
     private var resolutionGeneration = 0
     private var lastResult: Result<CursorAuthenticatedAccount, Error>?
     private var lastResolvedAt: Date?
 
     init(
-        authenticationReader: CursorAuthenticationReading = CursorStateAuthenticationReader(),
+        authenticationReader: CursorAuthenticationReading = CursorAuthenticationService.shared,
         transport: CursorHTTPTransport = CursorURLSessionTransport(),
         normalReuseInterval: TimeInterval = 2,
         onWaitForInFlight: (() -> Void)? = nil,
@@ -45,11 +47,21 @@ final class CursorAccountSession: CursorAccountResolving {
         cancellation: CursorOperationCancellation? = nil
     ) throws -> CursorAuthenticatedAccount {
         try checkCancellation(cancellation)
+        let authenticationRevision = client.authenticationRevision
         condition.lock()
         defer { condition.unlock() }
 
+        while isResolving, resolvingAuthenticationRevision != authenticationRevision {
+            _ = condition.wait(until: Date().addingTimeInterval(0.1))
+            try checkCancellation(cancellation)
+            guard client.authenticationRevision == authenticationRevision else {
+                throw CursorUsageError.cancelled
+            }
+        }
+
         if !isResolving,
            !force,
+           lastAuthenticationRevision == authenticationRevision,
            let reusable = reusableResult() {
             return try reusable.get()
         }
@@ -59,13 +71,18 @@ final class CursorAccountSession: CursorAccountResolving {
             onWaitForInFlight?()
         } else {
             isResolving = true
+            resolvingAuthenticationRevision = authenticationRevision
             resolutionQueue.async { [weak self] in
                 guard let self else { return }
                 let result = Result {
-                    try self.client.authenticatedAccount(cancellation: nil)
+                    guard self.client.authenticationRevision == authenticationRevision else {
+                        throw CursorUsageError.cancelled
+                    }
+                    return try self.client.authenticatedAccount(cancellation: nil)
                 }
                 self.condition.lock()
                 self.lastResult = result
+                self.lastAuthenticationRevision = authenticationRevision
                 self.lastResolvedAt = self.now()
                 self.isResolving = false
                 self.resolutionGeneration += 1
@@ -77,6 +94,9 @@ final class CursorAccountSession: CursorAccountResolving {
         while resolutionGeneration == observedGeneration {
             _ = condition.wait(until: Date().addingTimeInterval(0.1))
             try checkCancellation(cancellation)
+        }
+        guard client.authenticationRevision == authenticationRevision else {
+            throw CursorUsageError.cancelled
         }
         guard let lastResult else {
             throw CursorUsageError.invalidResponse
