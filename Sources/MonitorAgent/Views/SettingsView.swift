@@ -565,7 +565,7 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                CursorAccountSettingsRow()
+                CursorAccountSettingsRow(isMonitoringEnabled: draftEnabledAgents.contains(.cursor))
             }
 
             Section(QuotaSettingsCopy.title) {
@@ -1514,6 +1514,7 @@ struct SettingsRow<Control: View>: View {
 private struct CursorAccountSettingsRow: View {
     @EnvironmentObject var store: AppStore
     @ObservedObject private var authentication = CursorAuthenticationService.shared
+    let isMonitoringEnabled: Bool
 
     private var description: String {
         if authentication.isSigningIn { return "Complete sign-in in your browser." }
@@ -1546,13 +1547,15 @@ private struct CursorAccountSettingsRow: View {
                     .foregroundStyle(.red)
             }
         }
-        .disabled(store.isRebuildingUsageData || !store.enabledAgents.contains(.cursor))
+        .disabled(store.isRebuildingUsageData || !isMonitoringEnabled)
         .onAppear {
-            if store.enabledAgents.contains(.cursor) { authentication.loadSavedState() }
+            if isMonitoringEnabled { authentication.loadSavedState() }
         }
-        .onChange(of: store.enabledAgents) { _, enabledAgents in
-            if enabledAgents.contains(.cursor) {
+        .onChange(of: isMonitoringEnabled) { _, isEnabled in
+            if isEnabled {
                 authentication.loadSavedState()
+            } else {
+                authentication.cancelSignIn()
             }
         }
     }
