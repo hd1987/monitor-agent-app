@@ -98,9 +98,14 @@ final class CursorStateAuthenticationReader: CursorAuthenticationReading {
         NSHomeDirectory() + "/Library/Application Support/Cursor/User/globalStorage/state.vscdb"
 
     private let databasePath: String
+    private let tokenDecoder: CursorStoredTokenDecoder
 
-    init(databasePath: String = CursorStateAuthenticationReader.defaultDatabasePath) {
+    init(
+        databasePath: String = CursorStateAuthenticationReader.defaultDatabasePath,
+        tokenDecoder: CursorStoredTokenDecoder = CursorStoredTokenDecoder()
+    ) {
         self.databasePath = databasePath
+        self.tokenDecoder = tokenDecoder
     }
 
     func readAccessToken() throws -> String {
@@ -118,7 +123,7 @@ final class CursorStateAuthenticationReader: CursorAuthenticationReading {
         guard let token, !token.isEmpty else {
             throw CursorUsageError.authenticationUnavailable
         }
-        return token
+        return try tokenDecoder.decode(token)
     }
 }
 

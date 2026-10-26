@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Fixed
+- Decrypt Cursor's new macOS Safe Storage login tokens before refreshing usage, spend, and quota, while preserving support for legacy plaintext sessions
+
 ## [0.15.10] - 2026-10-01
 
 ### Fixed
